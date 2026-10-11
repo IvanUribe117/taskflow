@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["crates/domain", "crates/application"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[workspace.dependencies]
+# Crates internos: se declaran una vez y cada crate los usa con `domain.workspace = true`.
+domain = { path = "crates/domain" }
+
+async-trait = "0.1"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+indexmap = "2"
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

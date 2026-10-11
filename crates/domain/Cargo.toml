@@ -1,0 +1,19 @@
+[package]
+name = "domain"
+description = "Taskflow domain model: pure types and business rules, no async or I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
+
+[features]
+# Expone `domain::testing` para los tests de otros crates.
+test-support = []
+
+[lints]
+workspace = true

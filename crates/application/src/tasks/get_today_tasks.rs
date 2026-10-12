@@ -1,8 +1,12 @@
 //! UC-01 `GetTodayTasks` (§6, §11.2).
 
-use domain::project::ProjectSlug;
+use domain::policy::ScoringContext;
+use domain::project::{ProjectResolver, ProjectSlug};
+use domain::task::Status;
+use futures::future::try_join_all;
 
-use crate::dto::TodayReport;
+use crate::dto::{TaskGroup, TodayReport};
+use crate::ports::TaskQuery;
 use crate::{AppContext, AppError};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -49,7 +53,60 @@ impl<'a> GetTodayTasks<'a> {
     /// Devuelve [`AppError::Provider`] si falla el proveedor de tareas y
     /// [`AppError::Repo`] si no se pueden leer los proyectos.
     pub async fn execute(&self, query: TodayQuery) -> Result<TodayReport, AppError> {
-        todo!("Fase 2: implementar GetTodayTasks::execute")
+        let me = self.ctx.tasks.current_user().await?;
+        let projects = ProjectResolver::new(self.ctx.projects.list().await?);
+
+        let mut tasks = self
+            .ctx
+            .tasks
+            .search_tasks(&TaskQuery {
+                assignee: Some(me.clone()),
+                ..Default::default()
+            })
+            .await?;
+
+        tasks.retain(|task| task.status != Status::Done);
+
+        if let Some(slug) = query.project {
+            tasks.retain(|task| {
+                projects
+                    .resolve(task)
+                    .is_some_and(|project| project.slug == slug)
+            });
+        }
+
+        let comments =
+            try_join_all(tasks.iter().map(|task| self.ctx.tasks.comments(&task.id))).await?;
+
+        for (task, comment) in tasks.iter_mut().zip(comments) {
+            task.comments = comment;
+        }
+
+        let now = self.ctx.clock.now();
+        let offset = self.ctx.clock.offset();
+        let scoring = ScoringContext {
+            now,
+            offset,
+            me: &me,
+            projects: &projects,
+        };
+
+        self.ctx.policy.rank(&mut tasks, &scoring);
+
+        if let Some(limit) = query.limit {
+            tasks.truncate(limit);
+        }
+
+        let groups = match query.group_by {
+            GroupBy::None => vec![TaskGroup::flat(&tasks, &me, now)],
+            GroupBy::Project => projects
+                .group(&tasks)
+                .into_iter()
+                .map(|(key, group)| TaskGroup::for_project(&key, &projects, &group, &me, now))
+                .collect(),
+        };
+
+        Ok(TodayReport { generated_at: now, groups }) 
     }
 }
 

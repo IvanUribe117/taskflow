@@ -16,12 +16,10 @@ pub struct SystemClock;
 impl Clock for SystemClock {
     fn now(&self) -> DateTime<Utc> {
         Utc::now()
-        // todo!("Fase 2: devolver la hora actual en UTC")
     }
 
     fn offset(&self) -> FixedOffset {
         chrono::Local::now().offset().to_owned()
-        // todo!("Fase 2: devolver el desfase de la zona horaria local del sistema")
     }
 }
 

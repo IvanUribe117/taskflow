@@ -34,17 +34,17 @@ Cuando el usuario decide trabajar una tarea concreta, los pasos 4 a 6 se unen en
 
 ## 3. Objetivos
 
-| Tipo | Objetivo |
-| --- | --- |
-| Producto | Reducir la revisión matutina de tareas a un comando |
-| Producto | Ver el trabajo organizado por proyecto o cliente |
-| Producto | Entregar al agente de VS Code un contexto claro de cada tarea, incluido el contexto del proyecto |
-| Producto | Convertir procesos operativos repetitivos en Playbooks explícitos y supervisados |
-| Producto | Iniciar el trabajo en una tarea con un comando que registra el tiempo, prepara el análisis y guía la tarea hasta su cierre |
-| Producto | Configurar la herramienta de forma interactiva, sin editar archivos a mano |
-| Arquitectura | Independencia total del proveedor de tareas (ClickUp hoy, otro mañana) |
-| Arquitectura | Independencia total de la interfaz (CLI hoy, escritorio o web mañana) |
-| Aprendizaje | Aplicar de forma deliberada los conceptos centrales de Rust y patrones de proyectos profesionales |
+| Tipo         | Objetivo                                                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Producto     | Reducir la revisión matutina de tareas a un comando                                                                         |
+| Producto     | Ver el trabajo organizado por proyecto o cliente                                                                             |
+| Producto     | Entregar al agente de VS Code un contexto claro de cada tarea, incluido el contexto del proyecto                             |
+| Producto     | Convertir procesos operativos repetitivos en Playbooks explícitos y supervisados                                            |
+| Producto     | Iniciar el trabajo en una tarea con un comando que registra el tiempo, prepara el análisis y guía la tarea hasta su cierre |
+| Producto     | Configurar la herramienta de forma interactiva, sin editar archivos a mano                                                   |
+| Arquitectura | Independencia total del proveedor de tareas (ClickUp hoy, otro mañana)                                                      |
+| Arquitectura | Independencia total de la interfaz (CLI hoy, escritorio o web mañana)                                                       |
+| Aprendizaje  | Aplicar de forma deliberada los conceptos centrales de Rust y patrones de proyectos profesionales                            |
 
 **No objetivos (v1):** interfaz gráfica, ejecución automática del agente, sincronización entre varios proveedores a la vez, uso multiusuario, Playbooks programados o sin supervisión (cron), lenguaje de scripting embebido.
 
@@ -54,85 +54,85 @@ Prioridad según MoSCoW: **Debe** (imprescindible en v1), **Debería** (importan
 
 ### 4.1 Núcleo: tareas, IA y cierre
 
-| ID | Requisito | Prioridad |
-| --- | --- | --- |
-| FR-01 | El sistema debe obtener todas las tareas abiertas asignadas al usuario actual desde el proveedor de tareas configurado. | Debe |
-| FR-02 | El sistema debe obtener, para cada tarea, su estado, prioridad, fecha de vencimiento, descripción, URL, ubicación en el proveedor y comentarios. | Debe |
-| FR-03 | El sistema debe identificar los comentarios asignados al usuario actual que aún no están resueltos. | Debe |
-| FR-04 | El sistema debe ordenar las tareas usando una política de priorización configurable. | Debe |
-| FR-05 | El sistema debe mostrar la lista priorizada con estado, prioridad, fecha de vencimiento y cantidad de comentarios pendientes. | Debe |
-| FR-06 | El sistema debe generar, mediante un proveedor de IA, un resumen por tarea: qué se solicita, pasos sugeridos y preguntas abiertas. | Debe |
-| FR-07 | El sistema debe generar un plan del día a partir de la lista priorizada. | Debe |
-| FR-08 | El sistema debe generar, para una tarea, un prompt listo para el agente de IA. | Debe |
-| FR-09 | El sistema debería exportar el prompt del agente al portapapeles o a un archivo. | Debería |
-| FR-10 | El sistema debe cambiar el estado de una tarea al estado "done" configurado. | Debe |
-| FR-11 | El sistema debería publicar un comentario de cierre en la tarea. | Debería |
-| FR-12 | El sistema debe pedir confirmación explícita antes de cualquier operación de escritura. | Debe |
-| FR-13 | El sistema debe permitir elegir el proveedor de tareas y el proveedor de IA solo mediante configuración. | Debe |
-| FR-14 | El sistema debe mapear los estados propios del proveedor a los estados del dominio mediante configuración. | Debe |
-| FR-15 | El sistema debería exportar el resultado de cualquier consulta en JSON. | Debería |
-| FR-16 | El sistema podría guardar el plan del día como archivo Markdown. | Podría |
-| FR-17 | El sistema podría guardar en caché local los datos de tareas y los resúmenes de IA para evitar llamadas repetidas. | Podría |
+| ID    | Requisito                                                                                                                                          | Prioridad |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-01 | El sistema debe obtener todas las tareas abiertas asignadas al usuario actual desde el proveedor de tareas configurado.                            | Debe      |
+| FR-02 | El sistema debe obtener, para cada tarea, su estado, prioridad, fecha de vencimiento, descripción, URL, ubicación en el proveedor y comentarios. | Debe      |
+| FR-03 | El sistema debe identificar los comentarios asignados al usuario actual que aún no están resueltos.                                              | Debe      |
+| FR-04 | El sistema debe ordenar las tareas usando una política de priorización configurable.                                                             | Debe      |
+| FR-05 | El sistema debe mostrar la lista priorizada con estado, prioridad, fecha de vencimiento y cantidad de comentarios pendientes.                      | Debe      |
+| FR-06 | El sistema debe generar, mediante un proveedor de IA, un resumen por tarea: qué se solicita, pasos sugeridos y preguntas abiertas.                | Debe      |
+| FR-07 | El sistema debe generar un plan del día a partir de la lista priorizada.                                                                          | Debe      |
+| FR-08 | El sistema debe generar, para una tarea, un prompt listo para el agente de IA.                                                                     | Debe      |
+| FR-09 | El sistema debería exportar el prompt del agente al portapapeles o a un archivo.                                                                  | Debería  |
+| FR-10 | El sistema debe cambiar el estado de una tarea al estado "done" configurado.                                                                       | Debe      |
+| FR-11 | El sistema debería publicar un comentario de cierre en la tarea.                                                                                  | Debería  |
+| FR-12 | El sistema debe pedir confirmación explícita antes de cualquier operación de escritura.                                                         | Debe      |
+| FR-13 | El sistema debe permitir elegir el proveedor de tareas y el proveedor de IA solo mediante configuración.                                          | Debe      |
+| FR-14 | El sistema debe mapear los estados propios del proveedor a los estados del dominio mediante configuración.                                        | Debe      |
+| FR-15 | El sistema debería exportar el resultado de cualquier consulta en JSON.                                                                           | Debería  |
+| FR-16 | El sistema podría guardar el plan del día como archivo Markdown.                                                                                 | Podría   |
+| FR-17 | El sistema podría guardar en caché local los datos de tareas y los resúmenes de IA para evitar llamadas repetidas.                              | Podría   |
 
 ### 4.2 Configuración persistente
 
-| ID | Requisito | Prioridad |
-| --- | --- | --- |
-| FR-18 | El sistema debe almacenar la configuración en un archivo TOML persistente, en la ubicación estándar del sistema operativo, organizado en secciones (`provider`, `ai`, `policy`, `projects`, `context`, `playbooks`, `ui`). | Debe |
-| FR-19 | El sistema debe ofrecer un asistente interactivo (`config init`) que permita elegir el proveedor de tareas y el de IA de una lista de proveedores disponibles, y que solicite los datos que cada proveedor requiere. | Debe |
-| FR-20 | El sistema debe permitir cambiar de proveedor de forma interactiva (`config provider`) sin reconfigurar el resto de secciones. | Debe |
-| FR-21 | El sistema debe permitir leer y actualizar una clave o sección individual desde el CLI (`config get`, `config set`), preservando los comentarios y el formato del resto del archivo. | Debe |
-| FR-22 | El sistema debe validar la configuración antes de guardarla, rechazar valores inválidos indicando la clave y el motivo, y nunca dejar en disco un archivo inválido. | Debe |
-| FR-23 | El asistente debería guardar los secretos en el llavero del sistema operativo; las variables de entorno tienen precedencia sobre el llavero. | Debería |
-| FR-24 | El sistema debería abrir la configuración en el editor del sistema (`$EDITOR`) y validarla al cerrarlo. | Debería |
-| FR-25 | El sistema podría versionar el esquema de configuración y migrar automáticamente archivos de versiones anteriores. | Podría |
+| ID    | Requisito                                                                                                                                                                                                                                   | Prioridad |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-18 | El sistema debe almacenar la configuración en un archivo TOML persistente, en la ubicación estándar del sistema operativo, organizado en secciones (`provider`, `ai`, `policy`, `projects`, `context`, `playbooks`, `ui`). | Debe      |
+| FR-19 | El sistema debe ofrecer un asistente interactivo (`config init`) que permita elegir el proveedor de tareas y el de IA de una lista de proveedores disponibles, y que solicite los datos que cada proveedor requiere.                      | Debe      |
+| FR-20 | El sistema debe permitir cambiar de proveedor de forma interactiva (`config provider`) sin reconfigurar el resto de secciones.                                                                                                            | Debe      |
+| FR-21 | El sistema debe permitir leer y actualizar una clave o sección individual desde el CLI (`config get`, `config set`), preservando los comentarios y el formato del resto del archivo.                                                   | Debe      |
+| FR-22 | El sistema debe validar la configuración antes de guardarla, rechazar valores inválidos indicando la clave y el motivo, y nunca dejar en disco un archivo inválido.                                                                      | Debe      |
+| FR-23 | El asistente debería guardar los secretos en el llavero del sistema operativo; las variables de entorno tienen precedencia sobre el llavero.                                                                                               | Debería  |
+| FR-24 | El sistema debería abrir la configuración en el editor del sistema (`$EDITOR`) y validarla al cerrarlo.                                                                                                                                 | Debería  |
+| FR-25 | El sistema podría versionar el esquema de configuración y migrar automáticamente archivos de versiones anteriores.                                                                                                                       | Podría   |
 
 ### 4.3 Proyectos y agrupación
 
 Un **proyecto** representa un cliente o proyecto de trabajo. En ClickUp se identifica por un espacio, una carpeta o una lista; en otro proveedor, por su equivalente (por ejemplo, un repositorio en GitHub).
 
-| ID | Requisito | Prioridad |
-| --- | --- | --- |
-| FR-26 | El sistema debe permitir definir proyectos con un identificador corto (`slug`), un nombre, un tipo (cliente o interno) y reglas que lo asocian a ubicaciones del proveedor (espacio, carpeta, lista) o a etiquetas. | Debe |
-| FR-27 | El sistema debe asignar cada tarea a un proyecto según esas reglas; si varias reglas coinciden, gana la más específica (lista > carpeta > espacio > etiqueta). Las tareas sin coincidencia quedan en "Sin proyecto". | Debe |
-| FR-28 | El sistema debe mostrar las tareas agrupadas por proyecto y permitir filtrar cualquier consulta por proyecto. | Debe |
-| FR-29 | El sistema debería permitir crear un proyecto de forma interactiva, eligiendo sus ubicaciones del árbol obtenido del propio proveedor. | Debería |
-| FR-30 | El sistema debería permitir asociar un repositorio local a cada proyecto, usado como directorio de trabajo de los Playbooks y como referencia en el prompt del agente. | Debería |
-| FR-31 | El sistema podría aplicar una bonificación de prioridad por proyecto dentro de la política de priorización. | Podría |
+| ID    | Requisito                                                                                                                                                                                                               | Prioridad |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-26 | El sistema debe permitir definir proyectos con un identificador corto (`slug`), un nombre, un tipo (cliente o interno) y reglas que lo asocian a ubicaciones del proveedor (espacio, carpeta, lista) o a etiquetas.   | Debe      |
+| FR-27 | El sistema debe asignar cada tarea a un proyecto según esas reglas; si varias reglas coinciden, gana la más específica (lista > carpeta > espacio > etiqueta). Las tareas sin coincidencia quedan en "Sin proyecto". | Debe      |
+| FR-28 | El sistema debe mostrar las tareas agrupadas por proyecto y permitir filtrar cualquier consulta por proyecto.                                                                                                           | Debe      |
+| FR-29 | El sistema debería permitir crear un proyecto de forma interactiva, eligiendo sus ubicaciones del árbol obtenido del propio proveedor.                                                                                | Debería  |
+| FR-30 | El sistema debería permitir asociar un repositorio local a cada proyecto, usado como directorio de trabajo de los Playbooks y como referencia en el prompt del agente.                                                 | Debería  |
+| FR-31 | El sistema podría aplicar una bonificación de prioridad por proyecto dentro de la política de priorización.                                                                                                         | Podría   |
 
 ### 4.4 Contexto por proyecto
 
 El contexto de un proyecto se compone de **secciones**: archivos independientes que describen un aspecto del proyecto o dan instrucciones a la IA. Ejemplos: modelo de negocio, código, despliegue, aprendizaje ("estoy aprendiendo traits").
 
-| ID | Requisito | Prioridad |
-| --- | --- | --- |
-| FR-32 | Cada proyecto debe tener un contexto compuesto por secciones, cada una en su propio archivo Markdown. | Debe |
-| FR-33 | Las secciones deben ser abiertas: el usuario puede crear tantas como quiera y con cualquier nombre. | Debe |
-| FR-34 | Cada sección debe declarar su rol: **conocimiento** (describe el proyecto) o **instrucción** (indica a la IA cómo responder, por ejemplo adaptar las propuestas a un objetivo de aprendizaje). | Debe |
-| FR-35 | Cada sección debe declarar en qué usos se incluye: resumen, plan del día, prompt del agente o pasos de IA de los Playbooks. | Debe |
-| FR-36 | El sistema debe admitir secciones globales que aplican a todos los proyectos; una sección del proyecto con la misma clave reemplaza a la global. | Debe |
-| FR-37 | El sistema debe incluir automáticamente las secciones correspondientes al generar resúmenes, planes, prompts del agente y pasos de IA. | Debe |
-| FR-38 | El sistema debe respetar un presupuesto de tamaño de contexto, incluir las secciones por orden de prioridad e informar cuáles se omitieron. | Debe |
-| FR-39 | Las secciones marcadas como privadas nunca deben enviarse a un proveedor de IA. | Debe |
-| FR-40 | El sistema debería permitir listar, crear desde plantilla y editar secciones, y previsualizar el contexto exacto que recibirá la IA para una tarea. | Debería |
+| ID    | Requisito                                                                                                                                                                                                    | Prioridad |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| FR-32 | Cada proyecto debe tener un contexto compuesto por secciones, cada una en su propio archivo Markdown.                                                                                                        | Debe      |
+| FR-33 | Las secciones deben ser abiertas: el usuario puede crear tantas como quiera y con cualquier nombre.                                                                                                          | Debe      |
+| FR-34 | Cada sección debe declarar su rol:**conocimiento** (describe el proyecto) o **instrucción** (indica a la IA cómo responder, por ejemplo adaptar las propuestas a un objetivo de aprendizaje). | Debe      |
+| FR-35 | Cada sección debe declarar en qué usos se incluye: resumen, plan del día, prompt del agente o pasos de IA de los Playbooks.                                                                               | Debe      |
+| FR-36 | El sistema debe admitir secciones globales que aplican a todos los proyectos; una sección del proyecto con la misma clave reemplaza a la global.                                                            | Debe      |
+| FR-37 | El sistema debe incluir automáticamente las secciones correspondientes al generar resúmenes, planes, prompts del agente y pasos de IA.                                                                     | Debe      |
+| FR-38 | El sistema debe respetar un presupuesto de tamaño de contexto, incluir las secciones por orden de prioridad e informar cuáles se omitieron.                                                                | Debe      |
+| FR-39 | Las secciones marcadas como privadas nunca deben enviarse a un proveedor de IA.                                                                                                                              | Debe      |
+| FR-40 | El sistema debería permitir listar, crear desde plantilla y editar secciones, y previsualizar el contexto exacto que recibirá la IA para una tarea.                                                        | Debería  |
 
 ### 4.5 Playbooks (automatizaciones)
 
 Un **Playbook** es una secuencia con nombre de pasos explícitos, definida por el usuario dentro de un proyecto, que automatiza un proceso operativo: ejecutar comandos de shell, consultar tareas, comentar, cambiar estados, pedir un análisis a la IA y solicitar confirmaciones.
 
-| ID | Requisito | Prioridad |
-| --- | --- | --- |
-| FR-41 | El sistema debe permitir definir Playbooks por proyecto en archivos TOML dentro del directorio del proyecto, con nombre, descripción, entradas y pasos. | Debe |
-| FR-42 | El sistema debe soportar estos tipos de paso: `shell`, `select_tasks`, `extract_task_ids`, `comment`, `set_status`, `ai` y `confirm`. | Debe |
-| FR-43 | Los pasos deben poder usar plantillas con variables: entradas del Playbook, salidas de pasos anteriores y datos del proyecto. | Debe |
-| FR-44 | Un paso debe poder repetirse por cada elemento de una colección (`for_each`) y ejecutarse de forma condicional (`when`). | Debe |
-| FR-45 | El sistema debe validar el Playbook completo al cargarlo (identificadores únicos, referencias existentes, plantillas válidas) e informar todos los errores antes de ejecutar nada. | Debe |
-| FR-46 | El sistema debe mostrar el plan de ejecución y pedir confirmación antes de ejecutarlo; los pasos marcados con `confirm` piden además confirmación individual. Amplía FR-12. | Debe |
-| FR-47 | El sistema debe ofrecer un modo de simulación (`--dry-run`) que muestre los comandos y operaciones resueltos sin ejecutar nada. | Debe |
-| FR-48 | El sistema debe mostrar la salida de cada paso en vivo, detenerse ante un error salvo que el paso indique `on_error = "continue"`, y terminar con un resumen de pasos ejecutados, omitidos y fallidos. | Debe |
-| FR-49 | El sistema debería guardar un registro de cada ejecución (entradas, pasos, salidas, resultado) en un archivo. | Debería |
-| FR-50 | El sistema debería permitir listar, ver, validar y crear Playbooks desde plantillas. | Debería |
-| FR-51 | El sistema podría permitir acciones nativas escritas en Rust (trait `Action`) como tipo de paso `custom`, para lógica que no cabe en pasos declarativos. | Podría |
+| ID    | Requisito                                                                                                                                                                                               | Prioridad |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-41 | El sistema debe permitir definir Playbooks por proyecto en archivos TOML dentro del directorio del proyecto, con nombre, descripción, entradas y pasos.                                                | Debe      |
+| FR-42 | El sistema debe soportar estos tipos de paso:`shell`, `select_tasks`, `extract_task_ids`, `comment`, `set_status`, `ai` y `confirm`.                                                      | Debe      |
+| FR-43 | Los pasos deben poder usar plantillas con variables: entradas del Playbook, salidas de pasos anteriores y datos del proyecto.                                                                           | Debe      |
+| FR-44 | Un paso debe poder repetirse por cada elemento de una colección (`for_each`) y ejecutarse de forma condicional (`when`).                                                                           | Debe      |
+| FR-45 | El sistema debe validar el Playbook completo al cargarlo (identificadores únicos, referencias existentes, plantillas válidas) e informar todos los errores antes de ejecutar nada.                    | Debe      |
+| FR-46 | El sistema debe mostrar el plan de ejecución y pedir confirmación antes de ejecutarlo; los pasos marcados con`confirm` piden además confirmación individual. Amplía FR-12.                       | Debe      |
+| FR-47 | El sistema debe ofrecer un modo de simulación (`--dry-run`) que muestre los comandos y operaciones resueltos sin ejecutar nada.                                                                      | Debe      |
+| FR-48 | El sistema debe mostrar la salida de cada paso en vivo, detenerse ante un error salvo que el paso indique`on_error = "continue"`, y terminar con un resumen de pasos ejecutados, omitidos y fallidos. | Debe      |
+| FR-49 | El sistema debería guardar un registro de cada ejecución (entradas, pasos, salidas, resultado) en un archivo.                                                                                         | Debería  |
+| FR-50 | El sistema debería permitir listar, ver, validar y crear Playbooks desde plantillas.                                                                                                                   | Debería  |
+| FR-51 | El sistema podría permitir acciones nativas escritas en Rust (trait`Action`) como tipo de paso `custom`, para lógica que no cabe en pasos declarativos.                                           | Podría   |
 
 ### 4.6 Sesión de trabajo (`start`)
 
@@ -147,59 +147,59 @@ start ─► contador ON ─► datos (caché o API) ─► análisis IA ─► 
 
 Los nombres de los estados **no son fijos**: dependen de la lista de ClickUp de cada tarea (por ejemplo, "Code Review" en una y "Ready For Testing" en otra) y pueden cambiar con el tiempo. Por eso la configuración solo guarda **sugerencias**, y el estado real se elige y se valida en cada transición.
 
-| ID | Requisito | Prioridad |
-| --- | --- | --- |
-| FR-52 | El sistema debe iniciar una sesión de trabajo sobre una tarea con `taskflow start <TASK_ID>`, o permitir elegirla de forma interactiva de la lista priorizada si no se indica el ID. | Debe |
-| FR-53 | Al iniciar la sesión, el sistema debe activar el contador de tiempo del proveedor para esa tarea. | Debe |
-| FR-54 | El sistema debe obtener la tarea completa (descripción, comentarios y, si el proveedor los ofrece, subtareas y listas de verificación) y resolver su proyecto. | Debe |
-| FR-55 | El sistema debería reutilizar los datos y el análisis en caché si la tarea no cambió desde el último análisis (misma fecha de actualización y mismo contexto). | Debería |
-| FR-56 | El sistema debe analizar la tarea con IA usando el contexto del proyecto y producir un **reporte de trabajo**: qué se solicita, criterios de aceptación, pasos propuestos, riesgos, preguntas abiertas, complejidad y prompt para el agente. | Debe |
-| FR-57 | El sistema debe mostrar el reporte y guardarlo como Markdown en el directorio de la sesión. El reporte queda como borrador local y nunca se publica automáticamente. | Debe |
-| FR-58 | Con el reporte listo, el sistema debe cambiar la tarea al estado sugerido para "preparado" (si existe en la lista de la tarea; si no, avisar y mantener el estado actual) y notificar al usuario que está lista para revisión. | Debe |
-| FR-59 | La sesión debe esperar la luz verde explícita del usuario (`taskflow approve`); solo entonces debe cambiar la tarea al estado de trabajo (el sugerido o el indicado con `--status`) y entregar el prompt del agente (pantalla, portapapeles o archivo). | Debe |
-| FR-60 | El usuario debería poder rechazar el reporte con indicaciones (`taskflow reject --note`) para que el análisis se repita teniéndolas en cuenta. | Debería |
-| FR-61 | Solo el usuario debe poder indicar que la tarea terminó, de forma explícita con `taskflow done`; ninguna herramienta externa (por ejemplo, el agente) puede cerrar la sesión ni marcarla como terminada. | Debe |
-| FR-62 | Al finalizar (`taskflow done`), el sistema debe pedir el estado final (con `--status` o eligiéndolo de los estados disponibles en la lista de la tarea, con las sugerencias primero), permitir un comentario de cierre opcional, pedir confirmación, cambiar el estado, detener el contador y notificar. | Debe |
-| FR-63 | El sistema debería permitir pausar y reanudar la sesión, deteniendo y reanudando el contador. | Debería |
-| FR-64 | El sistema debería permitir abortar la sesión, deteniendo el contador y, opcionalmente, restaurando el estado original de la tarea. | Debería |
-| FR-65 | La sesión debe persistir en disco para continuar entre ejecuciones y reinicios; `taskflow session` debe mostrar el estado actual, el tiempo acumulado y las acciones posibles. | Debe |
-| FR-66 | Solo debe existir una sesión activa a la vez; al iniciar otra, el sistema debe ofrecer pausar o terminar la actual. | Debe |
-| FR-67 | Los estados del proveedor no deben estar fijos: la configuración global y la de cada proyecto solo guardan **sugerencias** por etapa (preparado, trabajo, final), modificables en cualquier momento, y cada transición puede usar otro estado indicado por el usuario. | Debe |
-| FR-68 | El sistema debe notificar al menos con notificación de escritorio y en la terminal; los canales deben ser configurables. | Debe |
-| FR-69 | El sistema podría ejecutar un Playbook del proyecto en etapas de la sesión (`on_start`, `on_approved`, `on_done`), por ejemplo para crear la rama de la tarea. | Podría |
-| FR-70 | El sistema debe validar cualquier estado destino contra los estados disponibles en la lista de la tarea en ese momento e informar las opciones válidas si no existe. | Debe |
-| FR-71 | El sistema debe permitir publicar el reporte de trabajo como comentario en la tarea solo de forma explícita (`taskflow report publish`), mientras la sesión esté activa. | Debe |
-| FR-72 | El sistema debería permitir editar el reporte antes de publicarlo (`taskflow report edit`); se publica la versión editada. | Debería |
-| FR-73 | Al ejecutar `done` con el reporte sin publicar, el sistema debería preguntar si se desea publicarlo antes de cerrar (por defecto, no). | Debería |
-| FR-74 | El sistema debería permitir cambiar el estado de la tarea en cualquier momento de la sesión (`taskflow session status [STATUS]`). | Debería |
+| ID    | Requisito                                                                                                                                                                                                                                                                                                      | Prioridad |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-52 | El sistema debe iniciar una sesión de trabajo sobre una tarea con`taskflow start <TASK_ID>`, o permitir elegirla de forma interactiva de la lista priorizada si no se indica el ID.                                                                                                                         | Debe      |
+| FR-53 | Al iniciar la sesión, el sistema debe activar el contador de tiempo del proveedor para esa tarea.                                                                                                                                                                                                             | Debe      |
+| FR-54 | El sistema debe obtener la tarea completa (descripción, comentarios y, si el proveedor los ofrece, subtareas y listas de verificación) y resolver su proyecto.                                                                                                                                               | Debe      |
+| FR-55 | El sistema debería reutilizar los datos y el análisis en caché si la tarea no cambió desde el último análisis (misma fecha de actualización y mismo contexto).                                                                                                                                          | Debería  |
+| FR-56 | El sistema debe analizar la tarea con IA usando el contexto del proyecto y producir un**reporte de trabajo**: qué se solicita, criterios de aceptación, pasos propuestos, riesgos, preguntas abiertas, complejidad y prompt para el agente.                                                            | Debe      |
+| FR-57 | El sistema debe mostrar el reporte y guardarlo como Markdown en el directorio de la sesión. El reporte queda como borrador local y nunca se publica automáticamente.                                                                                                                                         | Debe      |
+| FR-58 | Con el reporte listo, el sistema debe cambiar la tarea al estado sugerido para "preparado" (si existe en la lista de la tarea; si no, avisar y mantener el estado actual) y notificar al usuario que está lista para revisión.                                                                               | Debe      |
+| FR-59 | La sesión debe esperar la luz verde explícita del usuario (`taskflow approve`); solo entonces debe cambiar la tarea al estado de trabajo (el sugerido o el indicado con `--status`) y entregar el prompt del agente (pantalla, portapapeles o archivo).                                                  | Debe      |
+| FR-60 | El usuario debería poder rechazar el reporte con indicaciones (`taskflow reject --note`) para que el análisis se repita teniéndolas en cuenta.                                                                                                                                                            | Debería  |
+| FR-61 | Solo el usuario debe poder indicar que la tarea terminó, de forma explícita con`taskflow done`; ninguna herramienta externa (por ejemplo, el agente) puede cerrar la sesión ni marcarla como terminada.                                                                                                   | Debe      |
+| FR-62 | Al finalizar (`taskflow done`), el sistema debe pedir el estado final (con `--status` o eligiéndolo de los estados disponibles en la lista de la tarea, con las sugerencias primero), permitir un comentario de cierre opcional, pedir confirmación, cambiar el estado, detener el contador y notificar. | Debe      |
+| FR-63 | El sistema debería permitir pausar y reanudar la sesión, deteniendo y reanudando el contador.                                                                                                                                                                                                                | Debería  |
+| FR-64 | El sistema debería permitir abortar la sesión, deteniendo el contador y, opcionalmente, restaurando el estado original de la tarea.                                                                                                                                                                          | Debería  |
+| FR-65 | La sesión debe persistir en disco para continuar entre ejecuciones y reinicios;`taskflow session` debe mostrar el estado actual, el tiempo acumulado y las acciones posibles.                                                                                                                               | Debe      |
+| FR-66 | Solo debe existir una sesión activa a la vez; al iniciar otra, el sistema debe ofrecer pausar o terminar la actual.                                                                                                                                                                                           | Debe      |
+| FR-67 | Los estados del proveedor no deben estar fijos: la configuración global y la de cada proyecto solo guardan**sugerencias** por etapa (preparado, trabajo, final), modificables en cualquier momento, y cada transición puede usar otro estado indicado por el usuario.                                  | Debe      |
+| FR-68 | El sistema debe notificar al menos con notificación de escritorio y en la terminal; los canales deben ser configurables.                                                                                                                                                                                      | Debe      |
+| FR-69 | El sistema podría ejecutar un Playbook del proyecto en etapas de la sesión (`on_start`, `on_approved`, `on_done`), por ejemplo para crear la rama de la tarea.                                                                                                                                         | Podría   |
+| FR-70 | El sistema debe validar cualquier estado destino contra los estados disponibles en la lista de la tarea en ese momento e informar las opciones válidas si no existe.                                                                                                                                          | Debe      |
+| FR-71 | El sistema debe permitir publicar el reporte de trabajo como comentario en la tarea solo de forma explícita (`taskflow report publish`), mientras la sesión esté activa.                                                                                                                                  | Debe      |
+| FR-72 | El sistema debería permitir editar el reporte antes de publicarlo (`taskflow report edit`); se publica la versión editada.                                                                                                                                                                                 | Debería  |
+| FR-73 | Al ejecutar`done` con el reporte sin publicar, el sistema debería preguntar si se desea publicarlo antes de cerrar (por defecto, no).                                                                                                                                                                       | Debería  |
+| FR-74 | El sistema debería permitir cambiar el estado de la tarea en cualquier momento de la sesión (`taskflow session status [STATUS]`).                                                                                                                                                                          | Debería  |
 
 ## 5. Requisitos no funcionales
 
-| ID | Requisito | Categoría |
-| --- | --- | --- |
-| NFR-01 | La lógica de negocio no debe depender de ningún proveedor de tareas, proveedor de IA ni interfaz de usuario específicos. | Mantenibilidad |
-| NFR-02 | Agregar un nuevo proveedor de tareas debe requerir solo un nuevo crate adaptador y una entrada de configuración, sin cambios en `domain` ni `application`. | Extensibilidad |
-| NFR-03 | Agregar una nueva interfaz de usuario (escritorio, web) debe reutilizar `application` y `bootstrap` sin modificarlos. | Extensibilidad |
-| NFR-04 | Los secretos nunca deben guardarse en el código fuente, en el archivo de configuración ni subirse al repositorio. | Seguridad |
-| NFR-05 | El proveedor de IA debe recibir solo los campos de la tarea y las secciones de contexto necesarias para cada uso. | Privacidad |
-| NFR-06 | El caso de uso `today` debe completarse en menos de 5 segundos para hasta 50 tareas en condiciones normales de red. | Rendimiento |
-| NFR-07 | Las peticiones independientes a las APIs deben ejecutarse de forma concurrente, respetando los límites de peticiones del proveedor. | Rendimiento |
-| NFR-08 | El sistema debe compilar y ejecutarse en Windows, Linux y macOS con un único código fuente. | Portabilidad |
-| NFR-09 | `domain` y `application` deben poder probarse por completo sin acceso a red ni ejecución de procesos reales. | Testeabilidad |
-| NFR-10 | Todo error mostrado al usuario debe indicar qué falló y sugerir una acción correctiva. | Usabilidad |
-| NFR-11 | El código debe pasar `cargo fmt --check` y `cargo clippy -- -D warnings`. | Calidad |
-| NFR-12 | Los Playbooks solo deben ejecutar comandos definidos en archivos locales del usuario; un texto generado por la IA nunca debe ejecutarse como comando. | Seguridad |
-| NFR-13 | Las entradas y variables marcadas como secretas deben ocultarse en pantalla, en los logs y en los registros de ejecución. | Seguridad |
-| NFR-14 | Toda escritura de configuración, contexto o Playbooks debe ser atómica (archivo temporal y renombrado) para no dejar archivos corruptos. | Fiabilidad |
-| NFR-15 | Cada comando de shell debe tener un tiempo máximo configurable y poder cancelarse con Ctrl+C sin dejar procesos huérfanos. | Robustez |
-| NFR-16 | La configuración, el contexto y los Playbooks deben ser texto plano legible y versionable con git. | Mantenibilidad |
-| NFR-17 | Un nuevo proveedor debe aparecer en el asistente interactivo con solo registrar su descriptor, sin cambiar el código del asistente. | Extensibilidad |
-| NFR-18 | Agregar una acción nativa de Playbook debe requerir solo implementar el trait `Action` y registrarla, sin modificar el motor. | Extensibilidad |
-| NFR-19 | Los Playbooks deben usar una shell configurable por sistema operativo (`sh`/`bash`/`zsh` en Unix, `pwsh` o `cmd` en Windows). | Portabilidad |
-| NFR-20 | Las transiciones de la sesión deben validarse: una acción no permitida en el estado actual se rechaza indicando el estado y las acciones válidas. | Fiabilidad |
-| NFR-21 | Si una operación externa falla durante una transición, la sesión debe registrar qué efectos se aplicaron y permitir reintentar solo los pendientes (`taskflow session retry`); nunca debe quedar un contador activo sin una sesión que lo refleje. | Fiabilidad |
-| NFR-22 | Un fallo al notificar o al ejecutar un gancho no debe interrumpir la sesión; se registra como advertencia. | Robustez |
-| NFR-23 | `start` debe mostrar el reporte en menos de 30 segundos para una tarea típica, y en menos de 3 segundos si el análisis está en caché. | Rendimiento |
+| ID     | Requisito                                                                                                                                                                                                                                                 | Categoría     |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| NFR-01 | La lógica de negocio no debe depender de ningún proveedor de tareas, proveedor de IA ni interfaz de usuario específicos.                                                                                                                               | Mantenibilidad |
+| NFR-02 | Agregar un nuevo proveedor de tareas debe requerir solo un nuevo crate adaptador y una entrada de configuración, sin cambios en`domain` ni `application`.                                                                                            | Extensibilidad |
+| NFR-03 | Agregar una nueva interfaz de usuario (escritorio, web) debe reutilizar`application` y `bootstrap` sin modificarlos.                                                                                                                                  | Extensibilidad |
+| NFR-04 | Los secretos nunca deben guardarse en el código fuente, en el archivo de configuración ni subirse al repositorio.                                                                                                                                       | Seguridad      |
+| NFR-05 | El proveedor de IA debe recibir solo los campos de la tarea y las secciones de contexto necesarias para cada uso.                                                                                                                                         | Privacidad     |
+| NFR-06 | El caso de uso`today` debe completarse en menos de 5 segundos para hasta 50 tareas en condiciones normales de red.                                                                                                                                      | Rendimiento    |
+| NFR-07 | Las peticiones independientes a las APIs deben ejecutarse de forma concurrente, respetando los límites de peticiones del proveedor.                                                                                                                      | Rendimiento    |
+| NFR-08 | El sistema debe compilar y ejecutarse en Windows, Linux y macOS con un único código fuente.                                                                                                                                                             | Portabilidad   |
+| NFR-09 | `domain` y `application` deben poder probarse por completo sin acceso a red ni ejecución de procesos reales.                                                                                                                                         | Testeabilidad  |
+| NFR-10 | Todo error mostrado al usuario debe indicar qué falló y sugerir una acción correctiva.                                                                                                                                                                 | Usabilidad     |
+| NFR-11 | El código debe pasar`cargo fmt --check` y `cargo clippy -- -D warnings`.                                                                                                                                                                             | Calidad        |
+| NFR-12 | Los Playbooks solo deben ejecutar comandos definidos en archivos locales del usuario; un texto generado por la IA nunca debe ejecutarse como comando.                                                                                                     | Seguridad      |
+| NFR-13 | Las entradas y variables marcadas como secretas deben ocultarse en pantalla, en los logs y en los registros de ejecución.                                                                                                                                | Seguridad      |
+| NFR-14 | Toda escritura de configuración, contexto o Playbooks debe ser atómica (archivo temporal y renombrado) para no dejar archivos corruptos.                                                                                                                | Fiabilidad     |
+| NFR-15 | Cada comando de shell debe tener un tiempo máximo configurable y poder cancelarse con Ctrl+C sin dejar procesos huérfanos.                                                                                                                              | Robustez       |
+| NFR-16 | La configuración, el contexto y los Playbooks deben ser texto plano legible y versionable con git.                                                                                                                                                       | Mantenibilidad |
+| NFR-17 | Un nuevo proveedor debe aparecer en el asistente interactivo con solo registrar su descriptor, sin cambiar el código del asistente.                                                                                                                      | Extensibilidad |
+| NFR-18 | Agregar una acción nativa de Playbook debe requerir solo implementar el trait`Action` y registrarla, sin modificar el motor.                                                                                                                           | Extensibilidad |
+| NFR-19 | Los Playbooks deben usar una shell configurable por sistema operativo (`sh`/`bash`/`zsh` en Unix, `pwsh` o `cmd` en Windows).                                                                                                                   | Portabilidad   |
+| NFR-20 | Las transiciones de la sesión deben validarse: una acción no permitida en el estado actual se rechaza indicando el estado y las acciones válidas.                                                                                                      | Fiabilidad     |
+| NFR-21 | Si una operación externa falla durante una transición, la sesión debe registrar qué efectos se aplicaron y permitir reintentar solo los pendientes (`taskflow session retry`); nunca debe quedar un contador activo sin una sesión que lo refleje. | Fiabilidad     |
+| NFR-22 | Un fallo al notificar o al ejecutar un gancho no debe interrumpir la sesión; se registra como advertencia.                                                                                                                                               | Robustez       |
+| NFR-23 | `start` debe mostrar el reporte en menos de 30 segundos para una tarea típica, y en menos de 3 segundos si el análisis está en caché.                                                                                                               | Rendimiento    |
 
 ## 6. Casos de uso
 
@@ -273,17 +273,17 @@ Todas las acciones de la sesión pasan por un único servicio, `SessionService` 
 3. Ejecutar los efectos en orden a través de los puertos (`TimeTracker`, `TaskProvider`, `Summarizer`, `Notifier`, `PlaybookEngine`), anotando cada uno en el diario de la sesión.
 4. Guardar la sesión de forma atómica; si llegó a un estado terminal, archivarla.
 
-| Acción | Comando | Entrada |
-| --- | --- | --- |
-| `StartWork` | `taskflow start` | `TaskId` o selección interactiva |
-| `ApproveWork` | `taskflow approve` | Destino del prompt del agente |
-| `RejectWork` | `taskflow reject` | Nota para el nuevo análisis |
-| `PauseWork` / `ResumeWork` | `taskflow pause` / `taskflow resume` | — |
-| `PublishReport` | `taskflow report publish` | — (usa la versión de `report.md` en disco, con las ediciones del usuario) |
-| `ChangeStatus` | `taskflow session status` | Nombre del estado o selección interactiva |
-| `FinishWork` | `taskflow done` | Estado final elegido, comentario opcional; confirmación obtenida por la interfaz |
-| `AbortWork` | `taskflow abort` | Restaurar o no el estado original |
-| `RetryEffects` | `taskflow session retry` | — |
+| Acción                        | Comando                                  | Entrada                                                                           |
+| ------------------------------ | ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `StartWork`                  | `taskflow start`                       | `TaskId` o selección interactiva                                               |
+| `ApproveWork`                | `taskflow approve`                     | Destino del prompt del agente                                                     |
+| `RejectWork`                 | `taskflow reject`                      | Nota para el nuevo análisis                                                      |
+| `PauseWork` / `ResumeWork` | `taskflow pause` / `taskflow resume` | —                                                                                |
+| `PublishReport`              | `taskflow report publish`              | — (usa la versión de`report.md` en disco, con las ediciones del usuario)      |
+| `ChangeStatus`               | `taskflow session status`              | Nombre del estado o selección interactiva                                        |
+| `FinishWork`                 | `taskflow done`                        | Estado final elegido, comentario opcional; confirmación obtenida por la interfaz |
+| `AbortWork`                  | `taskflow abort`                       | Restaurar o no el estado original                                                 |
+| `RetryEffects`               | `taskflow session retry`               | —                                                                                |
 
 Consulta auxiliar: `StatusOptions` devuelve los estados disponibles en la lista de la tarea, con las sugerencias del proyecto primero. La usan las interfaces para `approve`, `session status` y `done`.
 
@@ -292,44 +292,44 @@ Consulta auxiliar: `StatusOptions` devuelve los estados disponibles en la lista 
 
 ## 7. Comandos del CLI
 
-| Command | Use case | Description |
-| --- | --- | --- |
-| `taskflow today [--json] [--limit N] [--by-project] [--project SLUG]` | UC-01 | Ranked list of assigned tasks, optionally grouped or filtered by project |
-| `taskflow plan [--max N] [--project SLUG] [--save]` | UC-02 | AI daily plan, optionally saved as Markdown |
-| `taskflow show <TASK_ID> [--copy] [--out FILE]` | UC-03 | Task detail, AI summary and agent prompt |
-| `taskflow close <TASK_ID> [--comment TEXT] [--yes]` | UC-04 | Close task, with confirmation unless `--yes` |
-| `taskflow config init` | UC-05 | Interactive wizard: providers, credentials and defaults |
-| `taskflow config provider [tasks\|ai]` | UC-05 | Interactively switch a provider |
-| `taskflow config show [SECTION]` | — | Print the current configuration (secrets masked) |
-| `taskflow config get <KEY>` | — | Read one key, e.g. `ai.model` |
-| `taskflow config set <KEY> <VALUE>` | UC-05 | Update one key, preserving comments |
-| `taskflow config edit` | UC-05 | Open in `$EDITOR`, validate on close |
-| `taskflow config check` | — | Validate configuration and credentials |
-| `taskflow config path` | — | Print the configuration directory |
-| `taskflow project list` | UC-06 | List projects and their rules |
-| `taskflow project add` | UC-06 | Interactive: pick spaces, folders or lists from the provider |
-| `taskflow project show <SLUG>` | UC-06 | Project detail, context sections and playbooks |
-| `taskflow context list [--project SLUG]` | UC-07 | List global and project sections |
-| `taskflow context new <KEY> [--project SLUG] [--role knowledge\|instruction]` | UC-07 | Create a section from a template and open it in the editor |
-| `taskflow context edit <KEY> [--project SLUG]` | UC-07 | Edit a section |
-| `taskflow context preview <TASK_ID> [--usage summary\|plan\|agent]` | UC-07 | Show exactly what context the AI would receive |
-| `taskflow playbook list [--project SLUG]` | UC-09 | List playbooks |
-| `taskflow playbook show <NAME> [--project SLUG]` | UC-09 | Show inputs and steps |
-| `taskflow playbook check <NAME> [--project SLUG]` | UC-09 | Validate without running |
-| `taskflow playbook new <NAME> [--project SLUG] [--from TEMPLATE]` | UC-09 | Create from a template |
-| `taskflow run <NAME> [--project SLUG] [--set KEY=VALUE]... [--dry-run] [--yes]` | UC-08 | Plan, confirm and execute a playbook |
-| `taskflow start [TASK_ID]` | UC-10 | Start a work session: timer, AI analysis, work report, "ready" status, notification |
-| `taskflow approve [--status NAME] [--copy] [--out FILE]` | UC-10 | Green light: working status and agent prompt |
-| `taskflow reject --note TEXT` | UC-10 | Re-run the analysis with extra guidance |
-| `taskflow pause` / `taskflow resume` | UC-10 | Stop / restart the timer |
-| `taskflow session [--json]` | UC-10 | Current session: state, elapsed time, allowed actions |
-| `taskflow session status [STATUS]` | UC-10 | Change the task status now (interactive list if omitted) |
-| `taskflow report show` | UC-10 | Show the work report draft |
-| `taskflow report edit` | UC-10 | Edit the report in `$EDITOR` before publishing |
-| `taskflow report publish [--yes]` | UC-10 | Explicitly post the report as a task comment |
-| `taskflow session retry` | UC-10 | Retry pending effects after a failure |
-| `taskflow done [--status NAME] [--comment TEXT] [--yes]` | UC-10 | You declare the task finished: final status, optional comment, stop timer, notify |
-| `taskflow abort [--keep-status]` | UC-10 | Cancel the session and stop the timer |
+| Command                                                                           | Use case | Description                                                                         |
+| --------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
+| `taskflow today [--json] [--limit N] [--by-project] [--project SLUG]`           | UC-01    | Ranked list of assigned tasks, optionally grouped or filtered by project            |
+| `taskflow plan [--max N] [--project SLUG] [--save]`                             | UC-02    | AI daily plan, optionally saved as Markdown                                         |
+| `taskflow show <TASK_ID> [--copy] [--out FILE]`                                 | UC-03    | Task detail, AI summary and agent prompt                                            |
+| `taskflow close <TASK_ID> [--comment TEXT] [--yes]`                             | UC-04    | Close task, with confirmation unless`--yes`                                       |
+| `taskflow config init`                                                          | UC-05    | Interactive wizard: providers, credentials and defaults                             |
+| `taskflow config provider [tasks\|ai]`                                           | UC-05    | Interactively switch a provider                                                     |
+| `taskflow config show [SECTION]`                                                | —       | Print the current configuration (secrets masked)                                    |
+| `taskflow config get <KEY>`                                                     | —       | Read one key, e.g.`ai.model`                                                      |
+| `taskflow config set <KEY> <VALUE>`                                             | UC-05    | Update one key, preserving comments                                                 |
+| `taskflow config edit`                                                          | UC-05    | Open in`$EDITOR`, validate on close                                               |
+| `taskflow config check`                                                         | —       | Validate configuration and credentials                                              |
+| `taskflow config path`                                                          | —       | Print the configuration directory                                                   |
+| `taskflow project list`                                                         | UC-06    | List projects and their rules                                                       |
+| `taskflow project add`                                                          | UC-06    | Interactive: pick spaces, folders or lists from the provider                        |
+| `taskflow project show <SLUG>`                                                  | UC-06    | Project detail, context sections and playbooks                                      |
+| `taskflow context list [--project SLUG]`                                        | UC-07    | List global and project sections                                                    |
+| `taskflow context new <KEY> [--project SLUG] [--role knowledge\|instruction]`    | UC-07    | Create a section from a template and open it in the editor                          |
+| `taskflow context edit <KEY> [--project SLUG]`                                  | UC-07    | Edit a section                                                                      |
+| `taskflow context preview <TASK_ID> [--usage summary\|plan\|agent]`               | UC-07    | Show exactly what context the AI would receive                                      |
+| `taskflow playbook list [--project SLUG]`                                       | UC-09    | List playbooks                                                                      |
+| `taskflow playbook show <NAME> [--project SLUG]`                                | UC-09    | Show inputs and steps                                                               |
+| `taskflow playbook check <NAME> [--project SLUG]`                               | UC-09    | Validate without running                                                            |
+| `taskflow playbook new <NAME> [--project SLUG] [--from TEMPLATE]`               | UC-09    | Create from a template                                                              |
+| `taskflow run <NAME> [--project SLUG] [--set KEY=VALUE]... [--dry-run] [--yes]` | UC-08    | Plan, confirm and execute a playbook                                                |
+| `taskflow start [TASK_ID]`                                                      | UC-10    | Start a work session: timer, AI analysis, work report, "ready" status, notification |
+| `taskflow approve [--status NAME] [--copy] [--out FILE]`                        | UC-10    | Green light: working status and agent prompt                                        |
+| `taskflow reject --note TEXT`                                                   | UC-10    | Re-run the analysis with extra guidance                                             |
+| `taskflow pause` / `taskflow resume`                                          | UC-10    | Stop / restart the timer                                                            |
+| `taskflow session [--json]`                                                     | UC-10    | Current session: state, elapsed time, allowed actions                               |
+| `taskflow session status [STATUS]`                                              | UC-10    | Change the task status now (interactive list if omitted)                            |
+| `taskflow report show`                                                          | UC-10    | Show the work report draft                                                          |
+| `taskflow report edit`                                                          | UC-10    | Edit the report in`$EDITOR` before publishing                                     |
+| `taskflow report publish [--yes]`                                               | UC-10    | Explicitly post the report as a task comment                                        |
+| `taskflow session retry`                                                        | UC-10    | Retry pending effects after a failure                                               |
+| `taskflow done [--status NAME] [--comment TEXT] [--yes]`                        | UC-10    | You declare the task finished: final status, optional comment, stop timer, notify   |
+| `taskflow abort [--keep-status]`                                                | UC-10    | Cancel the session and stop the timer                                               |
 
 Opciones globales: `-v/--verbose` (logs detallados), `--config <PATH>`.
 
@@ -350,29 +350,29 @@ Dentro de `domain` y `application` el código se organiza **por capacidad** (tar
 
 ### 8.2 Patrones de diseño y la herramienta de Rust que los implementa
 
-| Patrón | Dónde | Herramienta de Rust | Qué resuelve |
-| --- | --- | --- | --- |
-| Puertos y adaptadores | Todos los puertos | Traits + `Arc<dyn Trait>` | Independencia de proveedor e interfaz |
-| Composition root | `bootstrap` | Funciones constructoras, `cfg(feature)` | Un único lugar donde se conectan las piezas |
-| Registro de proveedores | `bootstrap::registry` | `static` de descriptores con punteros a función | El asistente lista proveedores sin conocerlos (NFR-17) |
-| Newtype + *parse, don't validate* | `TaskId`, `ProjectSlug`, `SectionKey`, `StepId`, `ConfigKey` | Campo privado + `FromStr`/`TryFrom` | Un valor inválido no puede existir |
-| Spec → Modelo | Archivos TOML → dominio | `serde` para la *spec*, `TryFrom` hacia el modelo | El formato de archivo no contamina el dominio |
-| Estrategia | `PrioritizationPolicy`, reglas de proyecto | Traits con métodos por defecto, enums | Cambiar comportamiento por configuración |
-| Repositorio | Configuración, proyectos, contexto, Playbooks | Traits async en `application::ports` | El núcleo no sabe que existen archivos |
-| Comando + *enum dispatch* | Pasos de Playbook (`StepKind`) | `enum` + `match` exhaustivo | El compilador obliga a manejar cada tipo de paso |
-| Extensión por trait object | Paso `custom` | `trait Action` + `HashMap<&str, Arc<dyn Action>>` | Agregar acciones sin tocar el motor (NFR-18) |
-| Intérprete | `PlaybookEngine` | Bucle sobre pasos + `Scope` de variables | Ejecutar Playbooks declarativos |
-| *Typestate* | `PlaybookRun<Planned>` → `PlaybookRun<Approved>` | Genéricos con tipos de estado | Imposible ejecutar sin aprobación: lo verifica el compilador |
-| Observador por canales | Progreso de Playbooks | `tokio::sync::mpsc` + `enum RunEvent` | La aplicación informa sin imprimir |
-| Cancelación cooperativa | Playbooks, comandos largos | `CancellationToken` + `tokio::select!` | Ctrl+C limpio (NFR-15) |
-| Errores tipados por capa | Todas las capas | `thiserror` + `#[from]`, `anyhow` en binarios | Errores precisos y mensajes útiles |
-| API estable | Enums públicos de errores y DTOs | `#[non_exhaustive]` | Agregar variantes sin romper a quien las usa |
-| Máquina de estados con enums | `SessionState` + `SessionCommand` | `match (estado, comando)` exhaustivo, guardas `if`, patrones `A \| B` | Solo existen las transiciones permitidas (NFR-20) |
-| Núcleo funcional, efectos en el borde | `WorkSession::handle` → `Vec<Effect>` | Enums con datos y funciones puras | La lógica de la sesión se prueba sin red; los efectos se reintentan (NFR-21) |
-| Decorador | `CachedTaskProvider<P, C>` | Genéricos + `impl<P: TaskProvider, C: Cache> TaskProvider for ...` | Caché transparente sin tocar adaptadores ni casos de uso |
-| Segregación de interfaces | `TimeTracker` separado de `TaskProvider` | Traits pequeños | Un proveedor sin contador (GitHub) no implementa métodos vacíos |
-| Objeto nulo | `LocalTimeTracker` | Otra implementación del mismo trait | Sin casos especiales cuando el proveedor no mide tiempo |
-| Composite | `MultiNotifier` | `Vec<Box<dyn Notifier>>` que también implementa `Notifier` | Varios canales de notificación como si fueran uno |
+| Patrón                                | Dónde                                                                 | Herramienta de Rust                                                        | Qué resuelve                                                                  |
+| -------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Puertos y adaptadores                  | Todos los puertos                                                      | Traits +`Arc<dyn Trait>`                                                 | Independencia de proveedor e interfaz                                          |
+| Composition root                       | `bootstrap`                                                          | Funciones constructoras,`cfg(feature)`                                   | Un único lugar donde se conectan las piezas                                   |
+| Registro de proveedores                | `bootstrap::registry`                                                | `static` de descriptores con punteros a función                         | El asistente lista proveedores sin conocerlos (NFR-17)                         |
+| Newtype +*parse, don't validate*     | `TaskId`, `ProjectSlug`, `SectionKey`, `StepId`, `ConfigKey` | Campo privado +`FromStr`/`TryFrom`                                     | Un valor inválido no puede existir                                            |
+| Spec → Modelo                         | Archivos TOML → dominio                                               | `serde` para la *spec*, `TryFrom` hacia el modelo                    | El formato de archivo no contamina el dominio                                  |
+| Estrategia                             | `PrioritizationPolicy`, reglas de proyecto                           | Traits con métodos por defecto, enums                                     | Cambiar comportamiento por configuración                                      |
+| Repositorio                            | Configuración, proyectos, contexto, Playbooks                         | Traits async en`application::ports`                                      | El núcleo no sabe que existen archivos                                        |
+| Comando +*enum dispatch*             | Pasos de Playbook (`StepKind`)                                       | `enum` + `match` exhaustivo                                            | El compilador obliga a manejar cada tipo de paso                               |
+| Extensión por trait object            | Paso`custom`                                                         | `trait Action` + `HashMap<&str, Arc<dyn Action>>`                      | Agregar acciones sin tocar el motor (NFR-18)                                   |
+| Intérprete                            | `PlaybookEngine`                                                     | Bucle sobre pasos +`Scope` de variables                                  | Ejecutar Playbooks declarativos                                                |
+| *Typestate*                          | `PlaybookRun<Planned>` → `PlaybookRun<Approved>`                  | Genéricos con tipos de estado                                             | Imposible ejecutar sin aprobación: lo verifica el compilador                  |
+| Observador por canales                 | Progreso de Playbooks                                                  | `tokio::sync::mpsc` + `enum RunEvent`                                  | La aplicación informa sin imprimir                                            |
+| Cancelación cooperativa               | Playbooks, comandos largos                                             | `CancellationToken` + `tokio::select!`                                 | Ctrl+C limpio (NFR-15)                                                         |
+| Errores tipados por capa               | Todas las capas                                                        | `thiserror` + `#[from]`, `anyhow` en binarios                        | Errores precisos y mensajes útiles                                            |
+| API estable                            | Enums públicos de errores y DTOs                                      | `#[non_exhaustive]`                                                      | Agregar variantes sin romper a quien las usa                                   |
+| Máquina de estados con enums          | `SessionState` + `SessionCommand`                                  | `match (estado, comando)` exhaustivo, guardas `if`, patrones `A \| B` | Solo existen las transiciones permitidas (NFR-20)                              |
+| Núcleo funcional, efectos en el borde | `WorkSession::handle` → `Vec<Effect>`                             | Enums con datos y funciones puras                                          | La lógica de la sesión se prueba sin red; los efectos se reintentan (NFR-21) |
+| Decorador                              | `CachedTaskProvider<P, C>`                                           | Genéricos +`impl<P: TaskProvider, C: Cache> TaskProvider for ...`       | Caché transparente sin tocar adaptadores ni casos de uso                      |
+| Segregación de interfaces             | `TimeTracker` separado de `TaskProvider`                           | Traits pequeños                                                           | Un proveedor sin contador (GitHub) no implementa métodos vacíos              |
+| Objeto nulo                            | `LocalTimeTracker`                                                   | Otra implementación del mismo trait                                       | Sin casos especiales cuando el proveedor no mide tiempo                        |
+| Composite                              | `MultiNotifier`                                                      | `Vec<Box<dyn Notifier>>` que también implementa `Notifier`            | Varios canales de notificación como si fueran uno                             |
 
 ### 8.3 Capas y crates
 
@@ -407,20 +407,20 @@ Dentro de `domain` y `application` el código se organiza **por capacidad** (tar
                      └──────────────────────────────────────────────────────────────────┘
 ```
 
-| Crate | Tipo | Responsabilidad | Depende de |
-| --- | --- | --- | --- |
-| `domain` | lib | Entidades, value objects, política de prioridad, resolución de proyectos, selección de contexto, modelo validado de Playbooks, máquina de estados de la sesión de trabajo. Código puro, sin async ni I/O. | `chrono`, `thiserror`, `enumset`, `indexmap`, `serde` (solo derive) |
-| `application` | lib | Puertos (traits), casos de uso, DTOs serializables, `AppContext`, motor de Playbooks, servicio de sesiones de trabajo, decorador de caché. | `domain`, `async-trait`, `serde`, `serde_json`, `futures`, `tokio` (`sync`, `macros`), `tokio-util`, `minijinja` |
-| `adapter-clickup` | lib | Implementa `TaskProvider` y `TimeTracker` para la API v2 de ClickUp. | `application`, `reqwest`, `serde` |
-| `adapter-anthropic` | lib | Implementa `Summarizer` usando la API de Messages. | `application`, `reqwest`, `serde` |
-| `adapter-fs` | lib | Implementa `ConfigStore`, `ProjectRepository`, `ContextRepository`, `PlaybookRepository`, `RunLog`, `SessionStore` y `Cache` sobre archivos. | `application`, `toml`, `toml_edit`, `tempfile`, `directories` |
-| `adapter-shell` | lib | Implementa `CommandRunner` con `tokio::process`, tiempo máximo y cancelación. | `application`, `tokio` (`process`) |
-| `adapter-keyring` | lib | Implementa `SecretStore` con el llavero del sistema y fallback a variables de entorno. | `application`, `keyring` |
-| `adapter-notify` | lib | Implementa `Notifier` para escritorio y terminal, y `MultiNotifier` para combinarlos. | `application`, `notify-rust` |
-| `bootstrap` | lib | Registro de proveedores, carga de configuración y armado del `AppContext`. Compartido por todas las interfaces. | `application`, todos los adaptadores |
-| `cli` | bin | Parseo de argumentos, asistentes interactivos, implementación de `Interaction`, presentación en terminal. | `bootstrap`, `application`, `clap`, `dialoguer`, `indicatif`, `comfy-table`, `arboard` |
-| `desktop` | bin (futuro) | App Tauri; cada comando Tauri invoca un caso de uso. | `bootstrap`, `application`, `tauri` |
-| `web` | bin (futuro) | API HTTP; cada handler invoca un caso de uso. | `bootstrap`, `application`, `axum` |
+| Crate                 | Tipo         | Responsabilidad                                                                                                                                                                                                 | Depende de                                                                                                                           |
+| --------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `domain`            | lib          | Entidades, value objects, política de prioridad, resolución de proyectos, selección de contexto, modelo validado de Playbooks, máquina de estados de la sesión de trabajo. Código puro, sin async ni I/O. | `chrono`, `thiserror`, `enumset`, `indexmap`, `serde` (solo derive)                                                        |
+| `application`       | lib          | Puertos (traits), casos de uso, DTOs serializables,`AppContext`, motor de Playbooks, servicio de sesiones de trabajo, decorador de caché.                                                                    | `domain`, `async-trait`, `serde`, `serde_json`, `futures`, `tokio` (`sync`, `macros`), `tokio-util`, `minijinja` |
+| `adapter-clickup`   | lib          | Implementa`TaskProvider` y `TimeTracker` para la API v2 de ClickUp.                                                                                                                                         | `application`, `reqwest`, `serde`                                                                                              |
+| `adapter-anthropic` | lib          | Implementa`Summarizer` usando la API de Messages.                                                                                                                                                             | `application`, `reqwest`, `serde`                                                                                              |
+| `adapter-fs`        | lib          | Implementa`ConfigStore`, `ProjectRepository`, `ContextRepository`, `PlaybookRepository`, `RunLog`, `SessionStore` y `Cache` sobre archivos.                                                       | `application`, `toml`, `toml_edit`, `tempfile`, `directories`                                                              |
+| `adapter-shell`     | lib          | Implementa`CommandRunner` con `tokio::process`, tiempo máximo y cancelación.                                                                                                                              | `application`, `tokio` (`process`)                                                                                             |
+| `adapter-keyring`   | lib          | Implementa`SecretStore` con el llavero del sistema y fallback a variables de entorno.                                                                                                                         | `application`, `keyring`                                                                                                         |
+| `adapter-notify`    | lib          | Implementa`Notifier` para escritorio y terminal, y `MultiNotifier` para combinarlos.                                                                                                                        | `application`, `notify-rust`                                                                                                     |
+| `bootstrap`         | lib          | Registro de proveedores, carga de configuración y armado del`AppContext`. Compartido por todas las interfaces.                                                                                               | `application`, todos los adaptadores                                                                                               |
+| `cli`               | bin          | Parseo de argumentos, asistentes interactivos, implementación de`Interaction`, presentación en terminal.                                                                                                    | `bootstrap`, `application`, `clap`, `dialoguer`, `indicatif`, `comfy-table`, `arboard`                                 |
+| `desktop`           | bin (futuro) | App Tauri; cada comando Tauri invoca un caso de uso.                                                                                                                                                            | `bootstrap`, `application`, `tauri`                                                                                            |
+| `web`               | bin (futuro) | API HTTP; cada handler invoca un caso de uso.                                                                                                                                                                   | `bootstrap`, `application`, `axum`                                                                                             |
 
 > **Por qué existe `bootstrap`:** si el armado de dependencias viviera en el CLI, la app de escritorio tendría que copiarlo. Al separarlo, cualquier interfaz nueva obtiene la lógica completa con una sola línea: `bootstrap::build(config).await?`.
 
@@ -761,7 +761,7 @@ impl ProjectResolver {
     /// Agrupa tareas ya ordenadas. `IndexMap` conserva el orden de inserción, así que
     /// el primer grupo es el del proyecto con la tarea más prioritaria.
     pub fn group<'t>(&self, tasks: &'t [Task]) -> IndexMap<ProjectKey, Vec<&'t Task>> {
-        let mut groups: IndexMap<ProjectKey, Vec<&Task>> = IndexMap::new();
+        elet mut groups: IndexMap<ProjectKey, Vec<&Task>> = IndexMap::new();
         for task in tasks {
             let key = self
                 .resolve(task)
@@ -1337,12 +1337,12 @@ Decisiones:
 - **`Effect` se serializa**: el diario guarda qué efectos se aplicaron, así `session retry` continúa exactamente donde falló.
 - **¿Typestate o enum?** Los Playbooks usan *typestate* (§11.4) porque viven dentro de una sola ejecución y el compilador puede seguir su estado. La sesión se guarda en disco y se recupera en otra ejecución (`start` hoy, `approve` en una hora), así que su estado solo se conoce en tiempo de ejecución. Por eso es un enum con transiciones validadas.
 
-| | Typestate (`PlaybookRun<S>`) | Enum (`SessionState`) |
-| --- | --- | --- |
-| ¿Cuándo se conoce el estado? | Al compilar | Al ejecutar (se lee de disco) |
-| Transición inválida | No compila | `Err(SessionError::InvalidTransition)` |
-| Persistencia | No necesaria | `serde` |
-| Ideal para | Flujos dentro de un proceso | Flujos largos entre ejecuciones |
+|                                | Typestate (`PlaybookRun<S>`) | Enum (`SessionState`)                  |
+| ------------------------------ | ------------------------------ | ---------------------------------------- |
+| ¿Cuándo se conoce el estado? | Al compilar                    | Al ejecutar (se lee de disco)            |
+| Transición inválida          | No compila                     | `Err(SessionError::InvalidTransition)` |
+| Persistencia                   | No necesaria                   | `serde`                                |
+| Ideal para                     | Flujos dentro de un proceso    | Flujos largos entre ejecuciones          |
 
 ## 10. Puertos (traits)
 
@@ -1479,6 +1479,7 @@ where
 ```
 
 `bootstrap` decide si envolver el adaptador: `Arc::new(CachedTaskProvider::new(clickup, fs_cache, ttl)) as Arc<dyn TaskProvider>`. Ni el adaptador de ClickUp ni los casos de uso saben que existe la caché.
+
 ```
 
 ### 10.3 Configuración y secretos
@@ -1717,7 +1718,7 @@ impl<'a> GetTodayTasks<'a> {
         }
 
         let now = self.ctx.clock.now();
-        let scoring = ScoringContext { now, me: &me, projects: &projects };
+        let scoring = ScoringContext { now, offset: self.ctx.clock.offset(), me: &me, projects: &projects };
         self.ctx.policy.rank(&mut tasks, &scoring);
 
         if let Some(limit) = query.limit {
@@ -1923,14 +1924,14 @@ pub enum StepOutput {
 
 `Scope` expone a las plantillas (`minijinja`):
 
-| Variable | Contenido |
-| --- | --- |
-| `inputs.<name>` | Entradas del Playbook |
-| `project.slug`, `project.name`, `project.repo_path` | Datos del proyecto |
-| `steps.<id>.text`, `.lines`, `.json`, `.exit_code` | Salida de un paso anterior |
-| `steps.<id>.tasks`, `.ids` | Colecciones para `for_each` o `select_tasks` |
-| `item` | Elemento actual dentro de `for_each` (por ejemplo `item.title`, `item.url`) |
-| `now` | Fecha y hora de ejecución |
+| Variable                                                   | Contenido                                                                        |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `inputs.<name>`                                          | Entradas del Playbook                                                            |
+| `project.slug`, `project.name`, `project.repo_path`  | Datos del proyecto                                                               |
+| `steps.<id>.text`, `.lines`, `.json`, `.exit_code` | Salida de un paso anterior                                                       |
+| `steps.<id>.tasks`, `.ids`                             | Colecciones para`for_each` o `select_tasks`                                  |
+| `item`                                                   | Elemento actual dentro de`for_each` (por ejemplo `item.title`, `item.url`) |
+| `now`                                                    | Fecha y hora de ejecución                                                       |
 
 #### Eventos de progreso
 
@@ -2580,10 +2581,10 @@ enum ProviderConfig {
 
 Nunca en `config.toml`. Orden de búsqueda: variable de entorno → llavero del sistema (`keyring`) → error con sugerencia.
 
-| Variable | Llavero | Uso |
-| --- | --- | --- |
-| `TASKFLOW_CLICKUP_TOKEN` | `taskflow/clickup_token` | Token personal de ClickUp |
-| `TASKFLOW_ANTHROPIC_API_KEY` | `taskflow/anthropic_api_key` | Clave de la API de IA |
+| Variable                       | Llavero                        | Uso                       |
+| ------------------------------ | ------------------------------ | ------------------------- |
+| `TASKFLOW_CLICKUP_TOKEN`     | `taskflow/clickup_token`     | Token personal de ClickUp |
+| `TASKFLOW_ANTHROPIC_API_KEY` | `taskflow/anthropic_api_key` | Clave de la API de IA     |
 
 En desarrollo se pueden cargar desde `.env` con `dotenvy`; `.env.example` documenta las variables sin valores reales. Los secretos viajan en memoria como `SecretString` (crate `secrecy`), que no se imprime en `Debug` ni en logs.
 
@@ -2665,13 +2666,13 @@ Estoy aprendiendo Rust. Cuando propongas una solución en Rust:
 
 Campos del *front matter*:
 
-| Campo | Valores | Por defecto |
-| --- | --- | --- |
-| `title` | Texto | Nombre del archivo |
-| `role` | `knowledge`, `instruction` | `knowledge` |
-| `usage` | `summary`, `plan`, `agent_prompt`, `playbook` | Todos |
-| `priority` | 0–255, menor = más importante | 100 |
-| `private` | `true`, `false` | `false` |
+| Campo        | Valores                                               | Por defecto        |
+| ------------ | ----------------------------------------------------- | ------------------ |
+| `title`    | Texto                                                 | Nombre del archivo |
+| `role`     | `knowledge`, `instruction`                        | `knowledge`      |
+| `usage`    | `summary`, `plan`, `agent_prompt`, `playbook` | Todos              |
+| `priority` | 0–255, menor = más importante                       | 100                |
+| `private`  | `true`, `false`                                   | `false`          |
 
 La clave de la sección (`SectionKey`) es el nombre del archivo sin prefijo numérico ni extensión: `10-negocio.md` → `negocio`. El prefijo solo ordena los archivos en el explorador.
 
@@ -2698,16 +2699,16 @@ La clave de la sección (`SectionKey`) es el nombre del archivo sin prefijo num�
 
 Cada Playbook es un archivo TOML en `projects/<slug>/playbooks/<name>.toml`.
 
-| Clave del paso | Obligatoria | Descripción |
-| --- | --- | --- |
-| `id` | Sí | Identificador único dentro del Playbook |
-| `kind` | Sí | `shell`, `select_tasks`, `extract_task_ids`, `comment`, `set_status`, `ai`, `confirm`, `custom` |
-| `title` | No | Texto mostrado en el plan y en el progreso |
-| `when` | No | Plantilla que debe evaluar a verdadero para ejecutar el paso |
-| `for_each` | No | `steps.<id>`: repite el paso por cada tarea o elemento |
-| `confirm` | No | Pide confirmación individual antes del paso |
-| `on_error` | No | `stop` (por defecto) o `continue` |
-| `timeout_secs` | No | Tiempo máximo (pasos `shell`); por defecto `playbooks.default_timeout_secs` |
+| Clave del paso   | Obligatoria | Descripción                                                                                                    |
+| ---------------- | ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `id`           | Sí         | Identificador único dentro del Playbook                                                                        |
+| `kind`         | Sí         | `shell`, `select_tasks`, `extract_task_ids`, `comment`, `set_status`, `ai`, `confirm`, `custom` |
+| `title`        | No          | Texto mostrado en el plan y en el progreso                                                                      |
+| `when`         | No          | Plantilla que debe evaluar a verdadero para ejecutar el paso                                                    |
+| `for_each`     | No          | `steps.<id>`: repite el paso por cada tarea o elemento                                                        |
+| `confirm`      | No          | Pide confirmación individual antes del paso                                                                    |
+| `on_error`     | No          | `stop` (por defecto) o `continue`                                                                           |
+| `timeout_secs` | No          | Tiempo máximo (pasos`shell`); por defecto `playbooks.default_timeout_secs`                                 |
 
 ### 15.2 Ejemplo: revisar y desplegar una release
 
@@ -2822,20 +2823,20 @@ hint: run `taskflow playbook check release` after fixing the file
 - **Autenticación:** token personal en el header `Authorization`.
 - **Base URL:** `https://api.clickup.com/api/v2`
 
-| Port method | ClickUp endpoint |
-| --- | --- |
-| `current_user` | `GET /user` |
-| `search_tasks` | `GET /team/{team_id}/task?assignees[]=...&list_ids[]=...&space_ids[]=...&statuses[]=...&tags[]=...&page={n}` |
-| `search_tasks` con `ids` | `GET /task/{task_id}` por cada ID, concurrente con límite |
-| `task` | `GET /task/{task_id}` |
-| `comments` | `GET /task/{task_id}/comment` |
-| `locations` | `GET /team/{team_id}/space` → `GET /space/{space_id}/folder` → `GET /folder/{folder_id}/list` y `GET /space/{space_id}/list` (listas sin carpeta) |
-| `set_status` | `PUT /task/{task_id}` with `{ "status": "<name>" }` |
-| `add_comment` | `POST /task/{task_id}/comment` with `{ "comment_text": "...", "notify_all": false }` |
-| `TimeTracker::start` | `POST /team/{team_id}/time_entries/start` with `{ "tid": "<task_id>" }` |
-| `TimeTracker::stop` | `POST /team/{team_id}/time_entries/stop` |
-| `TimeTracker::current` | `GET /team/{team_id}/time_entries/current` |
-| `available_statuses` | `GET /task/{task_id}` → `list.id` → `GET /list/{list_id}` (campo `statuses`, cada uno con `status` y `type`: open, custom, done, closed) |
+| Port method                  | ClickUp endpoint                                                                                                                                            |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `current_user`             | `GET /user`                                                                                                                                               |
+| `search_tasks`             | `GET /team/{team_id}/task?assignees[]=...&list_ids[]=...&space_ids[]=...&statuses[]=...&tags[]=...&page={n}`                                              |
+| `search_tasks` con `ids` | `GET /task/{task_id}` por cada ID, concurrente con límite                                                                                                |
+| `task`                     | `GET /task/{task_id}`                                                                                                                                     |
+| `comments`                 | `GET /task/{task_id}/comment`                                                                                                                             |
+| `locations`                | `GET /team/{team_id}/space` → `GET /space/{space_id}/folder` → `GET /folder/{folder_id}/list` y `GET /space/{space_id}/list` (listas sin carpeta) |
+| `set_status`               | `PUT /task/{task_id}` with `{ "status": "<name>" }`                                                                                                     |
+| `add_comment`              | `POST /task/{task_id}/comment` with `{ "comment_text": "...", "notify_all": false }`                                                                    |
+| `TimeTracker::start`       | `POST /team/{team_id}/time_entries/start` with `{ "tid": "<task_id>" }`                                                                                 |
+| `TimeTracker::stop`        | `POST /team/{team_id}/time_entries/stop`                                                                                                                  |
+| `TimeTracker::current`     | `GET /team/{team_id}/time_entries/current`                                                                                                                |
+| `available_statuses`       | `GET /task/{task_id}` → `list.id` → `GET /list/{list_id}` (campo `statuses`, cada uno con `status` y `type`: open, custom, done, closed)      |
 
 **Separación interna:**
 
@@ -2877,7 +2878,6 @@ hint: run `taskflow playbook check release` after fixing the file
 
 - La respuesta se deserializa con `serde_json` directamente a `TaskSummary`. Si el JSON es inválido, se reintenta una vez y luego se devuelve `AiError::InvalidResponse`.
 - `complete` (pasos `ai` de Playbooks) devuelve texto libre; su resultado se muestra y puede usarse en plantillas, pero **nunca se ejecuta como comando** (NFR-12).
-
 - **Esquema de salida para `analyze_work`** (reporte de trabajo de la sesión):
 
 ```json
@@ -2896,15 +2896,15 @@ hint: run `taskflow playbook check release` after fixing the file
 
 ## 18. Manejo de errores
 
-| Capa | Tipo | Crate | Ejemplos |
-| --- | --- | --- | --- |
-| `domain` | `DomainError`, `PlaybookIssue`, `SessionError` | `thiserror` | `EmptyTaskId`, `InvalidSlug`, `DuplicateStep`, `UnknownOrLaterStep`, `InvalidTransition { from, command, allowed }`, `NoReport`, `ReportAlreadyPublished` |
-| Puertos | `ProviderError`, `AiError` | `thiserror` | `Unauthorized`, `NotFound`, `RateLimited { retry_after }`, `Network`, `InvalidResponse` |
-| Puertos | `ConfigError`, `SecretError`, `RepoError`, `LoadError` | `thiserror` | `InvalidValue { key, reason }`, `UnknownKey`, `NotFound(path)`, `Invalid(Vec<PlaybookIssue>)` |
-| Puertos | `RunnerError`, `InteractionError` | `thiserror` | `Timeout`, `Cancelled`, `SpawnFailed`, `Aborted` |
-| Puertos | `NotifyError` | `thiserror` | `Unavailable`, `PermissionDenied` |
-| `application` | `AppError`, `StepError` | `thiserror` | Envuelven los anteriores con `#[from]` |
-| Interfaces | `anyhow::Error` | `anyhow` | Agrega contexto: `.context("loading config")` |
+| Capa            | Tipo                                                           | Crate         | Ejemplos                                                                                                                                                                |
+| --------------- | -------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `domain`      | `DomainError`, `PlaybookIssue`, `SessionError`           | `thiserror` | `EmptyTaskId`, `InvalidSlug`, `DuplicateStep`, `UnknownOrLaterStep`, `InvalidTransition { from, command, allowed }`, `NoReport`, `ReportAlreadyPublished` |
+| Puertos         | `ProviderError`, `AiError`                                 | `thiserror` | `Unauthorized`, `NotFound`, `RateLimited { retry_after }`, `Network`, `InvalidResponse`                                                                       |
+| Puertos         | `ConfigError`, `SecretError`, `RepoError`, `LoadError` | `thiserror` | `InvalidValue { key, reason }`, `UnknownKey`, `NotFound(path)`, `Invalid(Vec<PlaybookIssue>)`                                                                   |
+| Puertos         | `RunnerError`, `InteractionError`                          | `thiserror` | `Timeout`, `Cancelled`, `SpawnFailed`, `Aborted`                                                                                                                |
+| Puertos         | `NotifyError`                                                | `thiserror` | `Unavailable`, `PermissionDenied`                                                                                                                                   |
+| `application` | `AppError`, `StepError`                                    | `thiserror` | Envuelven los anteriores con`#[from]`                                                                                                                                 |
+| Interfaces      | `anyhow::Error`                                              | `anyhow`    | Agrega contexto:`.context("loading config")`                                                                                                                          |
 
 Cada adaptador convierte sus errores internos (`reqwest::Error`, `std::io::Error`, códigos HTTP) a errores de su puerto. Así el núcleo nunca ve un error de `reqwest` ni de `tokio::process`.
 
@@ -2944,21 +2944,21 @@ hint: available now: to do, preparado, in progress, Code Review, complete
 
 ## 20. Estrategia de pruebas
 
-| Nivel | Qué se prueba | Herramientas |
-| --- | --- | --- |
-| Unitarias | `WeightedPolicy`, `TaskId::new`, `ProjectSlug`, `ProjectResolver`, `ProjectContext::select`, `Playbook::new` | `#[test]`, `FixedClock` |
-| Propiedades | Slugs válidos siempre parsean; la selección de contexto nunca supera el presupuesto | `proptest` |
-| Casos de uso | Flujos completos con fakes de todos los puertos | `#[tokio::test]`, `FakeTaskProvider`, `FakeSummarizer` |
-| Motor de Playbooks | Orden de pasos, `for_each`, `when`, errores, cancelación, rechazo de confirmaciones | `FakeCommandRunner`, `ScriptedInteraction` |
-| Máquina de estados | Cada par (estado, comando): siguiente estado y efectos esperados; pares inválidos rechazados | Pruebas por tabla; `proptest` con secuencias aleatorias de comandos (nunca dos intervalos abiertos, nunca un estado terminal con contador activo, nunca se publica el reporte sin `PublishReport`) |
-| Servicio de sesión | Fallo de un efecto crítico y reanudación con `session retry`; fallo de notificación no interrumpe | `FakeTimeTracker`, `FakeNotifier` que falla, `FixedClock` |
-| Snapshots | Vista previa de Playbooks, prompts generados, tablas del CLI | `insta` |
-| Adaptadores | Deserialización y mapeo con JSON real guardado | `tests/fixtures/*.json` |
-| Archivos | `config set` conserva comentarios; escritura atómica; front matter | `tempfile` |
-| HTTP | Peticiones, paginación, 401, 429 | `wiremock` |
-| Shell | Timeout, cancelación, salida en vivo, por sistema operativo | `adapter-shell` en la matriz de CI |
-| Contrato | Suite común que todo `TaskProvider` debe pasar | `fn provider_contract<P: TaskProvider>(p: P)` |
-| E2E (manual) | CLI contra una cuenta real de prueba | Feature `e2e`, fuera de CI |
+| Nivel               | Qué se prueba                                                                                                           | Herramientas                                                                                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unitarias           | `WeightedPolicy`, `TaskId::new`, `ProjectSlug`, `ProjectResolver`, `ProjectContext::select`, `Playbook::new` | `#[test]`, `FixedClock`                                                                                                                                                                           |
+| Propiedades         | Slugs válidos siempre parsean; la selección de contexto nunca supera el presupuesto                                    | `proptest`                                                                                                                                                                                          |
+| Casos de uso        | Flujos completos con fakes de todos los puertos                                                                          | `#[tokio::test]`, `FakeTaskProvider`, `FakeSummarizer`                                                                                                                                          |
+| Motor de Playbooks  | Orden de pasos,`for_each`, `when`, errores, cancelación, rechazo de confirmaciones                                  | `FakeCommandRunner`, `ScriptedInteraction`                                                                                                                                                        |
+| Máquina de estados | Cada par (estado, comando): siguiente estado y efectos esperados; pares inválidos rechazados                            | Pruebas por tabla;`proptest` con secuencias aleatorias de comandos (nunca dos intervalos abiertos, nunca un estado terminal con contador activo, nunca se publica el reporte sin `PublishReport`) |
+| Servicio de sesión | Fallo de un efecto crítico y reanudación con`session retry`; fallo de notificación no interrumpe                    | `FakeTimeTracker`, `FakeNotifier` que falla, `FixedClock`                                                                                                                                       |
+| Snapshots           | Vista previa de Playbooks, prompts generados, tablas del CLI                                                             | `insta`                                                                                                                                                                                             |
+| Adaptadores         | Deserialización y mapeo con JSON real guardado                                                                          | `tests/fixtures/*.json`                                                                                                                                                                             |
+| Archivos            | `config set` conserva comentarios; escritura atómica; front matter                                                    | `tempfile`                                                                                                                                                                                          |
+| HTTP                | Peticiones, paginación, 401, 429                                                                                        | `wiremock`                                                                                                                                                                                          |
+| Shell               | Timeout, cancelación, salida en vivo, por sistema operativo                                                             | `adapter-shell` en la matriz de CI                                                                                                                                                                  |
+| Contrato            | Suite común que todo`TaskProvider` debe pasar                                                                         | `fn provider_contract<P: TaskProvider>(p: P)`                                                                                                                                                       |
+| E2E (manual)        | CLI contra una cuenta real de prueba                                                                                     | Feature`e2e`, fuera de CI                                                                                                                                                                           |
 
 La prueba de contrato es especialmente valiosa: cuando se agregue GitHub Issues, se ejecuta la misma suite y se sabe de inmediato si el adaptador cumple el contrato.
 
@@ -2993,93 +2993,93 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 
 ## 23. Mapa de conceptos de Rust
 
-| Concepto | Dónde se aplica |
-| --- | --- |
-| Ownership y borrowing | `&Task`, `&mut [Task]`, `GetTodayTasks<'a>` que toma prestado el contexto |
-| Lifetimes | `pending_comments_for<'a>`, `ScoringContext<'a>`, `ContextSelection<'a>`, `ProjectResolver::group<'t>` |
-| Structs, enums, `match` | Dominio, `ProviderConfig`, `StepKind`, comandos del CLI |
-| Newtypes y constructores validados | `TaskId::new`, `ProjectSlug`, `SectionKey`, `StepId`, `ConfigKey` |
-| `FromStr`, `TryFrom`, `From` | Slugs desde CLI (`clap`), spec TOML → dominio, errores con `#[from]` |
-| Traits y métodos por defecto | Puertos, `PrioritizationPolicy::rank` |
-| Trait objects | `Arc<dyn TaskProvider>`, `Arc<dyn Action>` |
-| Enum dispatch vs `dyn` | `StepKind` (cerrado, exhaustivo) frente a `Action` (abierto, extensible) |
-| Genéricos y trait bounds | `fn provider_contract<P: TaskProvider>`, `PlaybookRun<S>` |
-| Typestate | `PlaybookRun<Planned>` → `PlaybookRun<Approved>` |
-| Máquinas de estados con enums | `SessionState`, `match (estado, comando)` con guardas `if` y patrones `A \| B` |
-| Enums con datos | `StatusTarget::Explicit(StatusName)`, `Publication::Published { at }`, `ReportOutcome::Unavailable { reason }`, `SessionCommand::Finish { status, comment }` |
-| Enum en lugar de `bool` | `Publication::Draft` / `Published { at }`: el estado lleva sus datos |
-| Hacer imposible lo inválido con tipos | `Finish` exige un `StatusName`: no se puede cerrar sin elegir estado |
-| Patrones anidados y guardas | `PostComment(CommentKind::Report)`, `(state, C::PublishReport) if !state.is_terminal()` |
-| Typestate frente a enum | Playbooks (estado conocido al compilar) frente a sesiones (estado leído de disco) |
-| Ownership para expresar fin de vida | `SessionStore::archive(session: WorkSession)` consume la sesión |
-| Genéricos para decoradores | `CachedTaskProvider<P: TaskProvider, C: Cache>` |
-| Composite con trait objects | `MultiNotifier(Vec<Box<dyn Notifier>>)` |
-| Tipos recursivos | `LocationNode { children: Vec<LocationNode> }` |
-| Colecciones | `IndexMap` (orden de inserción), `BTreeMap` (orden por clave), `EnumSet` (bitset) |
-| Traits estándar | `Display`, `Default`, `Ord`, `Hash` |
-| `Option`, `Result`, `?` | Todo el código; `bool::then`, `is_some_and`, `map_or` |
-| Errores tipados | `thiserror` en librerías, `anyhow` en binarios, `Vec<PlaybookIssue>` para errores acumulados |
-| Iteradores y closures | `retain`, `filter_map`, `max_by_key`, `zip`, `sort_by_cached_key` |
-| Async y concurrencia | `tokio`, `try_join_all`, `Semaphore`, `spawn_blocking` |
-| Canales y cancelación | `mpsc` para `RunEvent`, `CancellationToken`, `tokio::select!` |
-| Procesos | `tokio::process::Command`, `kill_on_drop`, timeouts |
-| `Send`, `Sync`, `Arc` | `AppContext` compartido entre hilos |
-| Serde | JSON de APIs, TOML, DTOs, enums etiquetados, front matter |
-| Punteros a función y `static` | Registro de proveedores (`fn` en descriptores) |
-| Workspace y visibilidad | Crates separados, `pub` vs `pub(crate)`, campos privados |
-| Feature flags y `cfg` | `--features github`, `--features e2e`, registro condicional |
-| `#[non_exhaustive]` | Enums públicos de errores, eventos y pasos |
-| Testing | Fakes, fixtures, `wiremock`, `proptest`, `insta`, pruebas de contrato |
-| Macros (avanzado) | `macro_rules!` para registrar adaptadores o acciones |
+| Concepto                               | Dónde se aplica                                                                                                                                                     |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ownership y borrowing                  | `&Task`, `&mut [Task]`, `GetTodayTasks<'a>` que toma prestado el contexto                                                                                      |
+| Lifetimes                              | `pending_comments_for<'a>`, `ScoringContext<'a>`, `ContextSelection<'a>`, `ProjectResolver::group<'t>`                                                       |
+| Structs, enums,`match`               | Dominio,`ProviderConfig`, `StepKind`, comandos del CLI                                                                                                           |
+| Newtypes y constructores validados     | `TaskId::new`, `ProjectSlug`, `SectionKey`, `StepId`, `ConfigKey`                                                                                          |
+| `FromStr`, `TryFrom`, `From`     | Slugs desde CLI (`clap`), spec TOML → dominio, errores con `#[from]`                                                                                            |
+| Traits y métodos por defecto          | Puertos,`PrioritizationPolicy::rank`                                                                                                                               |
+| Trait objects                          | `Arc<dyn TaskProvider>`, `Arc<dyn Action>`                                                                                                                       |
+| Enum dispatch vs`dyn`                | `StepKind` (cerrado, exhaustivo) frente a `Action` (abierto, extensible)                                                                                         |
+| Genéricos y trait bounds              | `fn provider_contract<P: TaskProvider>`, `PlaybookRun<S>`                                                                                                        |
+| Typestate                              | `PlaybookRun<Planned>` → `PlaybookRun<Approved>`                                                                                                                |
+| Máquinas de estados con enums         | `SessionState`, `match (estado, comando)` con guardas `if` y patrones `A \| B`                                                                                |
+| Enums con datos                        | `StatusTarget::Explicit(StatusName)`, `Publication::Published { at }`, `ReportOutcome::Unavailable { reason }`, `SessionCommand::Finish { status, comment }` |
+| Enum en lugar de`bool`               | `Publication::Draft` / `Published { at }`: el estado lleva sus datos                                                                                             |
+| Hacer imposible lo inválido con tipos | `Finish` exige un `StatusName`: no se puede cerrar sin elegir estado                                                                                             |
+| Patrones anidados y guardas            | `PostComment(CommentKind::Report)`, `(state, C::PublishReport) if !state.is_terminal()`                                                                          |
+| Typestate frente a enum                | Playbooks (estado conocido al compilar) frente a sesiones (estado leído de disco)                                                                                   |
+| Ownership para expresar fin de vida    | `SessionStore::archive(session: WorkSession)` consume la sesión                                                                                                   |
+| Genéricos para decoradores            | `CachedTaskProvider<P: TaskProvider, C: Cache>`                                                                                                                    |
+| Composite con trait objects            | `MultiNotifier(Vec<Box<dyn Notifier>>)`                                                                                                                            |
+| Tipos recursivos                       | `LocationNode { children: Vec<LocationNode> }`                                                                                                                     |
+| Colecciones                            | `IndexMap` (orden de inserción), `BTreeMap` (orden por clave), `EnumSet` (bitset)                                                                             |
+| Traits estándar                       | `Display`, `Default`, `Ord`, `Hash`                                                                                                                          |
+| `Option`, `Result`, `?`          | Todo el código;`bool::then`, `is_some_and`, `map_or`                                                                                                          |
+| Errores tipados                        | `thiserror` en librerías, `anyhow` en binarios, `Vec<PlaybookIssue>` para errores acumulados                                                                  |
+| Iteradores y closures                  | `retain`, `filter_map`, `max_by_key`, `zip`, `sort_by_cached_key`                                                                                          |
+| Async y concurrencia                   | `tokio`, `try_join_all`, `Semaphore`, `spawn_blocking`                                                                                                       |
+| Canales y cancelación                 | `mpsc` para `RunEvent`, `CancellationToken`, `tokio::select!`                                                                                                |
+| Procesos                               | `tokio::process::Command`, `kill_on_drop`, timeouts                                                                                                              |
+| `Send`, `Sync`, `Arc`            | `AppContext` compartido entre hilos                                                                                                                                |
+| Serde                                  | JSON de APIs, TOML, DTOs, enums etiquetados, front matter                                                                                                            |
+| Punteros a función y`static`        | Registro de proveedores (`fn` en descriptores)                                                                                                                     |
+| Workspace y visibilidad                | Crates separados,`pub` vs `pub(crate)`, campos privados                                                                                                          |
+| Feature flags y`cfg`                 | `--features github`, `--features e2e`, registro condicional                                                                                                      |
+| `#[non_exhaustive]`                  | Enums públicos de errores, eventos y pasos                                                                                                                          |
+| Testing                                | Fakes, fixtures,`wiremock`, `proptest`, `insta`, pruebas de contrato                                                                                           |
+| Macros (avanzado)                      | `macro_rules!` para registrar adaptadores o acciones                                                                                                               |
 
 ## 24. Roadmap
 
-| Fase | Entregable | Criterio de terminado | Conceptos |
-| --- | --- | --- | --- |
-| 0 | Workspace y CI | `fmt`, `clippy` y `test` pasan en CI | Cargo, workspace, lints |
-| 1 | `domain`: tareas y política | Tests de `WeightedPolicy` con `FixedClock` | Structs, enums, traits, lifetimes |
-| 2 | Puertos y `GetTodayTasks` con fakes | Caso de uso probado sin red | `async_trait`, `Arc<dyn>` |
-| 3 | `adapter-clickup` de lectura | Imprime las tareas reales con su ubicación | `reqwest`, `serde`, `TryFrom`, paginación |
-| 4 | Configuración persistente + `bootstrap` + CLI `today`/`show` | `config init` interactivo deja todo listo; `taskflow today` reemplaza la revisión manual | `toml_edit`, escritura atómica, registro, `dialoguer` |
-| 5 | Proyectos y agrupación | `today --by-project`; `project add` elige listas de ClickUp | `FromStr`, `IndexMap`, tipos recursivos |
-| 6 | Contexto por proyecto + `adapter-anthropic` + `plan` | Resúmenes y prompts usan las secciones; `context preview` | `EnumSet`, lifetimes en selección, prompts, JSON estructurado |
-| 7 | `close` (escritura) | Cerrar una tarea sin abrir ClickUp | Confirmaciones, errores HTTP |
-| 8 | Sesión de trabajo | `start` → reporte → `approve` → `done` con el contador de ClickUp, estados sugeridos y validados por lista, publicación explícita del reporte y notificación de escritorio | Máquina de estados con enums, efectos, `TimeTracker`, `Notifier` |
-| 9 | Playbooks v1 | `release` corre de punta a punta con `shell`, `select_tasks`, `comment`, `set_status`, `confirm`, `--dry-run` | Typestate, enum dispatch, `tokio::process`, canales, `select!` |
-| 10 | Playbooks v2 | Pasos `ai` y `extract_task_ids`, `for_each`/`when`, registro de ejecuciones, acciones `custom`, ganchos de sesión | `minijinja`, `dyn Action`, JSON Lines |
-| 11 | Segundo proveedor (GitHub Issues) | Pasa la suite de contrato sin tocar el núcleo y aparece en el asistente; sesiones con `LocalTimeTracker` | Genéricos, feature flags, objeto nulo |
-| 12 | Caché local | `start` y `plan` reutilizan datos y análisis sin repetir llamadas | Decorador `CachedTaskProvider`, puerto `Cache`, `sqlx` o archivos |
-| 13 | Interfaz gráfica (opcional) | App Tauri con la vista `today`, sesión activa y ejecución de Playbooks | Reutilización de `application`, `Interaction` nativo |
+| Fase | Entregable                                                         | Criterio de terminado                                                                                                                                                                  | Conceptos                                                              |
+| ---- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 0    | Workspace y CI                                                     | `fmt`, `clippy` y `test` pasan en CI                                                                                                                                             | Cargo, workspace, lints                                                |
+| 1    | `domain`: tareas y política                                     | Tests de`WeightedPolicy` con `FixedClock`                                                                                                                                          | Structs, enums, traits, lifetimes                                      |
+| 2    | Puertos y`GetTodayTasks` con fakes                               | Caso de uso probado sin red                                                                                                                                                            | `async_trait`, `Arc<dyn>`                                          |
+| 3    | `adapter-clickup` de lectura                                     | Imprime las tareas reales con su ubicación                                                                                                                                            | `reqwest`, `serde`, `TryFrom`, paginación                       |
+| 4    | Configuración persistente +`bootstrap` + CLI `today`/`show` | `config init` interactivo deja todo listo; `taskflow today` reemplaza la revisión manual                                                                                          | `toml_edit`, escritura atómica, registro, `dialoguer`             |
+| 5    | Proyectos y agrupación                                            | `today --by-project`; `project add` elige listas de ClickUp                                                                                                                        | `FromStr`, `IndexMap`, tipos recursivos                            |
+| 6    | Contexto por proyecto +`adapter-anthropic` + `plan`            | Resúmenes y prompts usan las secciones;`context preview`                                                                                                                            | `EnumSet`, lifetimes en selección, prompts, JSON estructurado       |
+| 7    | `close` (escritura)                                              | Cerrar una tarea sin abrir ClickUp                                                                                                                                                     | Confirmaciones, errores HTTP                                           |
+| 8    | Sesión de trabajo                                                 | `start` → reporte → `approve` → `done` con el contador de ClickUp, estados sugeridos y validados por lista, publicación explícita del reporte y notificación de escritorio | Máquina de estados con enums, efectos,`TimeTracker`, `Notifier`   |
+| 9    | Playbooks v1                                                       | `release` corre de punta a punta con `shell`, `select_tasks`, `comment`, `set_status`, `confirm`, `--dry-run`                                                            | Typestate, enum dispatch,`tokio::process`, canales, `select!`      |
+| 10   | Playbooks v2                                                       | Pasos`ai` y `extract_task_ids`, `for_each`/`when`, registro de ejecuciones, acciones `custom`, ganchos de sesión                                                            | `minijinja`, `dyn Action`, JSON Lines                              |
+| 11   | Segundo proveedor (GitHub Issues)                                  | Pasa la suite de contrato sin tocar el núcleo y aparece en el asistente; sesiones con`LocalTimeTracker`                                                                             | Genéricos, feature flags, objeto nulo                                 |
+| 12   | Caché local                                                       | `start` y `plan` reutilizan datos y análisis sin repetir llamadas                                                                                                                 | Decorador`CachedTaskProvider`, puerto `Cache`, `sqlx` o archivos |
+| 13   | Interfaz gráfica (opcional)                                       | App Tauri con la vista`today`, sesión activa y ejecución de Playbooks                                                                                                              | Reutilización de`application`, `Interaction` nativo               |
 
 ## 25. Registro de decisiones (ADR)
 
-| ID | Decisión | Motivo |
-| --- | --- | --- |
-| ADR-001 | Arquitectura hexagonal | Independencia de proveedor e interfaz (NFR-01 a NFR-03) |
-| ADR-002 | `async_trait` en puertos | Los `async fn` nativos en traits no son compatibles con `dyn` |
-| ADR-003 | `Arc<dyn>` en `AppContext` | Compartir el contexto entre hilos en futuras interfaces |
-| ADR-004 | Crate `bootstrap` separado | Evitar duplicar el armado de dependencias entre interfaces |
-| ADR-005 | DTOs serializables en la frontera | Mismo resultado para terminal, JSON, Tauri y web |
-| ADR-006 | Tauri como opción de escritorio | Backend en Rust que reutiliza `application` directamente |
-| ADR-007 | TOML + `toml_edit` para la configuración | Legible, versionable y editable sin perder comentarios (FR-21) |
-| ADR-008 | Secretos en llavero con prioridad de variables de entorno | Nada sensible en disco en texto plano; compatible con CI (NFR-04) |
-| ADR-009 | Registro estático de descriptores de proveedor | Una sola fuente para el asistente y la construcción (NFR-17) |
-| ADR-010 | Contexto en Markdown con front matter TOML, secciones abiertas | Fácil de escribir y versionar; sin parser YAML adicional |
-| ADR-011 | Selección de contexto en `domain` | Regla de negocio pura, probable con `proptest` |
-| ADR-012 | Playbooks declarativos en TOML, sin lenguaje de scripting en v1 | Pasos explícitos, auditables y validables antes de ejecutar |
-| ADR-013 | Enum dispatch para pasos integrados + `trait Action` para extensión | Exhaustividad del compilador y apertura controlada (NFR-18) |
-| ADR-014 | Typestate para aprobar Playbooks | La confirmación (FR-46) la garantiza el compilador, no la disciplina |
-| ADR-015 | Puerto `Interaction` implementado por la interfaz | Decisiones a mitad de ejecución sin acoplar la aplicación a la terminal |
-| ADR-016 | Eventos por `mpsc` en lugar de imprimir | Misma ejecución para CLI, Tauri y registro en archivo |
-| ADR-017 | `minijinja` para plantillas | Sintaxis conocida, sin I/O, permite listar variables no declaradas para validar |
-| ADR-018 | Sesión de trabajo como enum de estados, no typestate | El estado se lee de disco entre ejecuciones; solo se conoce en tiempo de ejecución |
-| ADR-019 | El dominio devuelve efectos y la aplicación los ejecuta con un diario | Lógica pura y fácil de probar; reintentos sin repetir lo ya hecho (NFR-21) |
-| ADR-020 | `TimeTracker` y `Notifier` como puertos separados de `TaskProvider` | Segregación de interfaces; proveedores sin contador usan `LocalTimeTracker` |
-| ADR-021 | Caché como decorador genérico de `TaskProvider` | Se activa en `bootstrap` sin cambiar adaptadores ni casos de uso |
-| ADR-022 | `serde` permitido en `domain` solo como derive | Persistir la sesión sin duplicar tipos; el dominio sigue sin I/O |
+| ID      | Decisión                                                                   | Motivo                                                                                         |
+| ------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| ADR-001 | Arquitectura hexagonal                                                      | Independencia de proveedor e interfaz (NFR-01 a NFR-03)                                        |
+| ADR-002 | `async_trait` en puertos                                                  | Los`async fn` nativos en traits no son compatibles con `dyn`                               |
+| ADR-003 | `Arc<dyn>` en `AppContext`                                              | Compartir el contexto entre hilos en futuras interfaces                                        |
+| ADR-004 | Crate`bootstrap` separado                                                 | Evitar duplicar el armado de dependencias entre interfaces                                     |
+| ADR-005 | DTOs serializables en la frontera                                           | Mismo resultado para terminal, JSON, Tauri y web                                               |
+| ADR-006 | Tauri como opción de escritorio                                            | Backend en Rust que reutiliza`application` directamente                                      |
+| ADR-007 | TOML +`toml_edit` para la configuración                                  | Legible, versionable y editable sin perder comentarios (FR-21)                                 |
+| ADR-008 | Secretos en llavero con prioridad de variables de entorno                   | Nada sensible en disco en texto plano; compatible con CI (NFR-04)                              |
+| ADR-009 | Registro estático de descriptores de proveedor                             | Una sola fuente para el asistente y la construcción (NFR-17)                                  |
+| ADR-010 | Contexto en Markdown con front matter TOML, secciones abiertas              | Fácil de escribir y versionar; sin parser YAML adicional                                      |
+| ADR-011 | Selección de contexto en`domain`                                         | Regla de negocio pura, probable con`proptest`                                                |
+| ADR-012 | Playbooks declarativos en TOML, sin lenguaje de scripting en v1             | Pasos explícitos, auditables y validables antes de ejecutar                                   |
+| ADR-013 | Enum dispatch para pasos integrados +`trait Action` para extensión       | Exhaustividad del compilador y apertura controlada (NFR-18)                                    |
+| ADR-014 | Typestate para aprobar Playbooks                                            | La confirmación (FR-46) la garantiza el compilador, no la disciplina                          |
+| ADR-015 | Puerto`Interaction` implementado por la interfaz                          | Decisiones a mitad de ejecución sin acoplar la aplicación a la terminal                      |
+| ADR-016 | Eventos por`mpsc` en lugar de imprimir                                    | Misma ejecución para CLI, Tauri y registro en archivo                                         |
+| ADR-017 | `minijinja` para plantillas                                               | Sintaxis conocida, sin I/O, permite listar variables no declaradas para validar                |
+| ADR-018 | Sesión de trabajo como enum de estados, no typestate                       | El estado se lee de disco entre ejecuciones; solo se conoce en tiempo de ejecución            |
+| ADR-019 | El dominio devuelve efectos y la aplicación los ejecuta con un diario      | Lógica pura y fácil de probar; reintentos sin repetir lo ya hecho (NFR-21)                   |
+| ADR-020 | `TimeTracker` y `Notifier` como puertos separados de `TaskProvider`   | Segregación de interfaces; proveedores sin contador usan`LocalTimeTracker`                  |
+| ADR-021 | Caché como decorador genérico de`TaskProvider`                          | Se activa en`bootstrap` sin cambiar adaptadores ni casos de uso                              |
+| ADR-022 | `serde` permitido en `domain` solo como derive                          | Persistir la sesión sin duplicar tipos; el dominio sigue sin I/O                              |
 | ADR-023 | Estados del flujo como sugerencias + elección validada en cada transición | Los estados cambian por lista y con el tiempo; nada queda fijo en código ni en configuración |
-| ADR-024 | Publicar el reporte es un comando explícito (`PublishReport`) | El reporte es un borrador de trabajo; el usuario decide qué y cuándo se comparte |
-| ADR-025 | Solo `done` (usuario) lleva la sesión a `Closed` | El usuario es quien declara terminada una tarea; el agente no cierra nada |
+| ADR-024 | Publicar el reporte es un comando explícito (`PublishReport`)            | El reporte es un borrador de trabajo; el usuario decide qué y cuándo se comparte             |
+| ADR-025 | Solo`done` (usuario) lleva la sesión a `Closed`                        | El usuario es quien declara terminada una tarea; el agente no cierra nada                      |
 
 ## 26. Decisiones abiertas
 
@@ -3097,39 +3097,39 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 
 ### Decisiones tomadas
 
-| Fecha | Tema | Resolución |
-| --- | --- | --- |
-| 2026-10-10 | Estados del flujo | Son variables: dependen de la lista de cada tarea (por ejemplo "Code Review" o "Ready For Testing") y pueden cambiar en cualquier momento. La configuración guarda solo sugerencias; el estado se elige y valida en cada transición (FR-67, FR-70, ADR-023). |
-| 2026-10-10 | Quién indica que la tarea terminó | Siempre el usuario, de forma explícita con `taskflow done` (FR-61, ADR-025). |
-| 2026-10-10 | Publicación del reporte | Queda como borrador local; se publica solo de forma explícita con `taskflow report publish`, antes de cerrar la tarea (FR-71, ADR-024). |
+| Fecha      | Tema                                | Resolución                                                                                                                                                                                                                                                    |
+| ---------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-10 | Estados del flujo                   | Son variables: dependen de la lista de cada tarea (por ejemplo "Code Review" o "Ready For Testing") y pueden cambiar en cualquier momento. La configuración guarda solo sugerencias; el estado se elige y valida en cada transición (FR-67, FR-70, ADR-023). |
+| 2026-10-10 | Quién indica que la tarea terminó | Siempre el usuario, de forma explícita con`taskflow done` (FR-61, ADR-025).                                                                                                                                                                                 |
+| 2026-10-10 | Publicación del reporte            | Queda como borrador local; se publica solo de forma explícita con`taskflow report publish`, antes de cerrar la tarea (FR-71, ADR-024).                                                                                                                      |
 
 ## 27. Glosario
 
-| Término | Definición |
-| --- | --- |
-| Puerto | Trait que define lo que el núcleo necesita o lo que ofrece |
-| Adaptador | Implementación concreta de un puerto para una tecnología |
-| Caso de uso | Operación de la aplicación invocada por una interfaz |
-| Composition root | Único lugar donde se crean y conectan las dependencias (`bootstrap`) |
-| DTO | Estructura de datos serializable que cruza la frontera hacia las interfaces |
-| Dispatch dinámico | Resolución del método en ejecución mediante `dyn Trait` |
-| Enum dispatch | Resolución del comportamiento con un `match` sobre un enum cerrado |
-| Typestate | Codificar el estado de un objeto en su tipo para que el compilador impida operaciones inválidas |
-| Fake | Implementación de prueba de un trait con datos controlados |
-| Prueba de contrato | Suite común que valida que cualquier implementación de un trait se comporta igual |
-| Proyecto | Cliente o proyecto de trabajo; agrupa tareas mediante reglas sobre ubicaciones del proveedor |
-| Ubicación | Posición de una tarea en la jerarquía del proveedor (espacio, carpeta, lista, repositorio) |
-| Sección de contexto | Archivo Markdown que describe un aspecto del proyecto (conocimiento) o indica a la IA cómo responder (instrucción) |
-| Presupuesto de contexto | Máximo de caracteres de contexto enviados a la IA por llamada |
-| Playbook | Secuencia con nombre de pasos explícitos que automatiza un proceso operativo de un proyecto |
-| Paso | Unidad de un Playbook: comando, consulta, comentario, cambio de estado, IA o confirmación |
-| Acción nativa | Paso implementado en Rust mediante el trait `Action` |
-| Descriptor de proveedor | Metadatos estáticos de un proveedor: campos que pide el asistente y cómo se construye |
-| Sesión de trabajo | Seguimiento de una tarea desde `start` hasta `done`: contador, análisis, aprobación y cierre |
-| Reporte de trabajo | Resultado del análisis de la IA: qué hacer, criterios, pasos, riesgos, preguntas y prompt del agente |
-| Luz verde | Aprobación explícita del reporte (`taskflow approve`) que pasa la tarea al estado de trabajo |
-| Efecto | Operación externa (contador, estado, notificación) que el dominio solicita y la aplicación ejecuta |
-| Diario de efectos | Registro de efectos aplicados, pendientes y fallidos de una sesión; base de `session retry` |
-| Decorador | Implementación de un trait que envuelve otra y le agrega comportamiento (por ejemplo, caché) |
-| Estado sugerido | Estado del proveedor propuesto por la configuración para una etapa; se usa solo si existe en la lista de la tarea |
-| Borrador del reporte | Reporte de trabajo guardado en local, editable, que solo se publica con `report publish` |
+| Término                | Definición                                                                                                          |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Puerto                  | Trait que define lo que el núcleo necesita o lo que ofrece                                                          |
+| Adaptador               | Implementación concreta de un puerto para una tecnología                                                           |
+| Caso de uso             | Operación de la aplicación invocada por una interfaz                                                               |
+| Composition root        | Único lugar donde se crean y conectan las dependencias (`bootstrap`)                                              |
+| DTO                     | Estructura de datos serializable que cruza la frontera hacia las interfaces                                          |
+| Dispatch dinámico      | Resolución del método en ejecución mediante`dyn Trait`                                                          |
+| Enum dispatch           | Resolución del comportamiento con un`match` sobre un enum cerrado                                                 |
+| Typestate               | Codificar el estado de un objeto en su tipo para que el compilador impida operaciones inválidas                     |
+| Fake                    | Implementación de prueba de un trait con datos controlados                                                          |
+| Prueba de contrato      | Suite común que valida que cualquier implementación de un trait se comporta igual                                  |
+| Proyecto                | Cliente o proyecto de trabajo; agrupa tareas mediante reglas sobre ubicaciones del proveedor                         |
+| Ubicación              | Posición de una tarea en la jerarquía del proveedor (espacio, carpeta, lista, repositorio)                         |
+| Sección de contexto    | Archivo Markdown que describe un aspecto del proyecto (conocimiento) o indica a la IA cómo responder (instrucción) |
+| Presupuesto de contexto | Máximo de caracteres de contexto enviados a la IA por llamada                                                       |
+| Playbook                | Secuencia con nombre de pasos explícitos que automatiza un proceso operativo de un proyecto                         |
+| Paso                    | Unidad de un Playbook: comando, consulta, comentario, cambio de estado, IA o confirmación                           |
+| Acción nativa          | Paso implementado en Rust mediante el trait`Action`                                                                |
+| Descriptor de proveedor | Metadatos estáticos de un proveedor: campos que pide el asistente y cómo se construye                              |
+| Sesión de trabajo      | Seguimiento de una tarea desde`start` hasta `done`: contador, análisis, aprobación y cierre                    |
+| Reporte de trabajo      | Resultado del análisis de la IA: qué hacer, criterios, pasos, riesgos, preguntas y prompt del agente               |
+| Luz verde               | Aprobación explícita del reporte (`taskflow approve`) que pasa la tarea al estado de trabajo                     |
+| Efecto                  | Operación externa (contador, estado, notificación) que el dominio solicita y la aplicación ejecuta                |
+| Diario de efectos       | Registro de efectos aplicados, pendientes y fallidos de una sesión; base de`session retry`                        |
+| Decorador               | Implementación de un trait que envuelve otra y le agrega comportamiento (por ejemplo, caché)                       |
+| Estado sugerido         | Estado del proveedor propuesto por la configuración para una etapa; se usa solo si existe en la lista de la tarea   |
+| Borrador del reporte    | Reporte de trabajo guardado en local, editable, que solo se publica con`report publish`                            |

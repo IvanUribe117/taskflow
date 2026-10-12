@@ -36,7 +36,6 @@ impl TaskView {
             pending_comments: task.pending_comments_for(me).count(),
             url: task.url.clone(),
         }
-        // todo!("Fase 2: construir la vista a partir de la tarea")
     }
 }
 
@@ -55,7 +54,6 @@ impl From<&Project> for ProjectView {
             name: project.name.clone(),
             kind: project.kind.to_string(),
         }
-        // todo!("Fase 2: construir la vista a partir del proyecto")
     }
 }
 
@@ -70,7 +68,13 @@ impl TaskGroup {
     /// Un único grupo sin proyecto, con todas las tareas en el mismo orden.
     #[must_use]
     pub fn flat(tasks: &[Task], me: &UserId, now: DateTime<Utc>) -> Self {
-        todo!("Fase 2: grupo sin proyecto con todas las tareas")
+        Self {
+            project: None,
+            tasks: tasks
+                .iter()
+                .map(|task| TaskView::from_task(task, me, now))
+                .collect(),
+        }
     }
 
     /// Grupo de un proyecto. Con `ProjectKey::Unassigned`, o si el slug no existe en
@@ -83,7 +87,17 @@ impl TaskGroup {
         me: &UserId,
         now: DateTime<Utc>,
     ) -> Self {
-        todo!("Fase 2: grupo de un proyecto")
+        let project = match key {
+            ProjectKey::Project(slug) => projects.get(slug).map(ProjectView::from),
+            ProjectKey::Unassigned => None,
+        };
+        Self {
+            project,
+            tasks: tasks
+                .iter()
+                .map(|&task| TaskView::from_task(task, me, now))
+                .collect(),
+        }
     }
 }
 

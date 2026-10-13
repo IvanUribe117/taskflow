@@ -89,6 +89,7 @@ impl TaskProvider for ClickUpProvider {
             .comments
             .into_iter()
             .map(Comment::try_from)
+            .rev()
             .collect::<Result<Vec<_>, _>>()?;
         Ok(comments)
     }

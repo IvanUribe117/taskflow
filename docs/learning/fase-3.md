@@ -1,11 +1,11 @@
-TODO(fase 2)TODO(fase 2)TODO(fase 2)TODO(fase 2)TODO(fase 2)TODO(fase 2)TODO(fase 2)TODO(fase 2)TODO(fase 2)n/src/lib.rsn/src/lib.rsn/src/lib.rsn/src/lib.rsn/src/lib.rscrates/application/src/lib.rs.hay mejor manera de No# Fase 3: adaptador de ClickUp (lectura)
+# Fase 3: adaptador de ClickUp (lectura)
 
 Objetivo del roadmap (§24): *"`adapter-clickup` de lectura: imprime las tareas reales con su ubicación"*.
 
 Al terminar, este comando mostrará **tus tareas reales de ClickUp**, priorizadas por el `GetTodayTasks` que escribiste en la fase 2:
 
 ```sh
-
+cargo run -p adapter-clickup --example today
 ```
 
 El caso de uso no cambia ni una línea: solo se enchufa un `TaskProvider` real donde antes estaba el fake. Esa es la promesa de la arquitectura hexagonal, y en esta fase la vas a ver cumplirse.

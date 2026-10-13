@@ -1,6 +1,14 @@
 [workspace]
 resolver = "3"
-members = ["crates/domain", "crates/application", "crates/adapters/clickup"]
+members = [
+    "crates/domain",
+    "crates/application",
+    "crates/adapters/clickup",
+    "crates/adapters/fs",
+    "crates/adapters/keyring",
+    "crates/bootstrap",
+    "apps/cli",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,9 +20,12 @@ publish = false
 # Crates internos: se declaran una vez y cada crate los usa con `domain.workspace = true`.
 domain = { path = "crates/domain" }
 application = { path = "crates/application" }
+adapter-clickup = { path = "crates/adapters/clickup" }
+adapter-fs = { path = "crates/adapters/fs" }
+adapter-keyring = { path = "crates/adapters/keyring" }
+bootstrap = { path = "crates/bootstrap" }
 
 async-trait = "0.1"
-dotenvy = "0.15"
 futures = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +35,17 @@ wiremock = "0.6"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 indexmap = "2"
 thiserror = "2"
+# Fase 4
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+comfy-table = "7"
+dialoguer = "0.11"
+directories = "6"
+keyring = "3"
+secrecy = "0.10"
+tempfile = "3"
+toml = "0.9"
+toml_edit = "0.23"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

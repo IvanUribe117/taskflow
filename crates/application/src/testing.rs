@@ -11,7 +11,10 @@ use domain::project::Project;
 use domain::task::{Comment, Task, TaskId, UserId};
 
 use crate::AppContext;
-use crate::ports::{Clock, ProjectRepository, ProviderError, RepoError, TaskProvider, TaskQuery};
+use crate::ports::{
+    Clock, ExposeSecret, ProjectRepository, ProviderError, RepoError, SecretError, SecretName,
+    SecretStore, SecretString, TaskProvider, TaskQuery,
+};
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
 #[derive(Debug, Clone, Copy)]
@@ -168,4 +171,40 @@ pub fn context(
         clock: Arc::new(clock),
     };
     (ctx, tasks)
+}
+
+/// Almacén de secretos en memoria.
+#[derive(Debug, Default)]
+pub struct MemorySecretStore {
+    values: Mutex<HashMap<SecretName, String>>,
+}
+
+impl MemorySecretStore {
+    #[must_use]
+    pub fn with(self, name: SecretName, value: &str) -> Self {
+        self.values
+            .lock()
+            .expect("lock")
+            .insert(name, value.to_owned());
+        self
+    }
+
+    /// El valor guardado, para verificarlo en los tests.
+    pub fn value(&self, name: SecretName) -> Option<String> {
+        self.values.lock().expect("lock").get(&name).cloned()
+    }
+}
+
+impl SecretStore for MemorySecretStore {
+    fn get(&self, name: SecretName) -> Result<Option<SecretString>, SecretError> {
+        Ok(self.value(name).map(SecretString::from))
+    }
+
+    fn set(&self, name: SecretName, value: SecretString) -> Result<(), SecretError> {
+        self.values
+            .lock()
+            .expect("lock")
+            .insert(name, value.expose_secret().to_owned());
+        Ok(())
+    }
 }

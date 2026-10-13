@@ -96,7 +96,6 @@ impl ClickUpClient {
 
         serde_json::from_str::<T>(&body)
             .map_err(|e| ProviderError::InvalidResponse(format!("{path}: {e}")))
-
     }
 }
 

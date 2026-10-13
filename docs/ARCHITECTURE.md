@@ -1,12 +1,14 @@
 # Taskflow — Documento de arquitectura de software
 
-*Versión 0.5 · 2026-10-10 · Estado: borrador*
+*Versión 0.6 · 2026-10-13 · Estado: borrador*
 
 > **Cambios en 0.3:** configuración persistente con asistente interactivo, proyectos (cliente/proyecto) y agrupación de tareas, contexto por proyecto en secciones abiertas, automatizaciones con **Playbooks** y patrones de diseño de Rust asociados.
 >
 > **Cambios en 0.4:** sesión de trabajo (`taskflow start`): contador de tiempo, análisis con IA, reporte de trabajo, estados por etapa, luz verde, notificaciones y cierre. Modelada como máquina de estados con enums que devuelve efectos.
 >
 > **Cambios en 0.5:** estados del flujo variables (sugerencias + elección y validación por tarea), cierre siempre explícito del usuario, reporte como borrador local con publicación explícita.
+>
+> **Cambios en 0.6:** los descriptores de proveedores viven en `bootstrap`, no en cada adaptador, para evitar un ciclo de dependencias (ADR-026).
 
 ## 1. Propósito del documento
 
@@ -462,14 +464,14 @@ taskflow/
 │   │   ├── context.rs            # AppContext
 │   │   └── error.rs              # AppError
 │   ├── adapters/
-│   │   ├── clickup/src/          # client.rs, api_types.rs, mapper.rs, provider.rs, time_tracker.rs, descriptor.rs
-│   │   ├── anthropic/src/        # client.rs, prompts.rs, summarizer.rs, descriptor.rs
+│   │   ├── clickup/src/          # client.rs, api_types.rs, mapper.rs, provider.rs, time_tracker.rs
+│   │   ├── anthropic/src/        # client.rs, prompts.rs, summarizer.rs
 │   │   ├── fs/src/               # config_store.rs, projects.rs, context.rs, playbooks.rs,
 │   │   │                         # front_matter.rs, atomic.rs, run_log.rs, specs.rs, session_store.rs, cache.rs
 │   │   ├── shell/src/            # runner.rs, shell_kind.rs
 │   │   ├── keyring/src/          # secret_store.rs
 │   │   └── notify/src/           # desktop.rs, terminal.rs, multi.rs
-│   └── bootstrap/src/            # registry.rs, config.rs, build.rs
+│   └── bootstrap/src/            # registry.rs, build.rs, un descriptor por proveedor (clickup.rs, ...)
 ├── apps/
 │   └── cli/src/                  # main.rs, args.rs, commands/, wizards/, interaction.rs, presenter/
 ├── templates/                    # plantillas de contexto y Playbooks (incluidas con include_str!)
@@ -2557,12 +2559,14 @@ pub struct TaskProviderDescriptor {
 pub fn task_providers() -> &'static [TaskProviderDescriptor] {
     &[
         #[cfg(feature = "clickup")]
-        adapter_clickup::DESCRIPTOR,
+        clickup::DESCRIPTOR,           // crates/bootstrap/src/clickup.rs
         #[cfg(feature = "github")]
-        adapter_github::DESCRIPTOR,
+        github::DESCRIPTOR,
     ]
 }
 ```
+
+Los descriptores viven en `bootstrap` y no en cada adaptador (ADR-026): el descriptor usa tipos de `bootstrap` (`BuildError`, `FieldSpec`), y si `adapter-clickup` dependiera de `bootstrap` mientras `bootstrap` depende de `adapter-clickup`, habría un ciclo. Cargo no permite dependencias circulares entre crates.
 
 El asistente recorre `fields` sin saber qué proveedor es. `bootstrap::build` usa el mismo descriptor para construir el adaptador: una sola fuente de verdad (NFR-17).
 
@@ -2843,7 +2847,6 @@ hint: run `taskflow playbook check release` after fixing the file
 - `api_types.rs`: structs que reflejan el JSON de ClickUp tal cual (`#[derive(Deserialize)]`, `#[serde(rename = "...")]`).
 - `mapper.rs`: `impl TryFrom<ApiTask> for Task`. Aquí vive toda la traducción, incluido el mapeo de estados desde la configuración y la construcción de `TaskLocation` a partir de `space`, `folder` y `list` de la tarea.
 - `provider.rs`: `impl TaskProvider for ClickUpProvider`.
-- `descriptor.rs`: `DESCRIPTOR` para el registro (campos del asistente y función de construcción).
 - `time_tracker.rs`: `impl TimeTracker for ClickUpTimeTracker`. ClickUp permite un solo contador activo por usuario; `start` verifica `current` antes de iniciar para no pisar otro contador.
 
 **Consideraciones:**
@@ -3088,6 +3091,7 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 | ADR-023 | Estados del flujo como sugerencias + elección validada en cada transición | Los estados cambian por lista y con el tiempo; nada queda fijo en código ni en configuración |
 | ADR-024 | Publicar el reporte es un comando explícito (`PublishReport`)            | El reporte es un borrador de trabajo; el usuario decide qué y cuándo se comparte             |
 | ADR-025 | Solo`done` (usuario) lleva la sesión a `Closed`                        | El usuario es quien declara terminada una tarea; el agente no cierra nada                      |
+| ADR-026 | Descriptores de proveedores en `bootstrap`, no en los adaptadores        | Evita el ciclo `adapter → bootstrap → adapter`; los adaptadores no conocen el registro          |
 
 ## 26. Decisiones abiertas
 

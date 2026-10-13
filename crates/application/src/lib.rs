@@ -9,6 +9,7 @@ pub mod context;
 pub mod dto;
 pub mod error;
 pub mod ports;
+pub mod settings;
 pub mod tasks;
 
 pub use context::AppContext;

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use domain::project::Project;
 use thiserror::Error;
 
-/// Proyectos definidos por el usuario. En la fase 4 lo implementa `adapter-fs`
+/// Proyectos definidos por el usuario. En la fase 5 lo implementa `adapter-fs`
 /// leyendo `projects/<slug>/project.toml`.
 #[async_trait]
 pub trait ProjectRepository: Send + Sync {

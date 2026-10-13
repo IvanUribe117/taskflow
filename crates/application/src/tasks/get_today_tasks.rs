@@ -4,12 +4,15 @@ use domain::policy::ScoringContext;
 use domain::project::{ProjectResolver, ProjectSlug};
 use domain::task::Status;
 use futures::future::try_join_all;
+use serde::{Deserialize, Serialize};
 
 use crate::dto::{TaskGroup, TodayReport};
 use crate::ports::TaskQuery;
 use crate::{AppContext, AppError};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// En `config.toml` (`ui.group_by`) se escribe en minúsculas: `"none"` o `"project"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum GroupBy {
     #[default]
     None,

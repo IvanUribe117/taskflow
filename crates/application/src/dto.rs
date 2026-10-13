@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use domain::project::{Project, ProjectKey, ProjectResolver};
-use domain::task::{Task, UserId};
+use domain::task::{Comment, Task, UserId};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -105,6 +105,73 @@ impl TaskGroup {
 pub struct TodayReport {
     pub generated_at: DateTime<Utc>,
     pub groups: Vec<TaskGroup>,
+}
+
+/// Detalle de una tarea para `show` (UC-03). En la fase 6 se suma el resumen de la IA.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TaskDetail {
+    pub task: TaskView,
+    pub description: Option<String>,
+    /// Ruta legible, de la raíz a la lista: `["90110001", "Backend", "ACME – Sprint"]`.
+    /// Cada tramo usa su nombre o, si no tiene (el espacio de `ClickUp`), su id.
+    pub location: Vec<String>,
+    pub tags: Vec<String>,
+    pub project: Option<ProjectView>,
+    /// En el mismo orden en que los entrega el proveedor.
+    pub comments: Vec<CommentView>,
+}
+
+impl TaskDetail {
+    /// `task.comments` ya debe tener los comentarios cargados.
+    #[must_use]
+    pub fn new(task: &Task, project: Option<&Project>, me: &UserId, now: DateTime<Utc>) -> Self {
+        Self {
+            task: TaskView::from_task(task, me, now),
+            description: task.description.clone(),
+            location: task
+                .location
+                .segments()
+                .iter()
+                .map(|s| {
+                    if s.name.is_empty() {
+                        s.id.clone()
+                    } else {
+                        s.name.clone()
+                    }
+                })
+                .collect(),
+            tags: task.tags.clone(),
+            project: project.map(ProjectView::from),
+            comments: task
+                .comments
+                .iter()
+                .map(|c| CommentView::new(c, me))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CommentView {
+    pub author: String,
+    pub body: String,
+    pub created_at: DateTime<Utc>,
+    pub resolved: bool,
+    /// Asignado a `me`: lo que la interfaz resalta como pendiente.
+    pub assigned_to_me: bool,
+}
+
+impl CommentView {
+    #[must_use]
+    pub fn new(comment: &Comment, me: &UserId) -> Self {
+        Self {
+            author: comment.author.clone(),
+            body: comment.body.clone(),
+            created_at: comment.created_at,
+            resolved: comment.resolved,
+            assigned_to_me: comment.assignee.as_ref() == Some(me),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -217,6 +284,65 @@ mod tests {
 
         assert_eq!(group.project, None);
         assert_eq!(group.tasks.len(), 1);
+    }
+
+    #[test]
+    fn comment_view_marks_comments_assigned_to_me() {
+        let me = user("me");
+        let mut mine = comment(Some(&me), false);
+        mine.author = "Client PM".into();
+        mine.body = "can you check?".into();
+
+        let view = CommentView::new(&mine, &me);
+
+        assert_eq!(
+            view,
+            CommentView {
+                author: "Client PM".into(),
+                body: "can you check?".into(),
+                created_at: at("2026-10-01T00:00:00Z"),
+                resolved: false,
+                assigned_to_me: true,
+            }
+        );
+        assert!(!CommentView::new(&comment(Some(&user("other")), false), &me).assigned_to_me);
+        assert!(!CommentView::new(&comment(None, false), &me).assigned_to_me);
+    }
+
+    #[test]
+    fn task_detail_maps_every_field() {
+        let me = user("me");
+        let mut t = task("86b2x1abc");
+        t.description = Some("Totals differ by one cent".into());
+        t.tags = vec!["backend".into()];
+        t.location = domain::task::TaskLocation::new(vec![
+            domain::task::LocationSegment {
+                level: LocationLevel::Space,
+                id: "S1".into(),
+                name: String::new(),
+            },
+            domain::task::LocationSegment {
+                level: LocationLevel::List,
+                id: "L1".into(),
+                name: "Sprint".into(),
+            },
+        ]);
+        t.comments = vec![comment(Some(&me), false), comment(None, true)];
+        let p = project("acme", vec![]);
+
+        let detail = TaskDetail::new(&t, Some(&p), &me, at(NOW));
+
+        assert_eq!(detail.task, TaskView::from_task(&t, &me, at(NOW)));
+        assert_eq!(
+            detail.description.as_deref(),
+            Some("Totals differ by one cent")
+        );
+        assert_eq!(detail.location, ["S1", "Sprint"]);
+        assert_eq!(detail.tags, ["backend"]);
+        assert_eq!(detail.project, Some(ProjectView::from(&p)));
+        assert_eq!(detail.comments.len(), 2);
+        assert!(detail.comments[0].assigned_to_me);
+        assert!(detail.comments[1].resolved);
     }
 
     #[test]

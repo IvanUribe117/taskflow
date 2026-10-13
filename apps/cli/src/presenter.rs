@@ -139,12 +139,30 @@ pub fn json<T: Serialize>(value: &T) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(value)
 }
 
-/// Una fila de la tabla de `today`. Ya está hecha: úsala como ejemplo de `comfy-table`.
+/// Máximo de caracteres del título en la tabla de `today`. `show` muestra el título completo.
+const TITLE_WIDTH: usize = 50;
+
+/// `text` con como máximo `max` caracteres. Si es más largo, se corta y termina en `…`
+/// (que cuenta como uno de los `max`).
+///
+/// Cuenta **caracteres** (`chars`), no bytes: "Revisión" tiene 8 caracteres pero 9 bytes,
+/// porque la `ó` ocupa dos en UTF-8. Cortar por bytes (`&text[..max]`) puede caer en
+/// medio de una letra, y Rust hace panic en ese caso.
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut short: String = text.chars().take(max.saturating_sub(1)).collect();
+    short.push('…');
+    short
+}
+
+/// Una fila de la tabla de `today`.
 fn row(number: usize, task: &TaskView, offset: FixedOffset, today: NaiveDate) -> Vec<String> {
     vec![
         number.to_string(),
         task.id.clone(),
-        task.title.clone(),
+        truncate(&task.title, TITLE_WIDTH),
         task.status.clone(),
         task.priority.clone(),
         due_label(task.due, offset, today),
@@ -332,6 +350,54 @@ mod tests {
         assert!(text.contains("Sin descripción."), "{text}");
         assert!(text.contains("Sin comentarios."), "{text}");
         assert!(!text.contains("Etiquetas:"), "{text}");
+    }
+
+    #[test]
+    fn short_titles_are_not_cut() {
+        assert_eq!(truncate("Fix invoice rounding", 50), "Fix invoice rounding");
+        assert_eq!(truncate("exactly", 7), "exactly");
+    }
+
+    #[test]
+    fn long_titles_end_with_an_ellipsis() {
+        let cut = truncate("Revisar propuesta de arquitectura", 10);
+
+        assert_eq!(cut, "Revisar p…");
+        assert_eq!(cut.chars().count(), 10);
+    }
+
+    #[test]
+    fn truncation_counts_characters_not_bytes() {
+        // Cada `ñ` y `ó` ocupa 2 bytes: cortar por bytes en el 5 caería dentro de una letra.
+        assert_eq!(truncate("ññññóóóó", 5), "ññññ…");
+    }
+
+    #[test]
+    fn today_cuts_long_titles_but_show_does_not() {
+        let long =
+            "Migrar el módulo de facturación electrónica a la nueva versión del API de la DIAN";
+        let report = TodayReport {
+            generated_at: at("2026-10-10T15:00:00Z"),
+            groups: vec![TaskGroup {
+                project: None,
+                tasks: vec![view("1", long)],
+            }],
+        };
+        let detail = TaskDetail {
+            task: view("1", long),
+            description: None,
+            location: vec![],
+            tags: vec![],
+            project: None,
+            comments: vec![],
+        };
+
+        let table = today(&report, bogota(), day("2026-10-10"));
+        let full = task_detail(&detail, bogota(), day("2026-10-10"));
+
+        assert!(!table.contains(long), "{table}");
+        assert!(table.contains(&truncate(long, TITLE_WIDTH)), "{table}");
+        assert!(full.contains(long), "{full}");
     }
 
     #[test]

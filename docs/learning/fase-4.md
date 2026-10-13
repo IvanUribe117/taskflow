@@ -746,6 +746,40 @@ Ok(AppContext {
 - **El asistente valida antes de guardar el token:** si el `team_id` es inválido, no queda un secreto guardado de una configuración que nunca se escribió.
 - **`unreachable!`** en `config::run` documenta que `init` y `path` se atienden antes, en `commands::run`. Si algún día llegaran ahí, el programa se detiene con un mensaje claro en vez de hacer algo raro.
 
+## Ajuste: recortar títulos largos en `today`
+
+Los títulos muy largos rompían la tabla. Ahora se cortan en 50 caracteres (`TITLE_WIDTH`) y terminan en `…`. `show` sigue mostrando el título completo.
+
+```rust
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut short: String = text.chars().take(max.saturating_sub(1)).collect();
+    short.push('…');
+    short
+}
+```
+
+### Caracteres contra bytes
+
+Un `String` de Rust es UTF-8: cada carácter ocupa **de 1 a 4 bytes**.
+
+| Texto | `.len()` (bytes) | `.chars().count()` (caracteres) |
+| --- | --- | --- |
+| `"Fix"` | 3 | 3 |
+| `"Revisión"` | 9 | 8 (la `ó` ocupa 2 bytes) |
+| `"ñ"` | 2 | 1 |
+
+`&text[..10]` corta por **bytes**. Si el byte 10 cae en medio de una `ó`, Rust hace **panic** ("byte index 10 is not a char boundary"): prefiere detenerse antes que crear un texto inválido. Con títulos en español eso pasaría tarde o temprano. `chars()` recorre caracteres completos, así que `take(n)` nunca corta una letra a la mitad.
+
+Detalles:
+
+- **`saturating_sub(1)`:** deja lugar para el `…`. Si `max` fuera 0, `max - 1` desbordaría; `saturating_sub` se queda en 0.
+- **`collect::<String>()`:** un iterador de `char` se puede reunir directamente en un `String`.
+- **Límite conocido:** algunos emojis y letras con tildes combinadas son varios `char` que se ven como uno (*grafemas*). Para títulos de tareas no importa; si importara, el crate `unicode-segmentation` cuenta grafemas.
+- **Alternativa descartada:** `comfy-table` puede ajustar la tabla al ancho de la terminal (`ContentArrangement::Dynamic`), pero parte los títulos en varias líneas. Recortar mantiene una tarea por línea.
+
 ## Limpieza al cerrar la fase
 
 - Se borraron los cinco bloques `#![allow(...)]` con `TODO(fase 4)`, y un `use std::default;` que había quedado sin usar.

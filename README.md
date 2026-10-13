@@ -10,7 +10,8 @@ El diseño completo está en [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Las
 | --- | --- | --- |
 | 0 | Workspace y CI | Hecho |
 | 1 | `domain`: tareas, proyectos y política | Hecho |
-| 2 | Puertos y `GetTodayTasks` con fakes | En curso: firmas y tests listos ([qué falta](docs/learning/fase-2.md)) |
+| 2 | Puertos y `GetTodayTasks` con fakes | Hecho |
+| 3 | `adapter-clickup` de lectura | Hecho ([guía](docs/learning/fase-3.md)) |
 
 ## Desarrollo
 

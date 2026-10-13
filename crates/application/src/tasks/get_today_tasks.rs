@@ -106,7 +106,10 @@ impl<'a> GetTodayTasks<'a> {
                 .collect(),
         };
 
-        Ok(TodayReport { generated_at: now, groups }) 
+        Ok(TodayReport {
+            generated_at: now,
+            groups,
+        })
     }
 }
 

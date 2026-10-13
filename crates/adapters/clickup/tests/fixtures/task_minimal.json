@@ -1,0 +1,19 @@
+{
+  "id": "86b2x9zzz",
+  "custom_id": null,
+  "name": "Revisar propuesta",
+  "text_content": "",
+  "description": "",
+  "status": { "id": "sc901_done", "status": "Ready For Testing", "color": "#6bc950", "orderindex": 5, "type": "done" },
+  "date_created": "1759500000000",
+  "date_updated": "1759600000000",
+  "creator": { "id": 183, "username": "Ivan Uribe" },
+  "assignees": [],
+  "tags": [],
+  "priority": null,
+  "due_date": null,
+  "url": "https://app.clickup.com/t/86b2x9zzz",
+  "list": { "id": "901100999000", "name": "Inbox", "access": true },
+  "folder": { "id": "hidden_1", "name": "hidden", "hidden": true, "access": true },
+  "space": { "id": "90110009" }
+}

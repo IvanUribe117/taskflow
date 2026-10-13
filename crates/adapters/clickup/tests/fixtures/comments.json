@@ -1,0 +1,35 @@
+{
+  "comments": [
+    {
+      "id": "90120001",
+      "comment": [{ "text": "@Ivan can you check the rounding rule?" }],
+      "comment_text": "@Ivan can you check the rounding rule?",
+      "user": { "id": 200, "username": "Client PM", "initials": "CP", "email": "pm@example.test", "color": "#000000", "profilePicture": null },
+      "resolved": false,
+      "assignee": { "id": 183, "username": "Ivan Uribe", "email": "ivan@example.test", "color": "#7b68ee", "initials": "IU", "profilePicture": null },
+      "assigned_by": { "id": 200, "username": "Client PM", "initials": "CP", "email": "pm@example.test", "color": "#000000", "profilePicture": null },
+      "reactions": [],
+      "date": "1760000000000"
+    },
+    {
+      "id": "90120000",
+      "comment": [{ "text": "Already fixed in staging" }],
+      "comment_text": "Already fixed in staging",
+      "user": { "id": 183, "username": "Ivan Uribe" },
+      "resolved": true,
+      "assignee": { "id": 183, "username": "Ivan Uribe" },
+      "reactions": [],
+      "date": "1759900000000"
+    },
+    {
+      "id": "90119999",
+      "comment": [{ "text": "FYI" }],
+      "comment_text": "FYI",
+      "user": { "id": 200, "username": "Client PM" },
+      "resolved": false,
+      "assignee": null,
+      "reactions": [],
+      "date": "1759800000000"
+    }
+  ]
+}

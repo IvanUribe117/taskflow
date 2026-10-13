@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/domain", "crates/application"]
+members = ["crates/domain", "crates/application", "crates/adapters/clickup"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,12 +11,16 @@ publish = false
 [workspace.dependencies]
 # Crates internos: se declaran una vez y cada crate los usa con `domain.workspace = true`.
 domain = { path = "crates/domain" }
+application = { path = "crates/application" }
 
 async-trait = "0.1"
+dotenvy = "0.15"
 futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", default-features = false }
+wiremock = "0.6"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 indexmap = "2"
 thiserror = "2"

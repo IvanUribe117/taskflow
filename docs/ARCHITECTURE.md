@@ -2853,7 +2853,15 @@ hint: run `taskflow playbook check release` after fixing the file
 - **Fechas:** ClickUp devuelve timestamps en milisegundos como string; convertir en `mapper.rs`.
 - **Referencias a tareas en texto:** `task_ref_pattern` reconoce por defecto `CU-<id>` y `#<id>`, el formato que ClickUp sugiere para ramas y commits; se puede sobrescribir por Playbook con `pattern`.
 
-*Pendiente de verificar en la documentación oficial:* nombres exactos de campos de comentarios asignados (`assignee`, `resolved`), filtros disponibles en `GET /team/{team_id}/task`, endpoints de time tracking (y si iniciar un contador detiene el anterior) y el límite de peticiones del plan.
+**Verificado en la documentación oficial (fase 3, 2026-10-11):**
+
+- `Authorization: <token>` sin prefijo `Bearer` para tokens personales (`pk_...`); `Bearer` solo para OAuth.
+- `GET /user` → `{ "user": { "id": <entero>, "username": ... } }`. Los ids de usuario son **números**; las tareas, listas, carpetas y espacios usan ids **texto**.
+- `GET /team/{team_id}/task`: páginas de hasta 100 tareas, `page` empieza en 0. Filtros: `assignees[]`, `space_ids[]`, `project_ids[]` (carpetas), `list_ids[]`, `statuses[]`, `tags[]`, `include_closed`, `subtasks`. El campo `last_page` no figura en el esquema: el adaptador lo usa si viene y, si no, se detiene ante una página con menos de 100 tareas.
+- Tarea: `status { status, type }`, `priority` nulo o `{ id: "1".."4", priority }`, `due_date` y `date_updated` en milisegundos como texto, `folder { hidden }` (las listas sin carpeta tienen una carpeta oculta), `space` solo con `id`.
+- `GET /task/{id}/comment`: los 25 comentarios más recientes; cada uno con `comment_text`, `user`, `resolved`, `assignee` (nulo si no está asignado) y `date` en milisegundos. Se pagina con `start` + `start_id` del último comentario.
+
+*Pendiente de verificar:* endpoints de time tracking (y si iniciar un contador detiene el anterior) y el límite de peticiones del plan.
 
 ## 17. Adaptador de IA
 
@@ -3083,8 +3091,8 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 
 ## 26. Decisiones abiertas
 
-- [ ] Verificar en la API de ClickUp los campos exactos de comentarios asignados y resueltos.
-- [ ] Verificar los filtros soportados por `GET /team/{team_id}/task` (listas, espacios, estados, etiquetas).
+- [X] Verificar en la API de ClickUp los campos exactos de comentarios asignados y resueltos (fase 3, ver §16).
+- [X] Verificar los filtros soportados por `GET /team/{team_id}/task` (fase 3, ver §16).
 - [ ] Definir los estados reales del espacio de trabajo para `status_map`.
 - [ ] Elegir entrega del prompt al agente: portapapeles (`arboard`), archivo o ambos.
 - [ ] Decidir si la caché usa SQLite (`sqlx`) o archivos JSON.

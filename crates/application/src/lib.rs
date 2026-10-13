@@ -4,8 +4,6 @@
 //! invocan las interfaces. Nunca imprime, nunca lee argumentos y nunca habla con la red
 //! directamente. Ver `docs/ARCHITECTURE.md`, §10 y §11.
 #![warn(clippy::pedantic)]
-// TODO(fase 2): borra esta línea cuando termines las implementaciones.
-#![allow(unused_variables, dead_code, clippy::unused_async)]
 
 pub mod context;
 pub mod dto;

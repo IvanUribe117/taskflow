@@ -1,0 +1,13 @@
+{
+  "user": {
+    "id": 183,
+    "username": "Ivan Uribe",
+    "email": "ivan@example.test",
+    "color": "#7b68ee",
+    "profilePicture": null,
+    "initials": "IU",
+    "week_start_day": 1,
+    "global_font_support": true,
+    "timezone": "America/Bogota"
+  }
+}

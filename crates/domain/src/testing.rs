@@ -24,6 +24,7 @@ pub fn task(id: &str) -> Task {
         title: format!("Task {id}"),
         description: None,
         status: Status::Todo,
+        status_name: "to do".into(),
         priority: Priority::Normal,
         due: None,
         updated_at: at("2026-10-01T00:00:00Z"),

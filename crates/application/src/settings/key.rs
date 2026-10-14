@@ -39,6 +39,9 @@ impl ConfigKey {
         "ai.max_comments",
         "ai.read_repo",
         "history.dir",
+        "session.dir",
+        "session.track_time",
+        "session.notify",
         "ui.group_by",
     ];
 

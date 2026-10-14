@@ -1,6 +1,6 @@
 # Taskflow — Documento de arquitectura de software
 
-*Versión 0.8 · 2026-10-14 · Estado: borrador*
+*Versión 0.9 · 2026-10-14 · Estado: borrador*
 
 > **Cambios en 0.3:** configuración persistente con asistente interactivo, proyectos (cliente/proyecto) y agrupación de tareas, contexto por proyecto en secciones abiertas, automatizaciones con **Playbooks** y patrones de diseño de Rust asociados.
 >
@@ -13,6 +13,8 @@
 > **Cambios en 0.7:** varios proveedores de IA con el mismo registro que los de tareas (Anthropic por API, Claude Code con tu suscripción, OpenAI, Gemini...), elegidos por configuración (ADR-027).
 >
 > **Cambios en 0.8:** historial de análisis y planes (`--save` y `taskflow history`), guardado por proyecto (§14.4). Cumple FR-16.
+>
+> **Cambios en 0.9:** sesión de trabajo implementada (fase 8). Ajustes respecto del diseño en §9.6, "Cómo quedó implementada": el reporte vive en `report.md` (no dentro del enum), `pending` en lugar del diario completo, sin `SaveReport` ni `RunHook` por ahora, `Task::status_name` para restaurar el estado original, y la sección `[session]` en la configuración.
 
 ## 1. Propósito del documento
 
@@ -517,9 +519,9 @@ Separada del código. Ubicación con el crate `directories` (`~/.config/taskflow
 └── sessions/                         # sesiones de trabajo (§9.6)
     ├── active.json                   # sesión activa: estado, intervalos de tiempo, diario de efectos
     ├── 86b2x1abc/
-    │   ├── report.md                 # reporte de trabajo generado por la IA
+    │   ├── report.md                 # reporte de trabajo generado por la IA (editable)
     │   └── agent-prompt.md
-    └── history/                      # sesiones cerradas o abortadas
+    └── archive/                      # sesiones cerradas o abortadas: <fecha>_<tarea>.json
 ```
 
 Todo es texto plano, por lo que el directorio completo (sin `history/`, `runs/` ni `sessions/`) puede versionarse con git (NFR-16).
@@ -1357,6 +1359,20 @@ Decisiones:
 | Transición inválida          | No compila                     | `Err(SessionError::InvalidTransition)` |
 | Persistencia                   | No necesaria                   | `serde`                                |
 | Ideal para                     | Flujos dentro de un proceso    | Flujos largos entre ejecuciones          |
+
+#### Cómo quedó implementada (fase 8)
+
+El diseño de arriba se implementó con estos ajustes (detalle en `docs/learning/fase-8.md`):
+
+| Diseño | Implementado | Por qué |
+| --- | --- | --- |
+| `AnalysisReady(WorkReport)` y `ReportOutcome::Ready(WorkReport)` | `AnalysisReady` sin datos; `ReportOutcome::Ready` | El reporte vive en `sessions/<id>/report.md` para poder editarlo antes de publicarlo; el dominio solo sabe si está listo |
+| `Effect::SaveReport` | Lo hace el efecto `Analyze` antes de avisar a la sesión | Un efecto menos; guardar es parte de analizar |
+| `RunHook(HookPoint)` | No existe todavía | Llega con los Playbooks (fase 10) |
+| `journal: Journal` | `pending: Vec<Effect>` | Basta con saber qué falta para `session retry`; antes de cada efecto se guarda "este + lo que sigue" |
+| `original_status: Status` | `original_status: String` (de `Task::status_name`) | `Status` normaliza ("to do") y pierde el nombre exacto ("Open") que hace falta para restaurarlo |
+| `SetStatus(Suggested)` crítico | Si ningún nombre sugerido existe en la lista: aviso, no error | Una sugerencia no debe romper la sesión |
+| — | `StopTimer` solo detiene el contador **de esta tarea** | Si iniciaste otro a mano en ClickUp, no se toca (aviso) |
 
 ## 10. Puertos (traits)
 
@@ -2508,6 +2524,11 @@ budget_chars = 12000              # presupuesto total de contexto por llamada a 
 [history]
 dir = "history"                   # relativo al directorio de configuración, o absoluto
 
+[session]
+dir = "sessions"                  # sesión activa, reportes y archivo
+track_time = true                 # contador del proveedor; false = solo en la sesión
+notify = true                     # notificaciones de escritorio
+
 [playbooks]
 shell = "auto"                    # auto | sh | bash | zsh | pwsh | cmd
 default_timeout_secs = 600
@@ -3129,7 +3150,7 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 | 5    | Proyectos y agrupación                                            | `today --by-project`; `project add` elige listas de ClickUp                                                                                                                        | `FromStr`, `IndexMap`, tipos recursivos                            |
 | 6    | Contexto por proyecto + proveedores de IA (Claude Code, Anthropic) + `plan` | Resúmenes y prompts usan las secciones;`context preview`                                                                                                                            | `EnumSet`, lifetimes en selección, prompts, JSON estructurado       |
 | 7    | `close` (escritura)                                              | Cerrar una tarea sin abrir ClickUp                                                                                                                                                     | Confirmaciones, errores HTTP                                           |
-| 8    | Sesión de trabajo                                                 | `start` → reporte → `approve` → `done` con el contador de ClickUp, estados sugeridos y validados por lista, publicación explícita del reporte y notificación de escritorio | Máquina de estados con enums, efectos,`TimeTracker`, `Notifier`   |
+| 8 ✔  | Sesión de trabajo                                                 | `start` → reporte → `approve` → `done` con el contador de ClickUp, estados sugeridos y validados por lista, publicación explícita del reporte y notificación de escritorio | Máquina de estados con enums, efectos,`TimeTracker`, `Notifier`   |
 | 9    | Playbooks v1                                                       | `release` corre de punta a punta con `shell`, `select_tasks`, `comment`, `set_status`, `confirm`, `--dry-run`                                                            | Typestate, enum dispatch,`tokio::process`, canales, `select!`      |
 | 10   | Playbooks v2                                                       | Pasos`ai` y `extract_task_ids`, `for_each`/`when`, registro de ejecuciones, acciones `custom`, ganchos de sesión                                                            | `minijinja`, `dyn Action`, JSON Lines                              |
 | 11   | Segundo proveedor (GitHub Issues)                                  | Pasa la suite de contrato sin tocar el núcleo y aparece en el asistente; sesiones con`LocalTimeTracker`                                                                             | Genéricos, feature flags, objeto nulo                                 |

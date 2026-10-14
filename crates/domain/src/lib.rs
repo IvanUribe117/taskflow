@@ -8,6 +8,7 @@ pub mod context;
 pub mod error;
 pub mod policy;
 pub mod project;
+pub mod session;
 pub mod task;
 
 pub use error::DomainError;

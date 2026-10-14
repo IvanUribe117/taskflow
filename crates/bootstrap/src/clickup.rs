@@ -7,8 +7,10 @@
 
 use std::sync::Arc;
 
-use adapter_clickup::{ClickUpConfig, ClickUpProvider, StatusMap};
-use application::ports::{ExposeSecret, SecretName, SecretStore, SecretString, TaskProvider};
+use adapter_clickup::{ClickUpConfig, ClickUpProvider, ClickUpTimeTracker, StatusMap};
+use application::ports::{
+    ExposeSecret, SecretName, SecretStore, SecretString, TaskProvider, TimeTracker,
+};
 use application::settings::{
     AppSettings, ClickUpSettings, ProviderKind, ProviderSettings, StatusNames,
 };
@@ -33,6 +35,7 @@ pub(crate) const DESCRIPTOR: TaskProviderDescriptor = TaskProviderDescriptor {
     ],
     provider_settings,
     build,
+    build_time: Some(build_time),
 };
 
 /// `team_id` de las respuestas (vacío si falta) y `StatusNames::default()`.
@@ -61,6 +64,22 @@ fn build(
         .ok_or(BuildError::MissingSecret(SecretName::ClickUpToken))?;
     let config = clickup_config(settings, &token)?;
     Ok(Arc::new(ClickUpProvider::new(config)?))
+}
+
+/// El contador de `ClickUp`, con la misma configuración que el proveedor.
+///
+/// # Errors
+///
+/// Los mismos que [`build`].
+fn build_time(
+    settings: &AppSettings,
+    secrets: &dyn SecretStore,
+) -> Result<Arc<dyn TimeTracker>, BuildError> {
+    let token = secrets
+        .get(SecretName::ClickUpToken)?
+        .ok_or(BuildError::MissingSecret(SecretName::ClickUpToken))?;
+    let config = clickup_config(settings, &token)?;
+    Ok(Arc::new(ClickUpTimeTracker::new(&config)?))
 }
 
 /// Configuración del adaptador a partir de `config.toml` y el token.
@@ -165,5 +184,7 @@ mod tests {
         let provider = build(&settings(), &secrets).unwrap();
 
         assert_eq!(provider.name(), "clickup");
+        let time = build_time(&settings(), &secrets).unwrap();
+        assert_eq!(time.name(), "clickup");
     }
 }

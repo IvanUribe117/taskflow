@@ -44,6 +44,20 @@ impl fmt::Display for ProjectSlug {
     }
 }
 
+/// Como [`TaskId`](crate::task::TaskId): se guarda como texto y se valida al leerlo.
+impl serde::Serialize for ProjectSlug {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ProjectSlug {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = <String as serde::Deserialize>::deserialize(deserializer)?;
+        raw.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectKind {
     Client,

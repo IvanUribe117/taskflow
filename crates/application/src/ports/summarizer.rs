@@ -73,6 +73,8 @@ pub struct SummaryInput {
     pub project: Option<ProjectBrief>,
     /// Secciones de contexto de los usos `summary` y `agent_prompt`.
     pub context: BuiltContext,
+    /// Lo que pediste al rechazar el análisis anterior (`taskflow reject "..."`).
+    pub note: Option<String>,
 }
 
 /// Una tarea dentro del plan del día.

@@ -6,10 +6,17 @@ mod context;
 mod history;
 mod plan;
 mod project;
+mod session;
 mod show;
 mod today;
 
+use std::path::Path;
+
+use application::AppContext;
 use application::ports::{ConfigStore, HistoryFilter, SubjectFilter};
+use application::settings::AppSettings;
+
+use domain::session::SessionCommand;
 
 use crate::args::{Cli, Command, ConfigCommand};
 use crate::wizard;
@@ -18,8 +25,8 @@ use crate::wizard;
 ///
 /// 1. `config init` y `config path` funcionan **sin** configuración (todavía no existe).
 /// 2. El resto de `config` necesita el archivo, pero no el `AppContext`.
-/// 3. `today`, `show`, `plan`, `history`, `close`, `project` y `context` necesitan el
-///    `AppContext` completo.
+/// 3. El resto (`today`, `show`, `plan`, `history`, `close`, la sesión, `project` y
+///    `context`) necesitan el `AppContext` completo.
 pub async fn run(cli: Cli) -> anyhow::Result<()> {
     let store = bootstrap::config_store(cli.config.as_deref())?;
     let secrets = bootstrap::secret_store();
@@ -31,16 +38,31 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
             Ok(())
         }
         Command::Config(command) => config::run(command, &store, &secrets).await,
+        command => {
+            let settings = store.load()?;
+            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
+            with_context(command, &ctx, &settings, store.path()).await
+        }
+    }
+}
+
+/// Los comandos que necesitan el `AppContext`. Reciben la configuración ya cargada.
+async fn with_context(
+    command: Command,
+    ctx: &AppContext,
+    settings: &AppSettings,
+    config_path: &Path,
+) -> anyhow::Result<()> {
+    match command {
+        Command::Config(_) => unreachable!("handled in `run`"),
         Command::Today {
             json,
             limit,
             by_project,
             project,
         } => {
-            let settings = store.load()?;
-            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
-            let query = today::query(&settings, limit, by_project, project);
-            today::run(&ctx, json, query).await
+            let query = today::query(settings, limit, by_project, project);
+            today::run(ctx, json, query).await
         }
         Command::Show {
             task_id,
@@ -49,12 +71,10 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
             out,
             save,
         } => {
-            let settings = store.load()?;
-            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
             if ai {
-                show::run_with_ai(&ctx, &settings, &task_id, json, out.as_deref(), save).await
+                show::run_with_ai(ctx, settings, &task_id, json, out.as_deref(), save).await
             } else {
-                show::run(&ctx, &task_id, json).await
+                show::run(ctx, &task_id, json).await
             }
         }
         Command::Plan {
@@ -62,11 +82,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
             project,
             json,
             save,
-        } => {
-            let settings = store.load()?;
-            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
-            plan::run(&ctx, &settings, max, project, json, save).await
-        }
+        } => plan::run(ctx, settings, max, project, json, save).await,
         Command::History {
             task_id,
             project,
@@ -75,36 +91,42 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
             last,
             json,
         } => {
-            let settings = store.load()?;
-            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
             let subject = match (task_id, plans) {
                 (Some(id), _) => SubjectFilter::Task(id),
                 (None, true) => SubjectFilter::Plans,
                 (None, false) => SubjectFilter::Any,
             };
             let filter = HistoryFilter { project, subject };
-            let base = bootstrap::history_dir(&settings, store.path());
-            history::run(&ctx, &base, filter, limit, last, json).await
+            let base = bootstrap::history_dir(settings, config_path);
+            history::run(ctx, &base, filter, limit, last, json).await
         }
         Command::Close {
             task_id,
             status,
             comment,
             yes,
-        } => {
-            let settings = store.load()?;
-            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
-            close::run(&ctx, &settings, &task_id, status, comment, yes).await
+        } => close::run(ctx, settings, &task_id, status, comment, yes).await,
+        Command::Start { task_id, yes } => session::start(ctx, settings, &task_id, yes).await,
+        Command::Approve { status } => {
+            session::handle(ctx, settings, SessionCommand::Approve { status }).await
         }
-        Command::Project(command) => {
-            let settings = store.load()?;
-            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
-            project::run(command, &ctx, &settings).await
+        Command::Reject { note } => {
+            session::handle(ctx, settings, SessionCommand::Reject { note }).await
         }
-        Command::Context(command) => {
-            let settings = store.load()?;
-            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
-            context::run(command, &ctx, &settings).await
-        }
+        Command::Pause => session::handle(ctx, settings, SessionCommand::Pause).await,
+        Command::Resume => session::handle(ctx, settings, SessionCommand::Resume).await,
+        Command::Done {
+            status,
+            comment,
+            yes,
+        } => session::done(ctx, settings, status, comment, yes).await,
+        Command::Abort {
+            restore_status,
+            yes,
+        } => session::abort(ctx, settings, restore_status, yes).await,
+        Command::Session { command } => session::session(ctx, settings, command).await,
+        Command::Report(command) => session::report(ctx, settings, command).await,
+        Command::Project(command) => project::run(command, ctx, settings).await,
+        Command::Context(command) => context::run(command, ctx, settings).await,
     }
 }

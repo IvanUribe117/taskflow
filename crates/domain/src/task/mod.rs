@@ -32,6 +32,21 @@ impl TaskId {
     }
 }
 
+/// Se guarda como texto (`"86b2x1abc"`). Al leerlo se valida con [`TaskId::new`]: un
+/// archivo con un id vacío da un error de deserialización, no un `TaskId` inválido.
+impl serde::Serialize for TaskId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TaskId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Identificador de un usuario en el proveedor. Nunca está vacío.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserId(String);
@@ -69,6 +84,9 @@ pub struct Task {
     pub title: String,
     pub description: Option<String>,
     pub status: Status,
+    /// El nombre **exacto** del estado en el proveedor ("Open", "Code Review"). `status`
+    /// lo normaliza y pierde el original; este sirve para volver a él (`abort`).
+    pub status_name: String,
     pub priority: Priority,
     pub due: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,

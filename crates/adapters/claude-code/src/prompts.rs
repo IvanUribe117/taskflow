@@ -120,6 +120,14 @@ pub(crate) fn summary_message(input: &SummaryInput) -> String {
         message.push_str("</project_context>");
     }
 
+    // 6. Lo que pidió el usuario al rechazar el análisis anterior: al final, para que pese.
+    if let Some(note) = &input.note {
+        let _ = write!(
+            message,
+            "\n\n<user_feedback>\nRechacé el análisis anterior. Ten en cuenta esto:\n{note}\n</user_feedback>"
+        );
+    }
+
     message
 }
 
@@ -221,6 +229,7 @@ mod tests {
                 knowledge: vec![block("negocio", "ACME factura a pymes.")],
                 omitted: vec![],
             },
+            note: None,
         }
     }
 
@@ -275,6 +284,21 @@ mod tests {
              ACME factura a pymes.\n\
              \n\
              </project_context>"
+        );
+    }
+
+    #[test]
+    fn summary_message_ends_with_the_rejection_note() {
+        let mut input = input();
+        input.note = Some("Falta el caso de facturas en dólares.".into());
+
+        let message = summary_message(&input);
+
+        assert!(
+            message.ends_with(
+                "<user_feedback>\nRechacé el análisis anterior. Ten en cuenta esto:\nFalta el caso de facturas en dólares.\n</user_feedback>"
+            ),
+            "{message}"
         );
     }
 

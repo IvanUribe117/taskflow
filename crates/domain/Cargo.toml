@@ -7,10 +7,14 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-chrono.workspace = true
+chrono = { workspace = true, features = ["serde"] }
 enumset.workspace = true
 indexmap.workspace = true
+serde.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [features]
 # Expone `domain::testing` para los tests de otros crates.

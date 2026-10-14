@@ -38,6 +38,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub history: HistorySettings,
     #[serde(default)]
+    pub session: SessionSettings,
+    #[serde(default)]
     pub ui: UiSettings,
 }
 
@@ -221,6 +223,29 @@ impl Default for HistorySettings {
     }
 }
 
+/// Sección `[session]` (§13.1): la sesión de trabajo (`start` → `done`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SessionSettings {
+    /// Carpeta de la sesión activa, sus reportes y el archivo. Relativa al directorio de
+    /// `config.toml`, o absoluta.
+    pub dir: String,
+    /// Usar el contador del proveedor. Con `false`, el tiempo queda solo en la sesión.
+    pub track_time: bool,
+    /// Notificaciones de escritorio (reporte listo, sesión cerrada).
+    pub notify: bool,
+}
+
+impl Default for SessionSettings {
+    fn default() -> Self {
+        Self {
+            dir: "sessions".to_owned(),
+            track_time: true,
+            notify: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UiSettings {
@@ -254,6 +279,7 @@ impl AppSettings {
             context: ContextSettings::default(),
             ai: AiSettings::default(),
             history: HistorySettings::default(),
+            session: SessionSettings::default(),
             ui: UiSettings::default(),
         }
     }

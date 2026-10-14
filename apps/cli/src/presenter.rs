@@ -5,9 +5,11 @@ use std::path::Path;
 
 use application::dto::{
     CloseOptions, CloseResult, ContextBlock, ContextPreview, DailyPlan, HistoryItem, ProjectDetail,
-    SectionView, StatusOptionView, TaskDetail, TaskGroup, TaskView, TodayReport,
+    SectionView, SessionOutcome, SessionView, StatusOptionView, TaskDetail, TaskGroup, TaskView,
+    TimerView, TodayReport,
 };
 use application::ports::{Complexity, TaskSummary};
+use application::session::duration_label;
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use comfy_table::Table;
 use comfy_table::presets::NOTHING;
@@ -550,6 +552,117 @@ pub fn history(items: &[HistoryItem], base: &Path) -> String {
         ]);
     }
     table.to_string()
+}
+
+/// El estado de la sesión en palabras.
+#[must_use]
+pub fn session_state_label(state: &str) -> &str {
+    match state {
+        "analyzing" => "analizando",
+        "awaiting_approval" => "esperando tu aprobación",
+        "in_progress" => "en progreso",
+        "paused" => "en pausa",
+        "closed" => "cerrada",
+        "aborted" => "abortada",
+        other => other,
+    }
+}
+
+/// Qué puedes hacer ahora, según el estado.
+fn next_steps(state: &str) -> Option<&'static str> {
+    match state {
+        "analyzing" => Some("taskflow session retry (si el análisis se cortó) · taskflow abort"),
+        "awaiting_approval" => Some(
+            "taskflow report show · taskflow approve · taskflow reject \"<qué falta>\" · taskflow abort",
+        ),
+        "in_progress" => Some("taskflow pause · taskflow report publish · taskflow done"),
+        "paused" => Some("taskflow resume · taskflow done"),
+        _ => None,
+    }
+}
+
+/// `session show` y la salida de cada comando de la sesión:
+///
+/// ```text
+/// Fix invoice rounding (86b2x1abc)
+/// Estado: esperando tu aprobación · contador corriendo · 1 h 25 min
+/// Proyecto: idk-base                                   (solo si tiene)
+/// Reporte: listo · /…/sessions/86b2x1abc/report.md     (o "falló: <motivo>", o "todavía no")
+/// Prompt para el agente: /…/agent-prompt.md            (solo con el reporte listo)
+/// Publicado: 2026-10-14 15:30                          (solo si se publicó)
+/// Pendiente: cambiar el estado… → taskflow session retry
+/// Siguiente: taskflow approve · …
+/// ```
+#[must_use]
+pub fn session(view: &SessionView, offset: FixedOffset) -> String {
+    let timer = if view.timer_running {
+        "contador corriendo"
+    } else {
+        "contador detenido"
+    };
+    let mut lines = vec![
+        format!("{} ({})", view.title, view.task_id),
+        format!(
+            "Estado: {} · {timer} · {}",
+            session_state_label(view.state),
+            duration_label(chrono::Duration::minutes(view.elapsed_minutes))
+        ),
+    ];
+    if let Some(project) = &view.project {
+        lines.push(format!("Proyecto: {project}"));
+    }
+    match (view.report, &view.report_error) {
+        (Some("ready"), _) => {
+            lines.push(format!("Reporte: listo · {}", view.report_path.display()));
+            lines.push(format!(
+                "Prompt para el agente: {}",
+                view.agent_prompt_path.display()
+            ));
+        }
+        (_, Some(reason)) => lines.push(format!("Reporte: falló: {reason}")),
+        _ => lines.push("Reporte: todavía no".to_owned()),
+    }
+    if let Some(at) = view.published_at {
+        lines.push(format!(
+            "Publicado: {}",
+            at.with_timezone(&offset).format("%Y-%m-%d %H:%M")
+        ));
+    }
+    if !view.pending.is_empty() {
+        lines.push(format!(
+            "Pendiente: {} → taskflow session retry",
+            view.pending.join(", ")
+        ));
+    } else if let Some(next) = next_steps(view.state) {
+        lines.push(format!("Siguiente: {next}"));
+    }
+    lines.join("\n")
+}
+
+/// La sesión, los avisos (`⚠ …`) y, si terminó, dónde quedó archivada.
+#[must_use]
+pub fn session_outcome(outcome: &SessionOutcome, offset: FixedOffset) -> String {
+    let mut lines = vec![session(&outcome.session, offset)];
+    lines.extend(outcome.warnings.iter().map(|w| format!("⚠ {w}")));
+    if let Some(path) = &outcome.archived_to {
+        lines.push(format!("Sesión archivada en {}", path.display()));
+    }
+    lines.join("\n")
+}
+
+/// La pregunta antes de detener un contador ajeno a la sesión.
+#[must_use]
+pub fn running_timer(timer: &TimerView, now: DateTime<Utc>, offset: FixedOffset) -> String {
+    let task = timer
+        .task_title
+        .clone()
+        .or_else(|| timer.task_id.clone())
+        .unwrap_or_else(|| "sin tarea".to_owned());
+    format!(
+        "Tienes un contador corriendo en «{task}» desde las {} ({}).",
+        timer.started_at.with_timezone(&offset).format("%H:%M"),
+        duration_label(now - timer.started_at)
+    )
 }
 
 /// Cualquier DTO como JSON legible (`--json`).
@@ -1166,6 +1279,90 @@ mod tests {
             estimated_complexity: Complexity::Medium,
             agent_prompt: "Corrige invoicing.".into(),
         }
+    }
+
+    fn session_view(state: &'static str) -> SessionView {
+        SessionView {
+            task_id: "86b1".into(),
+            title: "Fix rounding".into(),
+            url: "https://example.test/t/86b1".into(),
+            project: Some("idk-base".into()),
+            state,
+            started_at: at("2026-10-14T15:00:00Z"),
+            elapsed_minutes: 85,
+            timer_running: true,
+            report: Some("ready"),
+            report_error: None,
+            published_at: None,
+            report_path: "/s/86b1/report.md".into(),
+            agent_prompt_path: "/s/86b1/agent-prompt.md".into(),
+            pending: vec![],
+        }
+    }
+
+    #[test]
+    fn session_shows_state_time_report_and_next_steps() {
+        let text = session(&session_view("awaiting_approval"), bogota());
+
+        assert_eq!(
+            text,
+            "Fix rounding (86b1)\n\
+             Estado: esperando tu aprobación · contador corriendo · 1 h 25 min\n\
+             Proyecto: idk-base\n\
+             Reporte: listo · /s/86b1/report.md\n\
+             Prompt para el agente: /s/86b1/agent-prompt.md\n\
+             Siguiente: taskflow report show · taskflow approve · taskflow reject \"<qué falta>\" · taskflow abort"
+        );
+    }
+
+    #[test]
+    fn session_with_failed_report_published_and_pending() {
+        let mut view = session_view("in_progress");
+        view.report = Some("unavailable");
+        view.report_error = Some("timeout".into());
+        view.published_at = Some(at("2026-10-14T20:30:00Z"));
+        view.pending = vec!["cambiar el estado a `Closed`".into()];
+
+        let text = session(&view, bogota());
+
+        assert!(text.contains("Reporte: falló: timeout"), "{text}");
+        assert!(text.contains("Publicado: 2026-10-14 15:30"), "{text}");
+        assert!(
+            text.ends_with("Pendiente: cambiar el estado a `Closed` → taskflow session retry"),
+            "{text}"
+        );
+        assert!(!text.contains("Siguiente"), "{text}");
+    }
+
+    #[test]
+    fn session_outcome_adds_warnings_and_archive() {
+        let outcome = SessionOutcome {
+            session: session_view("closed"),
+            warnings: vec!["no se pudo notificar".into()],
+            archived_to: Some("/s/archive/x.json".into()),
+        };
+
+        let text = session_outcome(&outcome, bogota());
+
+        assert!(text.contains("Estado: cerrada"), "{text}");
+        assert!(
+            text.ends_with("⚠ no se pudo notificar\nSesión archivada en /s/archive/x.json"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn running_timer_question() {
+        let timer = TimerView {
+            task_id: Some("x".into()),
+            task_title: Some("Otra tarea".into()),
+            started_at: at("2026-10-14T19:00:00Z"),
+        };
+
+        assert_eq!(
+            running_timer(&timer, at("2026-10-14T20:10:00Z"), bogota()),
+            "Tienes un contador corriendo en «Otra tarea» desde las 14:00 (1 h 10 min)."
+        );
     }
 
     #[test]

@@ -110,6 +110,7 @@ pub(crate) fn map_task(task: ApiTask, statuses: &StatusMap) -> Result<Task, MapE
         location: map_location(&task),
         id: TaskId::new(task.id)?,
         status: statuses.to_domain(&task.status.status, &task.status.kind),
+        status_name: task.status.status.clone(),
         description: task.text_content.filter(|t| !t.is_empty()),
         priority: map_priority(task.priority.as_ref())?,
         due: task.due_date.as_deref().map(parse_millis).transpose()?,
@@ -299,6 +300,7 @@ mod tests {
             Some("Totals differ by one cent on invoices with more than 20 items.")
         );
         assert_eq!(task.status, Status::InProgress);
+        assert_eq!(task.status_name, "In Progress");
         assert_eq!(task.priority, Priority::Urgent);
         assert_eq!(task.due, Some(millis(1_760_140_800_000)));
         assert_eq!(task.updated_at, millis(1_760_040_000_000));

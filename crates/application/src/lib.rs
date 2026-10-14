@@ -13,6 +13,7 @@ pub mod history;
 pub mod ports;
 pub mod projects;
 pub mod sections;
+pub mod session;
 pub mod settings;
 pub mod tasks;
 

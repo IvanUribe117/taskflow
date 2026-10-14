@@ -34,6 +34,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "adapter-desktop"
+version = "0.1.0"
+dependencies = [
+ "application",
+ "async-trait",
+ "tokio",
+]
+
+[[package]]
 name = "adapter-fs"
 version = "0.1.0"
 dependencies = [
@@ -44,6 +53,7 @@ dependencies = [
  "domain",
  "enumset",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "toml",
@@ -205,6 +215,7 @@ version = "0.1.0"
 dependencies = [
  "adapter-claude-code",
  "adapter-clickup",
+ "adapter-desktop",
  "adapter-fs",
  "adapter-keyring",
  "application",
@@ -518,6 +529,8 @@ dependencies = [
  "chrono",
  "enumset",
  "indexmap",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

@@ -11,6 +11,7 @@ application.workspace = true
 domain.workspace = true
 adapter-clickup.workspace = true
 adapter-claude-code.workspace = true
+adapter-desktop.workspace = true
 adapter-fs.workspace = true
 adapter-keyring.workspace = true
 thiserror.workspace = true

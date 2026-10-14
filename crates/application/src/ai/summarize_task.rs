@@ -36,6 +36,21 @@ impl<'a> SummarizeTask<'a> {
     /// [`AppError::Provider`] si la tarea no existe; [`AppError::Repo`] si fallan los
     /// proyectos o las secciones; [`AppError::Ai`] si falla la IA.
     pub async fn execute(&self, id: &TaskId, limits: AiLimits) -> Result<TaskInsight, AppError> {
+        self.execute_with_note(id, limits, None).await
+    }
+
+    /// Como [`Self::execute`], con lo que pediste al rechazar el análisis anterior. Lo usa
+    /// la sesión de trabajo (`taskflow reject`).
+    ///
+    /// # Errors
+    ///
+    /// Los de [`Self::execute`].
+    pub async fn execute_with_note(
+        &self,
+        id: &TaskId,
+        limits: AiLimits,
+        note: Option<&str>,
+    ) -> Result<TaskInsight, AppError> {
         let (me, mut task, comments) = futures::try_join!(
             self.ctx.tasks.current_user(),
             self.ctx.tasks.task(id),
@@ -64,6 +79,7 @@ impl<'a> SummarizeTask<'a> {
                 repo_path: p.repo_path.clone(),
             }),
             context,
+            note: note.map(str::to_owned),
         };
         let summary = self.ctx.ai.summarize_task(&input).await?;
 

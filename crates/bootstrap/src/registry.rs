@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use application::ports::{SecretName, SecretStore, Summarizer, TaskProvider};
+use application::ports::{SecretName, SecretStore, Summarizer, TaskProvider, TimeTracker};
 use application::settings::{AiKind, AppSettings, ProviderKind, ProviderSettings};
 
 use crate::BuildError;
@@ -39,6 +39,10 @@ pub type FieldValues = BTreeMap<&'static str, String>;
 /// Configuración + secretos → adaptador listo para usar.
 pub type BuildFn = fn(&AppSettings, &dyn SecretStore) -> Result<Arc<dyn TaskProvider>, BuildError>;
 
+/// Configuración + secretos → contador de tiempo del proveedor.
+pub type TimeBuildFn =
+    fn(&AppSettings, &dyn SecretStore) -> Result<Arc<dyn TimeTracker>, BuildError>;
+
 /// Todo lo que el resto del sistema necesita saber de un proveedor de tareas.
 ///
 /// Los campos `fn(...)` son **punteros a función**: no capturan nada (a diferencia de una
@@ -51,6 +55,8 @@ pub struct TaskProviderDescriptor {
     /// Respuestas del asistente → sección `[provider]` de la configuración.
     pub provider_settings: fn(&FieldValues) -> ProviderSettings,
     pub build: BuildFn,
+    /// `None` si el proveedor no tiene contador: se usa `LocalTimeTracker` (objeto nulo).
+    pub build_time: Option<TimeBuildFn>,
 }
 
 impl fmt::Debug for TaskProviderDescriptor {

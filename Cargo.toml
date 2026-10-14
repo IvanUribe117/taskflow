@@ -7,6 +7,7 @@ members = [
     "crates/adapters/fs",
     "crates/adapters/keyring",
     "crates/adapters/claude-code",
+    "crates/adapters/desktop",
     "crates/bootstrap",
     "apps/cli",
 ]
@@ -23,6 +24,7 @@ domain = { path = "crates/domain" }
 application = { path = "crates/application" }
 adapter-clickup = { path = "crates/adapters/clickup" }
 adapter-claude-code = { path = "crates/adapters/claude-code" }
+adapter-desktop = { path = "crates/adapters/desktop" }
 adapter-fs = { path = "crates/adapters/fs" }
 adapter-keyring = { path = "crates/adapters/keyring" }
 bootstrap = { path = "crates/bootstrap" }

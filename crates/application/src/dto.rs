@@ -10,7 +10,9 @@ use domain::context::ContextSection;
 use domain::project::{Project, ProjectKey, ProjectResolver};
 use domain::task::{Comment, StatusOption, Task, UserId};
 
-use crate::ports::{HistoryEntry, PlanTask, RecordSubject, TaskSummary};
+use domain::session::{Publication, ReportOutcome, WorkSession};
+
+use crate::ports::{HistoryEntry, PlanTask, RecordSubject, TaskSummary, TimeEntry};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -606,4 +608,108 @@ impl From<&HistoryEntry> for HistoryItem {
             path: entry.path.clone(),
         }
     }
+}
+
+/// La sesión de trabajo, para `session show` y la salida de cada comando.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SessionView {
+    pub task_id: String,
+    pub title: String,
+    pub url: String,
+    pub project: Option<String>,
+    /// `analyzing`, `awaiting_approval`, `in_progress`, `paused`, `closed` o `aborted`.
+    pub state: &'static str,
+    pub started_at: DateTime<Utc>,
+    /// Minutos con el contador corriendo (sin las pausas).
+    pub elapsed_minutes: i64,
+    pub timer_running: bool,
+    /// `None` mientras se analiza; después, `ready` o `unavailable`.
+    pub report: Option<&'static str>,
+    /// Por qué falló la IA, si falló.
+    pub report_error: Option<String>,
+    pub published_at: Option<DateTime<Utc>>,
+    pub report_path: PathBuf,
+    pub agent_prompt_path: PathBuf,
+    /// Lo que quedó sin aplicar tras un fallo, en palabras (`session retry`).
+    pub pending: Vec<String>,
+}
+
+impl SessionView {
+    #[must_use]
+    pub fn new(
+        session: &WorkSession,
+        now: DateTime<Utc>,
+        report_path: PathBuf,
+        agent_prompt_path: PathBuf,
+    ) -> Self {
+        let (report, report_error) = match &session.report {
+            None => (None, None),
+            Some(ReportOutcome::Ready) => (Some("ready"), None),
+            Some(ReportOutcome::Unavailable { reason }) => {
+                (Some("unavailable"), Some(reason.clone()))
+            }
+        };
+        let published_at = match session.publication {
+            Publication::Draft => None,
+            Publication::Published { at } => Some(at),
+        };
+        Self {
+            task_id: session.task_id.as_str().to_owned(),
+            title: session.title.clone(),
+            url: session.url.clone(),
+            project: session.project.as_ref().map(ToString::to_string),
+            state: session.state.name(),
+            started_at: session.started_at,
+            elapsed_minutes: session.elapsed(now).num_minutes(),
+            timer_running: session.timer_running(),
+            report,
+            report_error,
+            published_at,
+            report_path,
+            agent_prompt_path,
+            pending: session
+                .pending
+                .iter()
+                .map(crate::session::effect_label)
+                .collect(),
+        }
+    }
+}
+
+/// El resultado de un comando de la sesión.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SessionOutcome {
+    pub session: SessionView,
+    /// Lo que no salió pero no detiene la sesión (una notificación, un estado sugerido que
+    /// no existe en la lista...).
+    pub warnings: Vec<String>,
+    /// Dónde quedó archivada, si terminó (`done` o `abort`).
+    pub archived_to: Option<PathBuf>,
+}
+
+/// Un contador del proveedor que ya está corriendo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TimerView {
+    pub task_id: Option<String>,
+    pub task_title: Option<String>,
+    pub started_at: DateTime<Utc>,
+}
+
+impl From<&TimeEntry> for TimerView {
+    fn from(entry: &TimeEntry) -> Self {
+        Self {
+            task_id: entry.task_id.as_ref().map(|id| id.as_str().to_owned()),
+            task_title: entry.task_title.clone(),
+            started_at: entry.started_at,
+        }
+    }
+}
+
+/// Lo que hay que saber antes de `start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StartCheck {
+    /// Una sesión sin terminar: `start` no puede seguir.
+    pub active: Option<SessionView>,
+    /// Un contador corriendo **en otra tarea**: `start` lo detendría (hay que preguntar).
+    pub running_timer: Option<TimerView>,
 }

@@ -1,0 +1,18 @@
+[package]
+name = "adapter-desktop"
+description = "Desktop notifications (macOS: osascript)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+application.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["process"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

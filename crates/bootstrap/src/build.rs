@@ -1,10 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use adapter_fs::{FsConfigStore, FsContextRepository, FsHistoryRepository, FsProjectRepository};
+use adapter_desktop::MacNotifier;
+use adapter_fs::{
+    FsConfigStore, FsContextRepository, FsHistoryRepository, FsProjectRepository, FsSessionStore,
+};
 use adapter_keyring::{EnvSecretStore, KeyringSecretStore, LayeredSecretStore};
 use application::AppContext;
-use application::ports::{ProviderError, SecretError, SecretName, SecretStore, SystemClock};
+use application::ports::{
+    LocalTimeTracker, MultiNotifier, Notifier, ProviderError, SecretError, SecretName, SecretStore,
+    SystemClock, TimeTracker,
+};
 use application::settings::{AppSettings, ConfigError};
 use domain::policy::WeightedPolicy;
 use thiserror::Error;
@@ -60,6 +66,11 @@ pub fn secret_store() -> LayeredSecretStore {
 /// - `projects`: `FsProjectRepository` en [`projects_dir`].
 /// - `ai`: el proveedor de IA que construye el descriptor de `settings.ai.kind`.
 /// - `history`: `FsHistoryRepository` en [`history_dir`].
+/// - `time`: el contador del proveedor si lo tiene y `session.track_time`; si no,
+///   `LocalTimeTracker`.
+/// - `notifier`: un `MultiNotifier` con los canales activos (hoy, el escritorio en macOS
+///   si `session.notify`).
+/// - `sessions`: `FsSessionStore` en [`session_dir`].
 /// - `policy`: `WeightedPolicy` con los pesos de `settings.policy`.
 /// - `clock`: `SystemClock`.
 ///
@@ -82,6 +93,9 @@ pub fn build(
         ))),
         ai: (registry::find_ai(settings.ai.kind).build)(settings, secrets)?,
         history: Arc::new(FsHistoryRepository::new(history_dir(settings, config_path))),
+        time: time_tracker(settings, secrets, descriptor.build_time)?,
+        notifier: Arc::new(notifier(settings)),
+        sessions: Arc::new(FsSessionStore::new(session_dir(settings, config_path))),
         context: Arc::new(FsContextRepository::new(
             context_dir(settings, config_path),
             projects_dir(settings, config_path),
@@ -116,6 +130,36 @@ pub fn projects_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or(Path::new("."))
         .join(&settings.projects.dir)
+}
+
+fn time_tracker(
+    settings: &AppSettings,
+    secrets: &dyn SecretStore,
+    build: Option<crate::registry::TimeBuildFn>,
+) -> Result<Arc<dyn TimeTracker>, BuildError> {
+    match build {
+        Some(build) if settings.session.track_time => build(settings, secrets),
+        _ => Ok(Arc::new(LocalTimeTracker)),
+    }
+}
+
+/// *Composite*: cada canal activo se agrega a la lista. Sin canales, no avisa nada.
+fn notifier(settings: &AppSettings) -> MultiNotifier {
+    let mut channels: Vec<Box<dyn Notifier>> = Vec::new();
+    if settings.session.notify && cfg!(target_os = "macos") {
+        channels.push(Box::new(MacNotifier::default()));
+    }
+    MultiNotifier(channels)
+}
+
+/// La carpeta de las sesiones: `settings.session.dir` relativa a la carpeta de
+/// `config.toml`, o absoluta. Igual que [`projects_dir`].
+#[must_use]
+pub fn session_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(&settings.session.dir)
 }
 
 /// La carpeta del historial: `settings.history.dir` relativa a la carpeta de `config.toml`,
@@ -215,6 +259,40 @@ mod tests {
         );
         settings.history.dir = "/srv/history".into();
         assert_eq!(history_dir(&settings, config), Path::new("/srv/history"));
+    }
+
+    #[test]
+    fn sessions_live_next_to_the_config_file() {
+        let config = Path::new("/home/ivan/.config/taskflow/config.toml");
+
+        assert_eq!(
+            session_dir(&settings(), config),
+            Path::new("/home/ivan/.config/taskflow/sessions")
+        );
+    }
+
+    #[test]
+    fn without_track_time_the_timer_is_local() {
+        let mut settings = settings();
+        settings.session.track_time = false;
+        let secrets = application::testing::MemorySecretStore::default();
+
+        let time = time_tracker(
+            &settings,
+            &secrets,
+            crate::registry::find(settings.provider.kind).build_time,
+        )
+        .unwrap();
+
+        assert_eq!(time.name(), "local");
+    }
+
+    #[test]
+    fn without_notify_there_are_no_channels() {
+        let mut settings = settings();
+        settings.session.notify = false;
+
+        assert!(notifier(&settings).0.is_empty());
     }
 
     #[test]

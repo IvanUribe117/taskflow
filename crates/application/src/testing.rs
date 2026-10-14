@@ -9,14 +9,16 @@ use chrono::{DateTime, FixedOffset, Utc};
 use domain::context::ContextSection;
 use domain::policy::WeightedPolicy;
 use domain::project::{Project, ProjectSlug};
+use domain::session::WorkSession;
 use domain::task::{Comment, LocationNode, LocationSegment, StatusOption, Task, TaskId, UserId};
 
 use crate::AppContext;
 use crate::ports::{
     AiError, Clock, Complexity, ContextRepository, ExposeSecret, HistoryEntry, HistoryFilter,
-    HistoryRecord, HistoryRepository, PlanInput, ProjectRepository, ProviderError, RepoError,
-    SecretError, SecretName, SecretStore, SecretString, Summarizer, SummaryInput, TaskProvider,
-    TaskQuery, TaskSummary, markdown_title,
+    HistoryRecord, HistoryRepository, Notice, Notifier, NotifyError, PlanInput, ProjectRepository,
+    ProviderError, RepoError, SecretError, SecretName, SecretStore, SecretString, SessionStore,
+    Summarizer, SummaryInput, TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker,
+    markdown_title,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
@@ -291,6 +293,9 @@ pub fn context(
         context: Arc::new(FakeContextRepository::default()),
         ai: Arc::new(FakeSummarizer::default()),
         history: Arc::new(FakeHistoryRepository::default()),
+        time: Arc::new(FakeTimeTracker::default()),
+        notifier: Arc::new(FakeNotifier::default()),
+        sessions: Arc::new(FakeSessionStore::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -428,6 +433,203 @@ impl HistoryRepository for FakeHistoryRepository {
             .find(|(saved, _)| saved.path == entry.path)
             .map(|(_, content)| content.clone())
             .ok_or_else(|| RepoError::NotFound(entry.path.display().to_string()))
+    }
+}
+
+/// Contador en memoria: uno solo a la vez, como en `ClickUp`.
+#[derive(Debug, Default)]
+pub struct FakeTimeTracker {
+    running: Mutex<Option<TimeEntry>>,
+    /// `"start"` o `"stop"`, en orden.
+    calls: Mutex<Vec<String>>,
+    failing: bool,
+}
+
+impl FakeTimeTracker {
+    /// Con un contador ya corriendo en otra tarea.
+    pub fn running_on(task: &str) -> Self {
+        let entry = TimeEntry {
+            id: "t-other".into(),
+            task_id: Some(TaskId::new(task).expect("valid id")),
+            task_title: Some(format!("Task {task}")),
+            started_at: domain::testing::at("2026-10-14T14:00:00Z"),
+        };
+        Self {
+            running: Mutex::new(Some(entry)),
+            ..Self::default()
+        }
+    }
+
+    /// `start` y `stop` fallan con `Network`; `current` responde (sin contador).
+    pub fn failing() -> Self {
+        Self {
+            failing: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("lock").clone()
+    }
+
+    pub fn running(&self) -> Option<TimeEntry> {
+        self.running.lock().expect("lock").clone()
+    }
+
+    fn check(&self) -> Result<(), ProviderError> {
+        if self.failing {
+            Err(ProviderError::Network("timer down".into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[async_trait]
+impl TimeTracker for FakeTimeTracker {
+    fn name(&self) -> &'static str {
+        "fake"
+    }
+
+    async fn start(&self, task: &TaskId) -> Result<TimeEntry, ProviderError> {
+        self.calls.lock().expect("lock").push("start".into());
+        self.check()?;
+        let entry = TimeEntry {
+            id: "t-1".into(),
+            task_id: Some(task.clone()),
+            task_title: None,
+            started_at: domain::testing::at("2026-10-14T15:00:00Z"),
+        };
+        *self.running.lock().expect("lock") = Some(entry.clone());
+        Ok(entry)
+    }
+
+    async fn stop(&self) -> Result<Option<TimeEntry>, ProviderError> {
+        self.calls.lock().expect("lock").push("stop".into());
+        self.check()?;
+        Ok(self.running.lock().expect("lock").take())
+    }
+
+    async fn current(&self) -> Result<Option<TimeEntry>, ProviderError> {
+        Ok(self.running())
+    }
+}
+
+/// Avisos en memoria.
+#[derive(Debug, Default)]
+pub struct FakeNotifier {
+    sent: Mutex<Vec<Notice>>,
+    failing: bool,
+}
+
+impl FakeNotifier {
+    pub fn failing() -> Self {
+        Self {
+            failing: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn sent(&self) -> Vec<Notice> {
+        self.sent.lock().expect("lock").clone()
+    }
+}
+
+#[async_trait]
+impl Notifier for FakeNotifier {
+    async fn notify(&self, notice: &Notice) -> Result<(), NotifyError> {
+        if self.failing {
+            return Err(NotifyError("no desktop".into()));
+        }
+        self.sent.lock().expect("lock").push(notice.clone());
+        Ok(())
+    }
+}
+
+/// Sesiones en memoria.
+#[derive(Debug, Default)]
+pub struct FakeSessionStore {
+    active: Mutex<Option<WorkSession>>,
+    reports: Mutex<HashMap<TaskId, String>>,
+    archived: Mutex<Vec<WorkSession>>,
+}
+
+impl FakeSessionStore {
+    pub fn with_active(session: WorkSession) -> Self {
+        Self {
+            active: Mutex::new(Some(session)),
+            ..Self::default()
+        }
+    }
+
+    pub fn current(&self) -> Option<WorkSession> {
+        self.active.lock().expect("lock").clone()
+    }
+
+    pub fn archived(&self) -> Vec<WorkSession> {
+        self.archived.lock().expect("lock").clone()
+    }
+
+    pub fn report(&self, task: &str) -> Option<String> {
+        let id = TaskId::new(task).expect("valid id");
+        self.reports.lock().expect("lock").get(&id).cloned()
+    }
+
+    /// Como si editaras `report.md` a mano.
+    pub fn edit_report(&self, task: &str, markdown: &str) {
+        let id = TaskId::new(task).expect("valid id");
+        self.reports
+            .lock()
+            .expect("lock")
+            .insert(id, markdown.to_owned());
+    }
+}
+
+#[async_trait]
+impl SessionStore for FakeSessionStore {
+    async fn active(&self) -> Result<Option<WorkSession>, RepoError> {
+        Ok(self.current())
+    }
+
+    async fn save(&self, session: &WorkSession) -> Result<(), RepoError> {
+        *self.active.lock().expect("lock") = Some(session.clone());
+        Ok(())
+    }
+
+    async fn save_report(
+        &self,
+        task: &TaskId,
+        report: &str,
+        _agent_prompt: &str,
+    ) -> Result<std::path::PathBuf, RepoError> {
+        self.reports
+            .lock()
+            .expect("lock")
+            .insert(task.clone(), report.to_owned());
+        Ok(self.report_path(task))
+    }
+
+    fn report_path(&self, task: &TaskId) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!("mem/{}/report.md", task.as_str()))
+    }
+
+    fn agent_prompt_path(&self, task: &TaskId) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!("mem/{}/agent-prompt.md", task.as_str()))
+    }
+
+    async fn load_report(&self, task: &TaskId) -> Result<String, RepoError> {
+        self.reports
+            .lock()
+            .expect("lock")
+            .get(task)
+            .cloned()
+            .ok_or_else(|| RepoError::NotFound(format!("report of {}", task.as_str())))
+    }
+
+    async fn archive(&self, session: WorkSession) -> Result<std::path::PathBuf, RepoError> {
+        *self.active.lock().expect("lock") = None;
+        self.archived.lock().expect("lock").push(session);
+        Ok(std::path::PathBuf::from("mem/archive.json"))
     }
 }
 

@@ -14,11 +14,11 @@ El diseño completo está en [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Las
 | 3 | `adapter-clickup` de lectura | Hecho ([guía](docs/learning/fase-3.md)) |
 | 4 | Configuración, `bootstrap` y CLI `today`/`show` | Hecho ([guía](docs/learning/fase-4.md)) |
 | 5 | Proyectos y agrupación | Hecho ([guía](docs/learning/fase-5.md)) |
-| 7 | `close`: cerrar tareas en ClickUp (escritura) | Hecho; falta probarla contra ClickUp real ([guía](docs/learning/fase-7.md)) |
+| 7 | `close`: cerrar tareas en ClickUp (escritura) | Hecho y probado contra ClickUp real ([guía](docs/learning/fase-7.md)) |
 | 6A | Contexto por proyecto (secciones, `context list`/`preview`) | Hecho ([guía](docs/learning/fase-6.md)) |
-| 6B | IA: `show --ai`, `plan` y prompt para el agente con Claude Code (`claude -p`), leyendo el repositorio del proyecto | Hecho; falta probarla con tus tareas ([guía](docs/learning/fase-6b.md)) |
+| 6B | IA: `show --ai`, `plan` y prompt para el agente con Claude Code (`claude -p`), leyendo el repositorio del proyecto | Hecho y probado con tus tareas ([guía](docs/learning/fase-6b.md)) |
 | 6B+ | Historial: `show --ai --save`, `plan --save` y `history`, por proyecto | Hecho ([guía](docs/learning/fase-6b.md#ajuste-posterior-historial-de-análisis-y-planes)) |
-| 8 | Sesión de trabajo (`start` → `done`) | Pendiente |
+| 8 | Sesión de trabajo: `start` → `approve` → `done`, contador, reporte, notificaciones | Hecho y probado contra ClickUp, contador incluido ([guía](docs/learning/fase-8.md)) |
 
 Orden acordado el 2026-10-14: **7 → 6 → 8**. La 7 no depende de la IA y es útil desde ya; la 8 necesita la 6 (el reporte con IA) y la 7 (escribir en ClickUp).
 

@@ -61,6 +61,7 @@ fn input(repo: Option<PathBuf>) -> SummaryInput {
             repo_path: repo,
         }),
         context: BuiltContext::default(),
+        note: None,
     }
 }
 

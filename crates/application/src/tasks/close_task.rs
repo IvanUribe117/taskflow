@@ -124,7 +124,7 @@ impl<'a> CloseTask<'a> {
 }
 
 /// `unknown status `QA`; available: to do, in progress, complete`. Ya está hecha.
-fn unknown_status(name: &str, options: &[StatusOption]) -> String {
+pub(crate) fn unknown_status(name: &str, options: &[StatusOption]) -> String {
     let available: Vec<&str> = options.iter().map(|o| o.name.as_str()).collect();
     format!(
         "unknown status `{name}`; available: {}",

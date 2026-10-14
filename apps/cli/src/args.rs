@@ -108,6 +108,56 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Empieza una sesión de trabajo: contador, análisis con IA y estado sugerido.
+    Start {
+        #[arg(value_parser = parse_task_id)]
+        task_id: TaskId,
+        /// Si hay un contador corriendo en otra tarea, detenerlo sin preguntar.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Aprueba el reporte y pasa la tarea a "en progreso" (o al estado que indiques).
+    Approve {
+        /// Estado explícito en vez del sugerido (`provider.status_map.in_progress`).
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Rechaza el reporte y pide otro a la IA con tu nota.
+    Reject {
+        /// Qué falta o qué corregir.
+        note: String,
+    },
+    /// Pausa la sesión y detiene el contador.
+    Pause,
+    /// Reanuda la sesión y el contador.
+    Resume,
+    /// Termina la sesión: estado final, comentario opcional y contador detenido.
+    Done {
+        /// Estado final (sin distinguir mayúsculas). Sin él, se elige de una lista.
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        comment: Option<String>,
+        /// No preguntar: usa el estado sugerido si no se indica --status.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Cancela la sesión y detiene el contador.
+    Abort {
+        /// Devuelve la tarea al estado que tenía al empezar.
+        #[arg(long)]
+        restore_status: bool,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// La sesión activa: ver, cambiar el estado de la tarea o reintentar.
+    Session {
+        #[command(subcommand)]
+        command: Option<SessionSubcommand>,
+    },
+    /// El reporte de la sesión: ver o publicar como comentario.
+    #[command(subcommand)]
+    Report(ReportSubcommand),
     /// Ver y cambiar la configuración.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -117,6 +167,30 @@ pub enum Command {
     /// Secciones de contexto que acompañan a la IA.
     #[command(subcommand)]
     Context(ContextCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SessionSubcommand {
+    /// Estado, tiempo, reporte y lo pendiente (es lo que hace `taskflow session` solo).
+    Show {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cambia el estado de la tarea sin cambiar la sesión (por ejemplo, `blocked`).
+    Status { name: String },
+    /// Reintenta lo que quedó pendiente tras un error (o el análisis, si se cortó).
+    Retry,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ReportSubcommand {
+    /// El reporte tal como está en disco, con tus ediciones.
+    Show,
+    /// Lo publica como comentario en la tarea (pide confirmación).
+    Publish {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -448,6 +522,42 @@ mod tests {
             panic!("expected context list");
         };
         assert_eq!(project.map(|p| p.to_string()).as_deref(), Some("acme"));
+    }
+
+    #[test]
+    fn session_commands() {
+        assert!(matches!(
+            parse(&["start", "86b1", "--yes"]).unwrap().command,
+            Command::Start { yes: true, .. }
+        ));
+        assert!(matches!(
+            parse(&["approve", "--status", "code review"])
+                .unwrap()
+                .command,
+            Command::Approve { status: Some(_) }
+        ));
+        assert!(parse(&["reject"]).is_err(), "reject needs a note");
+        assert!(matches!(
+            parse(&["session"]).unwrap().command,
+            Command::Session { command: None }
+        ));
+        assert!(matches!(
+            parse(&["session", "status", "blocked"]).unwrap().command,
+            Command::Session {
+                command: Some(SessionSubcommand::Status { .. })
+            }
+        ));
+        assert!(matches!(
+            parse(&["report", "publish"]).unwrap().command,
+            Command::Report(ReportSubcommand::Publish { yes: false })
+        ));
+        assert!(matches!(
+            parse(&["abort", "--restore-status"]).unwrap().command,
+            Command::Abort {
+                restore_status: true,
+                yes: false
+            }
+        ));
     }
 
     #[test]

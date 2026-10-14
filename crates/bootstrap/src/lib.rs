@@ -16,4 +16,5 @@ pub mod registry;
 
 pub use build::{
     BuildError, build, config_store, context_dir, history_dir, projects_dir, secret_store,
+    session_dir,
 };

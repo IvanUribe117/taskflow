@@ -200,22 +200,31 @@ impl ProjectContext {
         &self.sections
     }
 
-    /// Las secciones que se envían para un uso, sin pasar de `budget_chars` (FR-37, FR-38):
+    /// Las secciones que se envían para uno o varios usos, sin pasar de `budget_chars`
+    /// (FR-37, FR-38):
     ///
     /// 1. Descartar las privadas.
-    /// 2. Quedarse con las que incluyen `usage`.
+    /// 2. Quedarse con las que incluyen **alguno** de los `usages`.
     /// 3. Ordenar por `(priority, key)`: primero la prioridad, y a igual prioridad, la clave.
     /// 4. Recorrerlas acumulando el largo del `body` en **caracteres** (`chars().count()`):
     ///    si cabe en lo que queda del presupuesto, va a `included`; si no, su clave va a
     ///    `omitted` y se **sigue** con la siguiente (una más corta todavía puede caber).
     #[must_use]
-    pub fn select(&self, usage: Usage, budget_chars: usize) -> ContextSelection<'_> {
+    ///
+    /// `usages` acepta un solo `Usage` o un `EnumSet<Usage>`: `select(Usage::Plan, ..)` y
+    /// `select(Usage::Summary | Usage::AgentPrompt, ..)` funcionan igual.
+    pub fn select(
+        &self,
+        usages: impl Into<EnumSet<Usage>>,
+        budget_chars: usize,
+    ) -> ContextSelection<'_> {
+        let usages = usages.into();
         let mut used = 0;
         let mut selection = ContextSelection::default();
         let mut candidates = self
             .sections
             .iter()
-            .filter(|s| !s.private && s.usage.contains(usage))
+            .filter(|s| !s.private && !s.usage.is_disjoint(usages))
             .collect::<Vec<_>>();
 
         candidates.sort_by_key(|s| (s.priority, &s.key));
@@ -346,6 +355,21 @@ mod tests {
         assert_eq!(keys(&summary.included), ["negocio"]);
         assert_eq!(keys(&agent.included), ["despliegue", "negocio"]);
         assert!(summary.omitted.is_empty());
+    }
+
+    #[test]
+    fn select_accepts_several_usages() {
+        let mut summary = section("negocio", 1, "x");
+        summary.usage = enum_set!(Usage::Summary);
+        let mut agent = section("codigo", 1, "x");
+        agent.usage = enum_set!(Usage::AgentPrompt);
+        let mut plan = section("plan", 1, "x");
+        plan.usage = enum_set!(Usage::Plan);
+        let context = ProjectContext::merge(vec![], vec![summary, agent, plan]);
+
+        let selection = context.select(Usage::Summary | Usage::AgentPrompt, 1000);
+
+        assert_eq!(keys(&selection.included), ["codigo", "negocio"]);
     }
 
     #[test]

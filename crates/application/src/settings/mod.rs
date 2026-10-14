@@ -34,6 +34,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub context: ContextSettings,
     #[serde(default)]
+    pub ai: AiSettings,
+    #[serde(default)]
     pub ui: UiSettings,
 }
 
@@ -97,6 +99,67 @@ pub struct PolicySettings {
     pub due_this_week_bonus: i64,
     pub pending_comment_weight: i64,
     pub in_review_bonus: i64,
+}
+
+/// Valores aceptados en `ai.effort`.
+const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// Proveedores de IA conocidos (ADR-027). En TOML: `kind = "claude_code"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiKind {
+    /// `claude -p`, con la sesión de Claude Code del usuario.
+    #[default]
+    ClaudeCode,
+}
+
+impl AiKind {
+    /// Todos, en el orden en que los ofrece el asistente.
+    pub const ALL: [Self; 1] = [Self::ClaudeCode];
+
+    /// El valor de `config.toml`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude_code",
+        }
+    }
+}
+
+/// Sección `[ai]` (§13.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AiSettings {
+    pub kind: AiKind,
+    /// Modelo del proveedor (`"sonnet"`, `"opus"`...). Sin valor, el de su configuración.
+    pub model: Option<String>,
+    /// Esfuerzo: `low`, `medium`, `high`, `xhigh` o `max`. Sin valor, el del proveedor.
+    pub effort: Option<String>,
+    /// Segundos máximos de espera por respuesta.
+    pub timeout_secs: u64,
+    /// Tareas que recibe `plan`.
+    pub max_tasks: usize,
+    /// Caracteres de la descripción que se envían (el resto se recorta).
+    pub max_description_chars: usize,
+    /// Comentarios más recientes que se envían.
+    pub max_comments: usize,
+    /// Si el proveedor puede leer el repositorio del proyecto (`repo_path`), solo lectura.
+    pub read_repo: bool,
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            kind: AiKind::ClaudeCode,
+            model: None,
+            effort: None,
+            timeout_secs: 300,
+            max_tasks: 10,
+            max_description_chars: 4_000,
+            max_comments: 10,
+            read_repo: true,
+        }
+    }
 }
 
 /// Sección `[context]` (§13.1).
@@ -170,6 +233,7 @@ impl AppSettings {
             policy: PolicySettings::default(),
             projects: ProjectsSettings::default(),
             context: ContextSettings::default(),
+            ai: AiSettings::default(),
             ui: UiSettings::default(),
         }
     }
@@ -186,6 +250,8 @@ impl AppSettings {
     ///    de `status_map` → clave `provider.status_map`, una vez por nombre repetido.
     /// 5. `projects.default`, si existe, debe ser un `ProjectSlug` válido
     ///    → clave `projects.default`. (Fase 5)
+    /// 6. `ai.effort`, si existe, debe ser uno de `low`, `medium`, `high`, `xhigh` o `max`;
+    ///    y `ai.timeout_secs` mayor que 0. (Fase 6)
     ///
     /// # Errors
     ///
@@ -246,6 +312,21 @@ impl AppSettings {
             && let Err(error) = default.parse::<ProjectSlug>()
         {
             issues.push(SettingsIssue::new("projects.default", error.to_string()));
+        }
+
+        if let Some(effort) = &self.ai.effort
+            && !EFFORTS.contains(&effort.as_str())
+        {
+            issues.push(SettingsIssue::new(
+                "ai.effort",
+                format!("`{effort}` is not one of {}", EFFORTS.join(", ")),
+            ));
+        }
+        if self.ai.timeout_secs == 0 {
+            issues.push(SettingsIssue::new(
+                "ai.timeout_secs",
+                "must be greater than 0",
+            ));
         }
 
         if issues.is_empty() {
@@ -423,6 +504,31 @@ mod tests {
         assert_eq!(issue_keys(settings.validate()), ["projects.default"]);
 
         settings.projects.default = Some("acme".into());
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn ai_section_defaults_to_claude_code() {
+        let settings = clickup("9001");
+
+        assert_eq!(settings.ai.kind, AiKind::ClaudeCode);
+        assert_eq!(settings.ai.kind.as_str(), "claude_code");
+        assert!(settings.ai.read_repo);
+    }
+
+    #[test]
+    fn ai_effort_and_timeout_are_validated() {
+        let mut settings = clickup("9001");
+        settings.ai.effort = Some("turbo".into());
+        settings.ai.timeout_secs = 0;
+
+        assert_eq!(
+            issue_keys(settings.validate()),
+            ["ai.effort", "ai.timeout_secs"]
+        );
+
+        settings.ai.effort = Some("high".into());
+        settings.ai.timeout_secs = 120;
         assert!(settings.validate().is_ok());
     }
 

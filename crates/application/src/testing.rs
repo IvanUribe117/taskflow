@@ -13,8 +13,9 @@ use domain::task::{Comment, LocationNode, LocationSegment, StatusOption, Task, T
 
 use crate::AppContext;
 use crate::ports::{
-    Clock, ContextRepository, ExposeSecret, ProjectRepository, ProviderError, RepoError,
-    SecretError, SecretName, SecretStore, SecretString, TaskProvider, TaskQuery,
+    AiError, Clock, Complexity, ContextRepository, ExposeSecret, PlanInput, ProjectRepository,
+    ProviderError, RepoError, SecretError, SecretName, SecretStore, SecretString, Summarizer,
+    SummaryInput, TaskProvider, TaskQuery, TaskSummary,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
@@ -287,6 +288,7 @@ pub fn context(
         tasks: tasks.clone(),
         projects: Arc::new(FakeProjectRepository::new(projects)),
         context: Arc::new(FakeContextRepository::default()),
+        ai: Arc::new(FakeSummarizer::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -359,5 +361,76 @@ impl ContextRepository for FakeContextRepository {
 
     async fn project_sections(&self, slug: &ProjectSlug) -> Result<Vec<ContextSection>, RepoError> {
         Ok(self.projects.get(slug).cloned().unwrap_or_default())
+    }
+}
+
+/// IA en memoria: devuelve respuestas fijas y guarda lo que recibió.
+#[derive(Debug, Default)]
+pub struct FakeSummarizer {
+    failing: bool,
+    plan: String,
+    summaries: Mutex<Vec<SummaryInput>>,
+    plans: Mutex<Vec<PlanInput>>,
+}
+
+impl FakeSummarizer {
+    /// Todas las llamadas fallan con `AiError::Failed`.
+    #[must_use]
+    pub fn failing() -> Self {
+        Self {
+            failing: true,
+            ..Self::default()
+        }
+    }
+
+    /// El texto que devuelve `plan_day`.
+    #[must_use]
+    pub fn with_plan(mut self, plan: &str) -> Self {
+        plan.clone_into(&mut self.plan);
+        self
+    }
+
+    /// El resumen fijo que devuelve `summarize_task`.
+    pub fn summary() -> TaskSummary {
+        TaskSummary {
+            what_is_requested: "Corregir el redondeo".into(),
+            suggested_steps: vec!["Reproducir".into(), "Corregir".into()],
+            open_questions: vec!["¿Por línea o por total?".into()],
+            estimated_complexity: Complexity::Medium,
+            agent_prompt: "Corrige el redondeo en invoicing.".into(),
+        }
+    }
+
+    /// Las entradas recibidas por `summarize_task`, en orden.
+    pub fn summary_inputs(&self) -> Vec<SummaryInput> {
+        self.summaries.lock().expect("lock").clone()
+    }
+
+    /// Las entradas recibidas por `plan_day`, en orden.
+    pub fn plan_inputs(&self) -> Vec<PlanInput> {
+        self.plans.lock().expect("lock").clone()
+    }
+}
+
+#[async_trait]
+impl Summarizer for FakeSummarizer {
+    fn name(&self) -> &'static str {
+        "fake"
+    }
+
+    async fn summarize_task(&self, input: &SummaryInput) -> Result<TaskSummary, AiError> {
+        self.summaries.lock().expect("lock").push(input.clone());
+        if self.failing {
+            return Err(AiError::Failed("fake failure".into()));
+        }
+        Ok(Self::summary())
+    }
+
+    async fn plan_day(&self, input: &PlanInput) -> Result<String, AiError> {
+        self.plans.lock().expect("lock").push(input.clone());
+        if self.failing {
+            return Err(AiError::Failed("fake failure".into()));
+        }
+        Ok(self.plan.clone())
     }
 }

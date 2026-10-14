@@ -10,6 +10,7 @@
 #![warn(clippy::pedantic)]
 
 mod build;
+mod claude_code;
 mod clickup;
 pub mod registry;
 

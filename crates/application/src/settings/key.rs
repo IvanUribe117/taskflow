@@ -30,6 +30,14 @@ impl ConfigKey {
         "projects.default",
         "context.global_dir",
         "context.budget_chars",
+        "ai.kind",
+        "ai.model",
+        "ai.effort",
+        "ai.timeout_secs",
+        "ai.max_tasks",
+        "ai.max_description_chars",
+        "ai.max_comments",
+        "ai.read_repo",
         "ui.group_by",
     ];
 

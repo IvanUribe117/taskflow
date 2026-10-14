@@ -42,7 +42,7 @@ impl<'a> PreviewContext<'a> {
         let context = BuildContext::new(self.ctx)
             .execute(ContextRequest {
                 project: project.map(|p| p.slug.clone()),
-                usage,
+                usage: usage.into(),
                 budget_chars,
             })
             .await?;

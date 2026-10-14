@@ -68,7 +68,18 @@ pub fn config_init(store: &impl ConfigStore, secrets: &impl SecretStore) -> anyh
     }
 
     // Validar antes de guardar nada: ni el token ni el archivo quedan a medias.
-    let settings = AppSettings::new((descriptor.provider_settings)(&values));
+    // Proveedor de IA (ADR-027). Hoy solo hay uno y no pide nada, pero el asistente ya
+    // recorre el registro: agregar otro no cambia este código.
+    let ai_providers = registry::ai_providers();
+    let ai_names: Vec<&str> = ai_providers.iter().map(|p| p.display_name).collect();
+    let ai_choice = Select::with_theme(&theme)
+        .with_prompt("Proveedor de IA")
+        .items(&ai_names)
+        .default(0)
+        .interact()?;
+
+    let mut settings = AppSettings::new((descriptor.provider_settings)(&values));
+    settings.ai.kind = ai_providers[ai_choice].kind;
     settings.validate()?;
     for (name, value) in new_secrets {
         secrets.set(name, value)?;

@@ -9,11 +9,11 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use application::ports::{SecretName, SecretStore, TaskProvider};
-use application::settings::{AppSettings, ProviderKind, ProviderSettings};
+use application::ports::{SecretName, SecretStore, Summarizer, TaskProvider};
+use application::settings::{AiKind, AppSettings, ProviderKind, ProviderSettings};
 
 use crate::BuildError;
-use crate::clickup;
+use crate::{claude_code, clickup};
 
 /// Un dato que el asistente le pide al usuario.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +62,47 @@ impl fmt::Debug for TaskProviderDescriptor {
     }
 }
 
+/// Configuración + secretos → proveedor de IA listo para usar.
+pub type AiBuildFn = fn(&AppSettings, &dyn SecretStore) -> Result<Arc<dyn Summarizer>, BuildError>;
+
+/// Lo mismo que [`TaskProviderDescriptor`], para los proveedores de IA (ADR-027).
+#[derive(Clone, Copy)]
+pub struct AiProviderDescriptor {
+    pub kind: AiKind,
+    pub display_name: &'static str,
+    /// Lo que pide el asistente. Claude Code no pide nada; una API pediría su clave.
+    pub fields: &'static [FieldSpec],
+    pub build: AiBuildFn,
+}
+
+impl fmt::Debug for AiProviderDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AiProviderDescriptor")
+            .field("kind", &self.kind)
+            .field("display_name", &self.display_name)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Todos los proveedores de IA, en el orden en que los ofrece el asistente.
+#[must_use]
+pub fn ai_providers() -> &'static [AiProviderDescriptor] {
+    &[claude_code::DESCRIPTOR]
+}
+
+/// El descriptor de IA de `kind`.
+///
+/// # Panics
+///
+/// Si `kind` no tiene descriptor (lo detecta `every_ai_kind_has_a_descriptor`).
+#[must_use]
+pub fn find_ai(kind: AiKind) -> &'static AiProviderDescriptor {
+    ai_providers()
+        .iter()
+        .find(|descriptor| descriptor.kind == kind)
+        .expect("every AiKind has a descriptor")
+}
+
 /// Todos los proveedores de tareas, en el orden en que los ofrece el asistente.
 #[must_use]
 pub fn task_providers() -> &'static [TaskProviderDescriptor] {
@@ -90,6 +131,13 @@ mod tests {
     fn every_provider_kind_has_a_descriptor() {
         for kind in ProviderKind::ALL {
             assert_eq!(find(kind).kind, kind);
+        }
+    }
+
+    #[test]
+    fn every_ai_kind_has_a_descriptor() {
+        for kind in AiKind::ALL {
+            assert_eq!(find_ai(kind).kind, kind);
         }
     }
 

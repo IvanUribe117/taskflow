@@ -7,6 +7,8 @@ use chrono::{DateTime, Utc};
 use domain::context::ContextSection;
 use domain::project::{Project, ProjectKey, ProjectResolver};
 use domain::task::{Comment, StatusOption, Task, UserId};
+
+use crate::ports::{PlanTask, TaskSummary};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -231,6 +233,27 @@ pub struct ContextPreview {
     pub project: Option<ProjectView>,
     pub usage: String,
     pub context: BuiltContext,
+}
+
+/// `show --ai`: el detalle de la tarea más el análisis de la IA (UC-03).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TaskInsight {
+    pub detail: TaskDetail,
+    pub summary: TaskSummary,
+}
+
+/// `plan`: las tareas del día y, si la IA respondió, el plan (UC-02).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DailyPlan {
+    pub generated_at: DateTime<Utc>,
+    /// En orden de prioridad.
+    pub tasks: Vec<PlanTask>,
+    /// El plan en Markdown, o `None` si no hay tareas o si la IA falló.
+    pub plan: Option<String>,
+    /// Por qué no hay plan, si la IA falló (degradación elegante: la lista sigue sirviendo).
+    pub ai_error: Option<String>,
+    /// Secciones de contexto que no entraron en el presupuesto.
+    pub omitted_sections: Vec<String>,
 }
 
 /// Detalle de una tarea para `show` (UC-03). En la fase 6 se suma el resumen de la IA.

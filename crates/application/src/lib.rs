@@ -5,6 +5,7 @@
 //! directamente. Ver `docs/ARCHITECTURE.md`, §10 y §11.
 #![warn(clippy::pedantic)]
 
+pub mod ai;
 pub mod context;
 pub mod dto;
 pub mod error;

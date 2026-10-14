@@ -58,6 +58,7 @@ pub fn secret_store() -> LayeredSecretStore {
 ///
 /// - `tasks`: el adaptador que construye el descriptor de `settings.provider.kind`.
 /// - `projects`: `FsProjectRepository` en [`projects_dir`].
+/// - `ai`: el proveedor de IA que construye el descriptor de `settings.ai.kind`.
 /// - `policy`: `WeightedPolicy` con los pesos de `settings.policy`.
 /// - `clock`: `SystemClock`.
 ///
@@ -78,6 +79,7 @@ pub fn build(
             settings,
             config_path,
         ))),
+        ai: (registry::find_ai(settings.ai.kind).build)(settings, secrets)?,
         context: Arc::new(FsContextRepository::new(
             context_dir(settings, config_path),
             projects_dir(settings, config_path),
@@ -153,6 +155,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(ctx.tasks.name(), "clickup");
+        assert_eq!(ctx.ai.name(), "claude_code");
     }
 
     #[test]

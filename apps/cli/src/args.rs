@@ -50,6 +50,23 @@ pub enum Command {
         task_id: TaskId,
         #[arg(long)]
         json: bool,
+        /// Agrega el análisis de la IA: resumen, pasos, preguntas y prompt para el agente.
+        #[arg(long)]
+        ai: bool,
+        /// Guarda el prompt para el agente en este archivo (requiere --ai).
+        #[arg(long, value_name = "FILE", requires = "ai")]
+        out: Option<PathBuf>,
+    },
+    /// Plan del día con IA a partir de tus tareas priorizadas.
+    Plan {
+        /// Máximo de tareas (por defecto, `ai.max_tasks`).
+        #[arg(long)]
+        max: Option<usize>,
+        /// Solo un proyecto; también suma su contexto.
+        #[arg(long, value_name = "SLUG")]
+        project: Option<ProjectSlug>,
+        #[arg(long)]
+        json: bool,
     },
     /// Cierra una tarea: estado final y comentario opcional, con confirmación.
     Close {
@@ -194,10 +211,38 @@ mod tests {
     fn show_parses_the_task_id() {
         let cli = parse(&["show", "86b2x1abc"]).unwrap();
 
-        let Command::Show { task_id, json } = cli.command else {
+        let Command::Show { task_id, json, .. } = cli.command else {
             panic!("expected show");
         };
         assert_eq!(task_id.as_str(), "86b2x1abc");
+        assert!(!json);
+    }
+
+    #[test]
+    fn show_with_ai_and_output_file() {
+        let cli = parse(&["show", "86b2x1abc", "--ai", "--out", "prompt.md"]).unwrap();
+
+        let Command::Show { ai, out, .. } = cli.command else {
+            panic!("expected show");
+        };
+        assert!(ai);
+        assert_eq!(out, Some(PathBuf::from("prompt.md")));
+    }
+
+    #[test]
+    fn out_requires_ai() {
+        assert!(parse(&["show", "86b2x1abc", "--out", "prompt.md"]).is_err());
+    }
+
+    #[test]
+    fn plan_flags() {
+        let cli = parse(&["plan", "--max", "5", "--project", "idk-base"]).unwrap();
+
+        let Command::Plan { max, project, json } = cli.command else {
+            panic!("expected plan");
+        };
+        assert_eq!(max, Some(5));
+        assert_eq!(project.map(|p| p.to_string()).as_deref(), Some("idk-base"));
         assert!(!json);
     }
 

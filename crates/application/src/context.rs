@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use domain::policy::PrioritizationPolicy;
 
-use crate::ports::{Clock, ContextRepository, ProjectRepository, TaskProvider};
+use crate::ports::{Clock, ContextRepository, ProjectRepository, Summarizer, TaskProvider};
 
 /// Todas las dependencias que necesitan los casos de uso (§11.1).
 ///
@@ -14,6 +14,7 @@ pub struct AppContext {
     pub tasks: Arc<dyn TaskProvider>,
     pub projects: Arc<dyn ProjectRepository>,
     pub context: Arc<dyn ContextRepository>,
+    pub ai: Arc<dyn Summarizer>,
     pub policy: Arc<dyn PrioritizationPolicy>,
     pub clock: Arc<dyn Clock>,
 }
@@ -23,6 +24,7 @@ impl fmt::Debug for AppContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AppContext")
             .field("tasks", &self.tasks.name())
+            .field("ai", &self.ai.name())
             .finish_non_exhaustive()
     }
 }

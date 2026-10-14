@@ -8,6 +8,7 @@ mod config_store;
 mod context_repository;
 mod project_repository;
 mod secret_store;
+mod summarizer;
 mod task_provider;
 
 pub use clock::{Clock, SystemClock};
@@ -15,6 +16,10 @@ pub use config_store::ConfigStore;
 pub use context_repository::ContextRepository;
 pub use project_repository::{ProjectRepository, RepoError};
 pub use secret_store::{SecretError, SecretName, SecretStore};
+pub use summarizer::{
+    AiError, Complexity, PlanInput, PlanTask, ProjectBrief, Summarizer, SummaryInput, TaskBrief,
+    TaskSummary,
+};
 pub use task_provider::{ProviderError, TaskProvider, TaskQuery};
 
 /// Reexportados para que los adaptadores usen la misma versión de `secrecy` que el puerto.

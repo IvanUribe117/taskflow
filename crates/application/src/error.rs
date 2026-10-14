@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::ports::{ProviderError, RepoError};
+use crate::ports::{AiError, ProviderError, RepoError};
 
 /// Error de cualquier caso de uso. Envuelve los errores de los puertos con `#[from]`,
 /// así el operador `?` los convierte automáticamente.
@@ -11,6 +11,8 @@ pub enum AppError {
     Provider(#[from] ProviderError),
     #[error(transparent)]
     Repo(#[from] RepoError),
+    #[error(transparent)]
+    Ai(#[from] AiError),
     /// Datos de entrada que no cumplen las reglas del caso de uso.
     #[error("{0}")]
     InvalidInput(String),

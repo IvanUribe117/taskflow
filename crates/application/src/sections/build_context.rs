@@ -1,5 +1,6 @@
 use domain::context::{ProjectContext, SectionRole, Usage};
 use domain::project::ProjectSlug;
+use enumset::EnumSet;
 
 use crate::dto::{BuiltContext, ContextBlock};
 use crate::{AppContext, AppError};
@@ -9,7 +10,8 @@ use crate::{AppContext, AppError};
 pub struct ContextRequest {
     /// `None`: solo las secciones globales (tarea sin proyecto).
     pub project: Option<ProjectSlug>,
-    pub usage: Usage,
+    /// Uno o varios usos: `Usage::Plan.into()` o `Usage::Summary | Usage::AgentPrompt`.
+    pub usage: EnumSet<Usage>,
     /// `context.budget_chars` de la configuración.
     pub budget_chars: usize,
 }
@@ -95,7 +97,7 @@ mod tests {
     fn request(project: Option<&str>, usage: Usage, budget_chars: usize) -> ContextRequest {
         ContextRequest {
             project: project.map(|p| p.parse().unwrap()),
-            usage,
+            usage: usage.into(),
             budget_chars,
         }
     }

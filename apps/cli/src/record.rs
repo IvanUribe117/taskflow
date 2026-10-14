@@ -144,6 +144,8 @@ mod tests {
             },
             summary: TaskSummary {
                 what_is_requested: "Corregir el redondeo.".into(),
+                acceptance_criteria: vec![],
+                risks: vec![],
                 suggested_steps: vec!["Reproducir".into()],
                 open_questions: vec![],
                 estimated_complexity: Complexity::Low,

@@ -6,8 +6,12 @@
 use application::AppContext;
 use application::ai::AiLimits;
 use application::dto::SessionOutcome;
-use application::session::{HandleSession, RetrySession, SessionPrefs, ShowSession, StartSession};
+use application::session::{
+    HandleSession, PrepareAgent, RetrySession, SessionPrefs, ShowSession, StartSession, Suggestion,
+    suggested_statuses,
+};
 use application::settings::AppSettings;
+use application::tasks::GetTodayTasks;
 use application::tasks::PrepareClose;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, Select};
@@ -24,6 +28,7 @@ pub fn prefs(settings: &AppSettings) -> SessionPrefs {
     SessionPrefs {
         ready: settings.provider.status_map.ready.clone(),
         working: settings.provider.status_map.in_progress.clone(),
+        done: settings.provider.status_map.done.clone(),
         limits: AiLimits {
             max_description_chars: settings.ai.max_description_chars,
             max_comments: settings.ai.max_comments,
@@ -39,32 +44,66 @@ fn print(ctx: &AppContext, outcome: &SessionOutcome) {
     );
 }
 
-/// `taskflow start <TASK_ID> [--yes]`.
+/// `taskflow start [TASK_ID] [--yes]`.
 ///
-/// 1. `StartSession::check`: si ya hay una sesión, se muestra y se termina con error.
-/// 2. Si hay un contador en otra tarea: con `--yes` se detiene; si no, se pregunta
-///    (por defecto, sí). Si respondes que no, no se empieza nada.
-/// 3. `StartSession::execute`. La IA puede tardar: se avisa en la salida de errores.
+/// 1. Sin ID, eliges la tarea de tu lista priorizada (la misma de `today`) (FR-52).
+/// 2. `StartSession::check`. Si ya hay una sesión: la muestra y ofrece terminarla,
+///    abortarla o cancelar (FR-66). Hay una sola sesión a la vez, como el contador.
+/// 3. Si hay un contador en otra tarea: con `--yes` se detiene; si no, se pregunta.
+/// 4. `StartSession::execute` y, si el reporte quedó listo, se muestra (FR-57).
 ///
 /// # Errors
 ///
-/// Los del caso de uso.
+/// Los del caso de uso o de la entrada.
 pub async fn start(
     ctx: &AppContext,
     settings: &AppSettings,
-    task_id: &TaskId,
+    task_id: Option<TaskId>,
     yes: bool,
 ) -> anyhow::Result<()> {
-    let check = StartSession::new(ctx).check(task_id).await?;
+    let theme = ColorfulTheme::default();
+    let task_id = match task_id {
+        Some(id) => id,
+        None => match pick_task(ctx, settings, &theme).await? {
+            Some(id) => id,
+            None => return Ok(()),
+        },
+    };
+
+    let check = StartSession::new(ctx).check(&task_id).await?;
     if let Some(active) = &check.active {
         println!("{}", presenter::session(active, ctx.clock.offset()));
-        anyhow::bail!("ya hay una sesión activa; termínala con `taskflow done` o `taskflow abort`");
+        if yes {
+            anyhow::bail!(
+                "ya hay una sesión activa; termínala con `taskflow done` o `taskflow abort`"
+            );
+        }
+        let choice = Select::with_theme(&theme)
+            .with_prompt("Ya hay una sesión activa (solo puede haber una). ¿Qué hago con ella?")
+            .items(&[
+                "Terminarla (done) y empezar la nueva",
+                "Abortarla y empezar la nueva",
+                "Nada: cancelar",
+            ])
+            .default(2)
+            .interact()?;
+        match choice {
+            0 => done(ctx, settings, None, None, false).await?,
+            1 => abort(ctx, settings, false, false).await?,
+            _ => {
+                println!("Cancelado. No se cambió nada.");
+                return Ok(());
+            }
+        }
+        if ShowSession::new(ctx).execute().await?.is_some() {
+            return Ok(()); // Canceló en la confirmación de done/abort.
+        }
     }
     let mut stop_running = false;
     if let Some(timer) = &check.running_timer {
         let question = presenter::running_timer(timer, ctx.clock.now(), ctx.clock.offset());
         stop_running = yes
-            || Confirm::with_theme(&ColorfulTheme::default())
+            || Confirm::with_theme(&theme)
                 .with_prompt(format!("{question} ¿Detenerlo y empezar la sesión?"))
                 .default(true)
                 .interact()?;
@@ -80,10 +119,47 @@ pub async fn start(
         ctx.ai.name()
     );
     let outcome = StartSession::new(ctx)
-        .execute(task_id, stop_running, &prefs(settings))
+        .execute(&task_id, stop_running, &prefs(settings))
         .await?;
+    print_report(ctx, &outcome).await;
     print(ctx, &outcome);
     Ok(())
+}
+
+/// La lista de `today`, para elegir una tarea. `None` si no hay tareas.
+async fn pick_task(
+    ctx: &AppContext,
+    settings: &AppSettings,
+    theme: &ColorfulTheme,
+) -> anyhow::Result<Option<TaskId>> {
+    let report = GetTodayTasks::new(ctx)
+        .execute(super::today::query(settings, None, false, None))
+        .await?;
+    let tasks: Vec<_> = report.groups.iter().flat_map(|g| &g.tasks).collect();
+    if tasks.is_empty() {
+        println!("No tienes tareas pendientes.");
+        return Ok(None);
+    }
+    let labels: Vec<String> = tasks
+        .iter()
+        .map(|t| format!("[{}] {} · {}", t.id, t.title, t.priority))
+        .collect();
+    let index = Select::with_theme(theme)
+        .with_prompt("¿En qué tarea trabajas?")
+        .items(&labels)
+        .default(0)
+        .max_length(15)
+        .interact()?;
+    Ok(Some(TaskId::new(tasks[index].id.clone())?))
+}
+
+/// Si el reporte está listo, lo imprime completo antes del estado (FR-57).
+async fn print_report(ctx: &AppContext, outcome: &SessionOutcome) {
+    if outcome.session.report == Some("ready")
+        && let Ok(report) = ShowSession::new(ctx).report().await
+    {
+        println!("{}\n{}", report.trim_end(), "─".repeat(40));
+    }
 }
 
 /// `approve`, `reject`, `pause`, `resume` y `session status`: un comando y su resultado.
@@ -99,10 +175,101 @@ pub async fn handle(
     if matches!(command, SessionCommand::Reject { .. }) {
         eprintln!("Pidiendo otro análisis a {}…", ctx.ai.name());
     }
+    let approving = matches!(command, SessionCommand::Approve { .. });
+    let rejecting = matches!(command, SessionCommand::Reject { .. });
     let outcome = HandleSession::new(ctx)
         .execute(command, &prefs(settings))
         .await?;
+    if rejecting {
+        print_report(ctx, &outcome).await;
+    }
     print(ctx, &outcome);
+    if approving {
+        deliver_prompt(ctx, settings).await;
+    }
+    Ok(())
+}
+
+/// Al aprobar (FR-59): el prompt completo al portapapeles, y cómo abrir el agente. Si
+/// algo falla aquí, la aprobación ya ocurrió: solo se avisa.
+async fn deliver_prompt(ctx: &AppContext, settings: &AppSettings) {
+    match PrepareAgent::new(ctx)
+        .execute(settings.context.budget_chars)
+        .await
+    {
+        Ok(brief) => {
+            let copied = copy_to_clipboard(&brief.prompt);
+            println!(
+                "\nPrompt para el agente{}: {}",
+                if copied {
+                    " (copiado al portapapeles)"
+                } else {
+                    ""
+                },
+                brief.prompt_path.display()
+            );
+            println!("Ábrelo en el repo con: taskflow agent");
+        }
+        Err(error) => eprintln!("⚠ no se pudo preparar el prompt para el agente: {error}"),
+    }
+}
+
+/// `pbcopy` en macOS. `false` si no está o falla: copiar es una comodidad.
+fn copy_to_clipboard(text: &str) -> bool {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() else {
+        return false;
+    };
+    let written = child
+        .stdin
+        .take()
+        .is_some_and(|mut stdin| stdin.write_all(text.as_bytes()).is_ok());
+    child.wait().is_ok_and(|status| status.success()) && written
+}
+
+/// `taskflow agent [--print]`: abre el agente (`session.agent_command`, por defecto
+/// `claude`) en el repo del proyecto con el prompt completo como primer mensaje. Es
+/// interactivo: hereda tu terminal, y Taskflow espera a que lo cierres.
+///
+/// # Errors
+///
+/// La sesión no está aprobada, o no se puede ejecutar el programa.
+pub async fn agent(
+    ctx: &AppContext,
+    settings: &AppSettings,
+    print_only: bool,
+) -> anyhow::Result<()> {
+    let brief = PrepareAgent::new(ctx)
+        .execute(settings.context.budget_chars)
+        .await?;
+    if print_only {
+        println!("{}", brief.prompt);
+        return Ok(());
+    }
+    let program = &settings.session.agent_command;
+    let dir = if let Some(dir) = &brief.repo_path {
+        dir.clone()
+    } else {
+        eprintln!("⚠ el proyecto no tiene `repo_path` (o no existe); se abre en la carpeta actual");
+        std::env::current_dir()?
+    };
+    eprintln!(
+        "Abriendo {program} en {} con el prompt de la sesión…",
+        dir.display()
+    );
+    let status = std::process::Command::new(program)
+        .arg(&brief.prompt)
+        .current_dir(&dir)
+        .status()
+        .map_err(|e| anyhow::anyhow!("no se pudo ejecutar `{program}`: {e}"))?;
+    if !status.success() {
+        eprintln!("{program} terminó con {status}");
+    }
+    eprintln!(
+        "La sesión sigue abierta: `taskflow session` para ver dónde vas, `taskflow done` al terminar."
+    );
     Ok(())
 }
 
@@ -129,9 +296,10 @@ pub async fn done(
         anyhow::bail!("no hay una sesión activa");
     };
     let task_id = TaskId::new(view.task_id.clone())?;
-    let options = PrepareClose::new(ctx)
-        .execute(&task_id, &settings.provider.status_map.done)
-        .await?;
+    let project = view.project.as_deref().and_then(|slug| slug.parse().ok());
+    let preferred =
+        suggested_statuses(ctx, &prefs(settings), project.as_ref(), Suggestion::Done).await;
+    let options = PrepareClose::new(ctx).execute(&task_id, &preferred).await?;
     let suggested = options.suggested.as_deref();
 
     let status = match status_choice(status, yes, suggested)? {
@@ -268,6 +436,26 @@ pub async fn report(
     match command {
         ReportSubcommand::Show => {
             print!("{report}");
+            Ok(())
+        }
+        ReportSubcommand::Edit => {
+            let Some(view) = ShowSession::new(ctx).execute().await? else {
+                anyhow::bail!("no hay una sesión activa");
+            };
+            let editor = std::env::var("VISUAL")
+                .or_else(|_| std::env::var("EDITOR"))
+                .unwrap_or_else(|_| "vi".to_owned());
+            // `sh -c` para que un `$EDITOR` con argumentos (`code --wait`) funcione.
+            let status = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!("{editor} \"$1\""))
+                .arg("sh")
+                .arg(&view.report_path)
+                .status()?;
+            if !status.success() {
+                anyhow::bail!("el editor terminó con {status}");
+            }
+            println!("Guardado. Se publica y se le pasa al agente tal como quedó.");
             Ok(())
         }
         ReportSubcommand::Publish { yes } => {

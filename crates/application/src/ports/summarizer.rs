@@ -52,6 +52,10 @@ pub struct TaskBrief {
     pub due: Option<String>,
     pub url: String,
     pub tags: Vec<String>,
+    /// `"[x] Título (estado)"`, una por subtarea.
+    pub subtasks: Vec<String>,
+    /// Una por lista: `"Nombre\n[ ] ítem\n[x] ítem"`.
+    pub checklists: Vec<String>,
 }
 
 /// El proyecto de la tarea, si tiene.
@@ -115,7 +119,14 @@ pub enum Complexity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSummary {
     pub what_is_requested: String,
+    /// Cómo se sabe que está terminada (FR-56). `default`: un análisis viejo sin el campo
+    /// sigue siendo válido.
+    #[serde(default)]
+    pub acceptance_criteria: Vec<String>,
     pub suggested_steps: Vec<String>,
+    /// Qué puede salir mal o romperse (FR-56).
+    #[serde(default)]
+    pub risks: Vec<String>,
     pub open_questions: Vec<String>,
     pub estimated_complexity: Complexity,
     /// Un prompt listo para pegar en el agente de código.

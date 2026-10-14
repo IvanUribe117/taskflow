@@ -40,7 +40,31 @@ pub(crate) fn task_brief(
         due: task.due.map(|due| local_date(due, offset)),
         url: task.url.clone(),
         tags: task.tags.clone(),
+        subtasks: task
+            .subtasks
+            .iter()
+            .map(|sub| format!("{} {} ({})", check(sub.done), sub.title, sub.status))
+            .collect(),
+        checklists: task
+            .checklists
+            .iter()
+            .map(|list| {
+                std::iter::once(list.name.clone())
+                    .chain(
+                        list.items
+                            .iter()
+                            .map(|item| format!("{} {}", check(item.done), item.text)),
+                    )
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .collect(),
     }
+}
+
+/// `[x]` o `[ ]`, como las casillas de Markdown.
+fn check(done: bool) -> &'static str {
+    if done { "[x]" } else { "[ ]" }
 }
 
 /// Los últimos `max` comentarios, como `"Autor (AAAA-MM-DD): texto"`, en el mismo orden.
@@ -108,5 +132,35 @@ mod tests {
 
         assert_eq!(lines, ["someone (2026-10-09): último"]);
         assert_eq!(recent_comments(&[last], 5, bogota()).len(), 1);
+    }
+
+    #[test]
+    fn subtasks_and_checklists_become_checkbox_lines() {
+        use domain::task::{Checklist, ChecklistItem, Subtask, TaskId};
+        let mut task = domain::testing::task("1");
+        task.subtasks = vec![Subtask {
+            id: TaskId::new("s1").unwrap(),
+            title: "Migración".into(),
+            status: "complete".into(),
+            done: true,
+        }];
+        task.checklists = vec![Checklist {
+            name: "QA".into(),
+            items: vec![
+                ChecklistItem {
+                    text: "Staging".into(),
+                    done: true,
+                },
+                ChecklistItem {
+                    text: "Prod".into(),
+                    done: false,
+                },
+            ],
+        }];
+
+        let brief = task_brief(&task, 100, bogota());
+
+        assert_eq!(brief.subtasks, ["[x] Migración (complete)"]);
+        assert_eq!(brief.checklists, ["QA\n[x] Staging\n[ ] Prod"]);
     }
 }

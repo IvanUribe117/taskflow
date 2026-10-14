@@ -101,6 +101,17 @@ impl SessionStore for FsSessionStore {
         }
     }
 
+    async fn load_agent_prompt(&self, task: &TaskId) -> Result<String, RepoError> {
+        let path = self.agent_prompt_path(task);
+        match fs::read_to_string(&path) {
+            Ok(text) => Ok(text),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Err(RepoError::NotFound(path.display().to_string()))
+            }
+            Err(e) => Err(storage(&path)(e)),
+        }
+    }
+
     /// Primero escribe el archivo y **después** borra `active.json`: si algo falla en
     /// medio, la sesión sigue activa y no se pierde.
     async fn archive(&self, session: WorkSession) -> Result<PathBuf, RepoError> {
@@ -189,6 +200,7 @@ mod tests {
             fs::read_to_string(dir.path().join("86b1/agent-prompt.md")).unwrap(),
             "prompt"
         );
+        assert_eq!(store.load_agent_prompt(&id).await.unwrap(), "prompt");
         let missing = TaskId::new("otra").unwrap();
         assert!(matches!(
             store.load_report(&missing).await,

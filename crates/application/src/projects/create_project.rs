@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use domain::project::{MatchRule, Project, ProjectKind, ProjectSlug};
+use domain::project::{MatchRule, Project, ProjectKind, ProjectSlug, StatusSuggestions};
 
 use crate::dto::ProjectDetail;
 use crate::{AppContext, AppError};
@@ -56,6 +56,7 @@ impl<'a> CreateProject<'a> {
             rules: draft.rules,
             repo_path: draft.repo_path,
             priority_boost: 0,
+            statuses: StatusSuggestions::default(),
         };
 
         self.ctx.projects.create(&project).await?;

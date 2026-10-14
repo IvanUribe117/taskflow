@@ -37,6 +37,9 @@ pub trait SessionStore: Send + Sync {
     /// Lee `report.md` tal como quedó en disco, **con tus ediciones**.
     async fn load_report(&self, task: &TaskId) -> Result<String, RepoError>;
 
+    /// Lee `agent-prompt.md`.
+    async fn load_agent_prompt(&self, task: &TaskId) -> Result<String, RepoError>;
+
     /// Guarda la sesión terminada en el archivo y deja de haber sesión activa.
     ///
     /// Recibe la sesión **por valor**: después de archivarla ya no se puede usar, y el

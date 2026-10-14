@@ -106,7 +106,8 @@ async fn with_context(
             comment,
             yes,
         } => close::run(ctx, settings, &task_id, status, comment, yes).await,
-        Command::Start { task_id, yes } => session::start(ctx, settings, &task_id, yes).await,
+        Command::Start { task_id, yes } => session::start(ctx, settings, task_id, yes).await,
+        Command::Agent { print } => session::agent(ctx, settings, print).await,
         Command::Approve { status } => {
             session::handle(ctx, settings, SessionCommand::Approve { status }).await
         }

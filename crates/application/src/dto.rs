@@ -126,6 +126,9 @@ pub struct ProjectDetail {
     /// La ruta como texto (`Path::display`), o `None`.
     pub repo_path: Option<String>,
     pub priority_boost: i64,
+    /// Los estados sugeridos propios, por etapa: `"ready: needs approval"`. Vacío si usa
+    /// los globales.
+    pub statuses: Vec<String>,
 }
 
 impl From<&Project> for ProjectDetail {
@@ -140,6 +143,15 @@ impl From<&Project> for ProjectDetail {
                 .repo_path
                 .as_ref()
                 .map(|path| path.display().to_string()),
+            statuses: [
+                ("ready", &project.statuses.ready),
+                ("in_progress", &project.statuses.in_progress),
+                ("done", &project.statuses.done),
+            ]
+            .into_iter()
+            .filter(|(_, names)| !names.is_empty())
+            .map(|(stage, names)| format!("{stage}: {}", names.join(", ")))
+            .collect(),
         }
     }
 }
@@ -464,6 +476,7 @@ mod tests {
                 rules: vec!["list L1".into(), "tag acme".into()],
                 repo_path: Some("/code/acme".into()),
                 priority_boost: 20,
+                statuses: vec![],
             }
         );
     }
@@ -632,6 +645,9 @@ pub struct SessionView {
     pub agent_prompt_path: PathBuf,
     /// Lo que quedó sin aplicar tras un fallo, en palabras (`session retry`).
     pub pending: Vec<String>,
+    /// Si la sesión cree que el contador corre pero el proveedor no lo tiene en esta tarea
+    /// (lo detuviste o lo cambiaste fuera de Taskflow). Solo lo calcula `session show`.
+    pub timer_out_of_sync: bool,
 }
 
 impl SessionView {
@@ -672,6 +688,7 @@ impl SessionView {
                 .iter()
                 .map(crate::session::effect_label)
                 .collect(),
+            timer_out_of_sync: false,
         }
     }
 }
@@ -712,4 +729,15 @@ pub struct StartCheck {
     pub active: Option<SessionView>,
     /// Un contador corriendo **en otra tarea**: `start` lo detendría (hay que preguntar).
     pub running_timer: Option<TimerView>,
+}
+
+/// Lo que recibe el agente de código (`taskflow agent`, y al aprobar).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgentBrief {
+    /// El prompt de la IA + el reporte con tus ediciones + tus reglas + la tarea.
+    pub prompt: String,
+    /// Dónde abrir el agente: el repositorio del proyecto, si existe en disco.
+    pub repo_path: Option<PathBuf>,
+    /// `agent-prompt.md`, solo el prompt de la IA.
+    pub prompt_path: PathBuf,
 }

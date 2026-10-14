@@ -291,3 +291,100 @@ Sobre [la tarea de prueba](https://app.clickup.com/t/86bcjdn6v), con una copia d
 | CLI | `args.rs`, `commands/session.rs`, `commands/mod.rs` (`with_context`), `presenter.rs` |
 
 Tests: de 354 a 415.
+
+---
+
+## Ajuste posterior: el contador detenido fuera de Taskflow
+
+Pasó en tu primera prueba (2026-10-14). Después de `start`, detuviste el contador a mano en ClickUp. La sesión siguió creyendo que corría, y `resume` no servía para reanudarlo: solo vale desde una pausa.
+
+- **`taskflow session` compara con el proveedor.** Si la sesión cree que el contador corre y el proveedor no lo tiene en esta tarea, muestra:
+  `⚠ El contador no corre en el proveedor (¿lo detuviste fuera de Taskflow?). Para reanudarlo: taskflow resume`
+- **`taskflow resume` con la sesión corriendo** no es una transición. `HandleSession` aplica solo `StartTimer`, que no hace nada si el contador ya corre en esta tarea. Desde una pausa sigue siendo la transición normal.
+- **`TimeTracker::is_local()`** (por defecto `false`; `LocalTimeTracker` devuelve `true`). Con el contador local, `current` siempre es `None` y no sirve para comparar, así que no se compara.
+
+**Concepto: métodos con implementación por defecto en un trait.** `fn is_local(&self) -> bool { false }` vive en el trait: los adaptadores existentes no cambian, y solo el objeto nulo lo sobrescribe.
+
+**Límite:** el tiempo que muestra `session` sigue contando mientras el contador estuvo detenido fuera de Taskflow, porque la sesión no sabe cuándo lo detuviste. El tiempo real queda en ClickUp.
+
+---
+
+## Segunda parte: lo que faltaba de la fase 8 y `taskflow agent`
+
+Al revisar los requisitos de la sesión (FR-52 a FR-72), encontré varios que se me habían pasado. Los completé, y agregué `taskflow agent`, que pediste.
+
+### El flujo completo
+
+```sh
+taskflow start                  # FR-52: sin ID, eliges de tu lista priorizada
+                                # FR-66: si hay otra sesión, ofrece terminarla o abortarla
+                                # FR-57: muestra el reporte completo al terminar el análisis
+taskflow report edit            # FR-72: lo abre en $VISUAL / $EDITOR / vi
+taskflow approve                # FR-59: el prompt completo al portapapeles
+taskflow agent                  # Claude Code en el repo del proyecto, con el prompt
+taskflow done
+```
+
+### Qué se agregó
+
+| Requisito | Cómo quedó |
+| --- | --- |
+| FR-56 | `TaskSummary` tiene `acceptance_criteria` y `risks`. El esquema JSON los exige, y `#[serde(default)]` mantiene válidos los análisis viejos. Aparecen en el reporte y en `show --ai`. |
+| FR-54 | `Task` tiene `subtasks` y `checklists` (`GET /task/{id}?include_subtasks=true`; las listas de verificación vienen siempre). La IA las recibe como `<subtasks>` y `<checklists>`, con casillas `[x]` / `[ ]`. |
+| FR-57 | `start` y `reject` imprimen el reporte completo antes del estado. |
+| FR-59 | `approve` copia el prompt completo al portapapeles (`pbcopy`) y dice cómo abrir el agente. Si falla, solo avisa: la aprobación ya ocurrió. |
+| FR-52 | `start` sin ID muestra tu lista de `today` para elegir. |
+| FR-66 | `start` con una sesión activa ofrece: terminarla (`done`), abortarla o cancelar. "Pausarla y empezar otra" no existe: hay una sola sesión a la vez, como el contador de ClickUp. |
+| FR-67 | `[statuses]` en `project.toml` (`ready`, `in_progress`, `done`). Una etapa con lista vacía usa la global. Lo usan la sesión y la sugerencia de `done`, y `project show` los muestra. |
+| FR-72 | `report edit`. Corre con `sh -c` para que un `$EDITOR` con argumentos (`code --wait`) funcione. |
+
+```toml
+# projects/idk-base/project.toml
+[statuses]
+ready = ["needs approval"]
+in_progress = ["in progress"]
+done = ["code review"]
+```
+
+### `taskflow agent`
+
+`PrepareAgent` (caso de uso) arma el prompt **completo**, en este orden:
+
+1. `agent-prompt.md`: lo que escribió la IA.
+2. `report.md` **tal como lo dejaste**: tus correcciones llegan al agente.
+3. Tus secciones `instruction` con uso `agent_prompt` (estilo de código, aprendizaje...).
+4. La tarea y su URL, con la regla de FR-61: *no cambies su estado ni la cierres; eso lo hago yo con Taskflow*.
+
+El CLI abre `session.agent_command` (por defecto `claude`) en el `repo_path` del proyecto, con el prompt como primer mensaje. Es interactivo: hereda tu terminal, y al salir la sesión sigue abierta. Solo funciona con la sesión **aprobada** (`in_progress` o `paused`). `taskflow agent --print` solo imprime el prompt.
+
+Como Claude Code se abre **dentro** del repo, también lee el `CLAUDE.md` de IDK.
+
+### Conceptos aplicados
+
+- **`#[serde(default)]` para evolucionar un formato.** Un `TaskSummary` guardado antes de agregar `risks` se sigue leyendo (lista vacía). El esquema que se le pide a la IA sí los exige.
+- **Subtareas: un struct que lee solo lo que necesita.** Cada subtarea de ClickUp es una tarea completa, pero `ApiSubtask` declara solo `id`, `name` y `status`, y `serde` ignora el resto.
+- **`iter::once(...).chain(...)` en vez de `push_str(&format!(...))`.** Clippy (`format_push_string`) evita crear un `String` temporal por cada línea. Armar la lista y unir con `join` es más claro.
+- **La sugerencia más específica gana, con respaldo.** `suggested_statuses` intenta el proyecto y, si no tiene, usa la configuración global. Si el proyecto no se puede leer (`.ok()`), también la global: una sugerencia nunca rompe nada.
+- **Un proceso interactivo hijo.** `Command::new("claude").arg(prompt).current_dir(repo).status()` hereda stdin, stdout y stderr, así que el agente usa tu terminal. `status()` espera a que termine; `output()` capturaría la salida y no serviría para algo interactivo.
+- **`sh -c '<editor> "$1"' sh <archivo>`.** El archivo va como argumento (`$1`), no pegado en el texto del comando. Una ruta con espacios (`Application Support`) o comillas no rompe nada; es la misma idea que `osascript ... argv`.
+- **Una comodidad que nunca falla en voz alta.** `copy_to_clipboard` devuelve `bool`: sin `pbcopy` (Linux), solo no dice "copiado".
+- **`if cond && let Ok(x) = ...` (*let chains*, Rust 2024).** Junta una condición y un patrón en un solo `if`. Clippy lo sugiere en vez de dos `if` anidados (`collapsible_if`).
+
+### Probado (2026-10-14)
+
+Con la configuración de prueba (`track_time = false`, `agent_command = echo`), para no tocar tu sesión ni tu contador:
+
+| Prueba | Resultado |
+| --- | --- |
+| `start 86bcjdn6v --yes` | El reporte completo en pantalla, con criterios de aceptación y riesgos |
+| `report edit` (con un editor de prueba que agrega una línea) | La línea quedó en `report.md` |
+| `agent` antes de aprobar | `approve the report first with taskflow approve` |
+| `approve` sin `pbcopy` | Muestra la ruta y `taskflow agent`, sin "copiado" |
+| `agent --print` | El prompt de la IA, `# Reporte aprobado` con la línea editada, `# Reglas para trabajar` (estilo de código y aprendizaje de Rust) y la tarea |
+| `agent` (con `echo`) | Abrió en `/Users/dev/swapps/idk` con el prompt |
+| `start` sin ID, en una terminal simulada | La lista de tus tareas; luego, con la sesión activa, el menú, y "cancelar" no cambió nada |
+
+### A tener en cuenta
+
+- **Tu sección `90-aprendizaje-rust` llega al agente de IDK**, porque tiene el uso `agent_prompt`. IDK es Python y Django; si no quieres que el agente de IDK la reciba, quítale `agent_prompt` del `usage`.
+- **`close` (fase 7) todavía usa solo los estados globales.** La sugerencia por proyecto la usan la sesión y `done`.

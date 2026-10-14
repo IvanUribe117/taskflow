@@ -1373,6 +1373,9 @@ El diseño de arriba se implementó con estos ajustes (detalle en `docs/learning
 | `original_status: Status` | `original_status: String` (de `Task::status_name`) | `Status` normaliza ("to do") y pierde el nombre exacto ("Open") que hace falta para restaurarlo |
 | `SetStatus(Suggested)` crítico | Si ningún nombre sugerido existe en la lista: aviso, no error | Una sugerencia no debe romper la sesión |
 | — | `StopTimer` solo detiene el contador **de esta tarea** | Si iniciaste otro a mano en ClickUp, no se toca (aviso) |
+| FR-66 "ofrecer pausar o terminar la actual" | Ofrece terminarla o abortarla | Hay una sola sesión a la vez: pausarla no libera el lugar |
+| No objetivo: "ejecución automática del agente" | `taskflow agent` lo **abre** en el repo con el prompt completo (prompt + reporte editado + reglas); el usuario lo dirige | No es automático: lo lanza el usuario, y el agente no puede cerrar la tarea (FR-61) |
+| FR-67 sugerencias por proyecto | `[statuses]` en `project.toml` | Una etapa vacía usa la global |
 
 ## 10. Puertos (traits)
 

@@ -17,8 +17,9 @@ use serde_json::{Value, json};
 /// El rol y las reglas para `summarize_task`.
 const SUMMARY_ROLE: &str = "Eres un asistente técnico que analiza tareas de desarrollo de software. \
 Responde siempre en español. Lee la tarea y su contexto y devuelve exclusivamente el JSON pedido: \
-qué se solicita (en 2-4 oraciones), los pasos sugeridos para resolverla, las preguntas abiertas que \
-habría que aclarar con quien la pidió, una estimación de complejidad y un prompt listo para pegar en un \
+qué se solicita (en 2-4 oraciones), los criterios de aceptación (cómo se comprueba que está \
+terminada), los pasos sugeridos para resolverla, los riesgos (qué podría romperse o salir mal), las \
+preguntas abiertas que habría que aclarar con quien la pidió, una estimación de complejidad y un prompt listo para pegar en un \
 agente de código. El prompt para el agente debe ser autocontenido: explica el objetivo, el contexto \
 relevante del proyecto, los archivos o módulos probables y cómo verificar el resultado. Si tienes acceso \
 al repositorio, úsalo solo para leer y citar rutas reales; no inventes archivos.";
@@ -95,6 +96,22 @@ pub(crate) fn summary_message(input: &SummaryInput) -> String {
     message.push_str(task.description.as_deref().unwrap_or("(sin descripción)"));
     message.push_str("\n</description>");
 
+    // 2b. Subtareas y listas de verificación: solo si hay. Dicen el alcance real.
+    if !task.subtasks.is_empty() {
+        message.push_str("\n\n<subtasks>\n");
+        for subtask in &task.subtasks {
+            let _ = writeln!(message, "{subtask}");
+        }
+        message.push_str("</subtasks>");
+    }
+    if !task.checklists.is_empty() {
+        message.push_str("\n\n<checklists>\n");
+        for list in &task.checklists {
+            let _ = writeln!(message, "{list}\n");
+        }
+        message.push_str("</checklists>");
+    }
+
     // 3. Los comentarios: solo si hay.
     if !input.comments.is_empty() {
         message.push_str("\n\n<comments>\n");
@@ -164,14 +181,18 @@ pub(crate) fn summary_schema() -> Value {
         "type": "object",
         "properties": {
             "what_is_requested": { "type": "string" },
+            "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
             "suggested_steps": { "type": "array", "items": { "type": "string" } },
+            "risks": { "type": "array", "items": { "type": "string" } },
             "open_questions": { "type": "array", "items": { "type": "string" } },
             "estimated_complexity": { "type": "string", "enum": ["low", "medium", "high"] },
             "agent_prompt": { "type": "string" }
         },
         "required": [
             "what_is_requested",
+            "acceptance_criteria",
             "suggested_steps",
+            "risks",
             "open_questions",
             "estimated_complexity",
             "agent_prompt"
@@ -218,6 +239,8 @@ mod tests {
                 due: Some("2026-10-16".into()),
                 url: "https://app.clickup.com/t/86b2x1abc".into(),
                 tags: vec!["backend".into(), "acme".into()],
+                subtasks: vec![],
+                checklists: vec![],
             },
             comments: vec!["Client PM (2026-10-09): ¿por línea o por total?".into()],
             project: Some(ProjectBrief {
@@ -288,6 +311,22 @@ mod tests {
     }
 
     #[test]
+    fn summary_message_includes_subtasks_and_checklists() {
+        let mut input = input();
+        input.task.subtasks = vec!["[x] Migración (complete)".into()];
+        input.task.checklists = vec!["QA\n[ ] Probar en staging".into()];
+
+        let message = summary_message(&input);
+
+        assert!(
+            message.contains(
+                "</description>\n\n<subtasks>\n[x] Migración (complete)\n</subtasks>\n\n<checklists>\nQA\n[ ] Probar en staging\n\n</checklists>"
+            ),
+            "{message}"
+        );
+    }
+
+    #[test]
     fn summary_message_ends_with_the_rejection_note() {
         let mut input = input();
         input.note = Some("Falta el caso de facturas en dólares.".into());
@@ -342,7 +381,9 @@ mod tests {
     fn summary_schema_matches_task_summary() {
         let example = serde_json::json!({
             "what_is_requested": "x",
+            "acceptance_criteria": ["c"],
             "suggested_steps": ["a"],
+            "risks": ["r"],
             "open_questions": [],
             "estimated_complexity": "high",
             "agent_prompt": "y"
@@ -353,5 +394,7 @@ mod tests {
 
         assert_eq!(required, example.as_object().unwrap().len());
         assert_eq!(summary.agent_prompt, "y");
+        assert_eq!(summary.acceptance_criteria, ["c"]);
+        assert_eq!(summary.risks, ["r"]);
     }
 }

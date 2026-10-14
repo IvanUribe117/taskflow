@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::project::{MatchRule, Project, ProjectKind};
+use crate::project::{MatchRule, Project, ProjectKind, StatusSuggestions};
 use crate::task::{
     Comment, LocationLevel, LocationSegment, Priority, Status, Task, TaskId, TaskLocation, UserId,
 };
@@ -32,6 +32,8 @@ pub fn task(id: &str) -> Task {
         location: TaskLocation::default(),
         tags: Vec::new(),
         comments: Vec::new(),
+        subtasks: Vec::new(),
+        checklists: Vec::new(),
     }
 }
 
@@ -69,5 +71,6 @@ pub fn project(slug: &str, rules: Vec<MatchRule>) -> Project {
         rules,
         repo_path: None,
         priority_boost: 0,
+        statuses: StatusSuggestions::default(),
     }
 }

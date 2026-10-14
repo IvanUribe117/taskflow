@@ -94,6 +94,33 @@ pub struct Task {
     pub location: TaskLocation,
     pub tags: Vec<String>,
     pub comments: Vec<Comment>,
+    /// Solo las trae `TaskProvider::task` (el detalle); la búsqueda las deja vacías.
+    pub subtasks: Vec<Subtask>,
+    /// Listas de verificación de la tarea. Igual que `subtasks`: solo en el detalle.
+    pub checklists: Vec<Checklist>,
+}
+
+/// Una subtarea, resumida: lo que necesita la IA para entender el alcance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subtask {
+    pub id: TaskId,
+    pub title: String,
+    /// El nombre exacto del estado ("in progress").
+    pub status: String,
+    pub done: bool,
+}
+
+/// Una lista de verificación ("Checklist" en `ClickUp`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checklist {
+    pub name: String,
+    pub items: Vec<ChecklistItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChecklistItem {
+    pub text: String,
+    pub done: bool,
 }
 
 impl Task {

@@ -54,6 +54,8 @@ fn input(repo: Option<PathBuf>) -> SummaryInput {
             due: None,
             url: "https://example.test/t/86b2x1abc".into(),
             tags: vec![],
+            subtasks: vec![],
+            checklists: vec![],
         },
         comments: vec![],
         project: Some(ProjectBrief {

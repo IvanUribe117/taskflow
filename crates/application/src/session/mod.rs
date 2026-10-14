@@ -4,13 +4,15 @@
 //! nombres de estado contra la lista de la tarea, se aplican los efectos con los puertos
 //! ([`runner`]) y se guarda o se archiva.
 
+mod agent;
 mod report;
 mod runner;
 
+pub use agent::PrepareAgent;
 pub use report::render as render_report;
 
 use chrono::Duration;
-use domain::project::ProjectResolver;
+use domain::project::{ProjectResolver, ProjectSlug, StatusSuggestions};
 use domain::session::{Effect, SessionCommand, Stage, StatusTarget, WorkSession};
 use domain::task::{TaskId, find_status};
 
@@ -26,7 +28,44 @@ pub struct SessionPrefs {
     pub ready: Vec<String>,
     /// `provider.status_map.in_progress`: estados sugeridos al aprobar.
     pub working: Vec<String>,
+    /// `provider.status_map.done`: estados sugeridos al terminar.
+    pub done: Vec<String>,
     pub limits: AiLimits,
+}
+
+/// Para qué etapa se buscan sugerencias.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Suggestion {
+    Ready,
+    Working,
+    Done,
+}
+
+/// Los estados sugeridos para una etapa (FR-67): los del proyecto (`[statuses]` en
+/// `project.toml`) si tiene para esa etapa; si no, los globales de `prefs`. Si el
+/// proyecto no se puede leer, también los globales: una sugerencia nunca rompe nada.
+pub async fn suggested_statuses(
+    ctx: &AppContext,
+    prefs: &SessionPrefs,
+    project: Option<&ProjectSlug>,
+    which: Suggestion,
+) -> Vec<String> {
+    let own = match project {
+        Some(slug) => ctx.projects.get(slug).await.ok().map(|p| p.statuses),
+        None => None,
+    };
+    let pick = |list: &StatusSuggestions| match which {
+        Suggestion::Ready => list.ready.clone(),
+        Suggestion::Working => list.in_progress.clone(),
+        Suggestion::Done => list.done.clone(),
+    };
+    own.map(|statuses| pick(&statuses))
+        .filter(|names| !names.is_empty())
+        .unwrap_or_else(|| match which {
+            Suggestion::Ready => prefs.ready.clone(),
+            Suggestion::Working => prefs.working.clone(),
+            Suggestion::Done => prefs.done.clone(),
+        })
 }
 
 /// Un efecto en palabras, para los errores y la lista de pendientes.
@@ -166,6 +205,11 @@ impl<'a> HandleSession<'a> {
                 "the session has pending steps; run `taskflow session retry` first".into(),
             ));
         }
+        // `resume` con la sesión corriendo: el contador se detuvo fuera de Taskflow (en
+        // ClickUp). No es una transición; solo hay que volver a iniciarlo.
+        if command == SessionCommand::Resume && session.timer_running() {
+            return runner::run(self.ctx, prefs, session, vec![Effect::StartTimer]).await;
+        }
         let command = self.exact_statuses(&session.task_id, command).await?;
         let effects = session.handle(command, self.ctx.clock.now())?;
         runner::run(self.ctx, prefs, session, effects).await
@@ -242,12 +286,23 @@ impl<'a> ShowSession<'a> {
         Self { ctx }
     }
 
+    /// La sesión, comparada con el contador del proveedor: si la sesión cree que corre y
+    /// el proveedor no lo tiene en esta tarea, `timer_out_of_sync`.
+    ///
     /// # Errors
     ///
-    /// Si no se puede leer la sesión.
+    /// Si no se puede leer la sesión o consultar el contador.
     pub async fn execute(&self) -> Result<Option<SessionView>, AppError> {
-        let session = self.ctx.sessions.active().await?;
-        Ok(session.as_ref().map(|s| runner::view(self.ctx, s)))
+        let Some(session) = self.ctx.sessions.active().await? else {
+            return Ok(None);
+        };
+        let mut view = runner::view(self.ctx, &session);
+        if session.timer_running() && !self.ctx.time.is_local() {
+            let current = self.ctx.time.current().await?;
+            view.timer_out_of_sync =
+                current.and_then(|entry| entry.task_id).as_ref() != Some(&session.task_id);
+        }
+        Ok(Some(view))
     }
 
     /// El reporte tal como está en disco (con tus ediciones).

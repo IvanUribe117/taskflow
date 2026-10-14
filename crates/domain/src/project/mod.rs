@@ -132,6 +132,28 @@ pub struct Project {
     pub rules: Vec<MatchRule>,
     pub repo_path: Option<PathBuf>,
     pub priority_boost: i64,
+    /// Estados sugeridos propios del proyecto (FR-67). Una lista vacía usa la global
+    /// (`provider.status_map`).
+    pub statuses: StatusSuggestions,
+}
+
+/// Nombres de estado sugeridos por etapa, en orden de preferencia. Son **sugerencias**: cada
+/// transición usa el primero que exista en la lista de la tarea.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StatusSuggestions {
+    /// Con el reporte listo, esperando tu aprobación.
+    pub ready: Vec<String>,
+    /// Al aprobar.
+    pub in_progress: Vec<String>,
+    /// Al terminar (`done`, `close`).
+    pub done: Vec<String>,
+}
+
+impl StatusSuggestions {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ready.is_empty() && self.in_progress.is_empty() && self.done.is_empty()
+    }
 }
 
 impl Project {

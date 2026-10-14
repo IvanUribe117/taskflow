@@ -23,6 +23,12 @@ pub struct TimeEntry {
 pub trait TimeTracker: Send + Sync {
     fn name(&self) -> &'static str;
 
+    /// `true` si el contador vive solo en la sesión ([`LocalTimeTracker`]). Entonces
+    /// `current` siempre es `None` y no sirve para comparar con la sesión.
+    fn is_local(&self) -> bool {
+        false
+    }
+
     async fn start(&self, task: &TaskId) -> Result<TimeEntry, ProviderError>;
 
     /// Detiene el contador que esté corriendo. Idempotente: si no hay, `Ok(None)`.
@@ -41,6 +47,10 @@ pub struct LocalTimeTracker;
 impl TimeTracker for LocalTimeTracker {
     fn name(&self) -> &'static str {
         "local"
+    }
+
+    fn is_local(&self) -> bool {
+        true
     }
 
     async fn start(&self, task: &TaskId) -> Result<TimeEntry, ProviderError> {

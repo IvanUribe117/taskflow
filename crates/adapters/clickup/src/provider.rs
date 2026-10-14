@@ -141,7 +141,8 @@ impl TaskProvider for ClickUpProvider {
     /// `GET /task/{task_id}` → `ApiTask`.
     async fn task(&self, id: &TaskId) -> Result<Task, ProviderError> {
         let path = format!("/task/{}", id.as_str());
-        let api_task: ApiTask = self.client.get(&path, &[]).await?;
+        let params = [("include_subtasks".to_owned(), "true".to_owned())];
+        let api_task: ApiTask = self.client.get(&path, &params).await?;
         Ok(map_task(api_task, &self.statuses)?)
     }
 

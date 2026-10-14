@@ -42,6 +42,7 @@ impl ConfigKey {
         "session.dir",
         "session.track_time",
         "session.notify",
+        "session.agent_command",
         "ui.group_by",
     ];
 

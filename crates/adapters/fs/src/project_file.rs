@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use domain::DomainError;
-use domain::project::{MatchRule, Project};
+use domain::project::{MatchRule, Project, StatusSuggestions};
 use serde::{Deserialize, Serialize};
 
 /// El archivo tal cual. Todo es texto: la validación ocurre en `TryFrom`.
@@ -24,6 +24,32 @@ pub(crate) struct ProjectFile {
     /// `[[match]]`: `match` es palabra reservada en Rust, por eso el campo se renombra.
     #[serde(rename = "match", default)]
     pub rules: Vec<RuleFile>,
+    /// `[statuses]`: estados sugeridos del proyecto. Opcional.
+    #[serde(default, skip_serializing_if = "StatusesFile::is_empty")]
+    pub statuses: StatusesFile,
+}
+
+/// ```toml
+/// [statuses]
+/// ready = ["needs approval"]
+/// in_progress = ["in progress"]
+/// done = ["code review", "qa"]
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct StatusesFile {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ready: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub in_progress: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub done: Vec<String>,
+}
+
+impl StatusesFile {
+    fn is_empty(&self) -> bool {
+        self.ready.is_empty() && self.in_progress.is_empty() && self.done.is_empty()
+    }
 }
 
 /// Una regla `[[match]]`. Hay dos formas y el archivo no dice cuál es:
@@ -86,6 +112,11 @@ impl TryFrom<ProjectFile> for Project {
             name: file.name,
             repo_path: file.repo_path.map(PathBuf::from),
             priority_boost: file.priority_boost,
+            statuses: StatusSuggestions {
+                ready: file.statuses.ready,
+                in_progress: file.statuses.in_progress,
+                done: file.statuses.done,
+            },
         })
     }
 }
@@ -103,6 +134,11 @@ impl From<&Project> for ProjectFile {
                 .map(|path| path.display().to_string()),
             priority_boost: project.priority_boost,
             rules: project.rules.iter().map(RuleFile::from).collect(),
+            statuses: StatusesFile {
+                ready: project.statuses.ready.clone(),
+                in_progress: project.statuses.in_progress.clone(),
+                done: project.statuses.done.clone(),
+            },
         }
     }
 }
@@ -192,6 +228,28 @@ tag = "acme"
         assert_eq!(project.repo_path, None);
         assert_eq!(project.priority_boost, 0);
         assert!(project.rules.is_empty());
+        assert!(project.statuses.is_empty());
+    }
+
+    #[test]
+    fn statuses_are_optional_suggestions_and_round_trip() {
+        let text = format!(
+            "{SAMPLE}\n[statuses]\nready = [\"needs approval\"]\ndone = [\"code review\", \"qa\"]\n"
+        );
+
+        let project = parse(&text).unwrap();
+        let written = toml::to_string(&ProjectFile::from(&project)).unwrap();
+
+        assert_eq!(project.statuses.ready, ["needs approval"]);
+        assert!(project.statuses.in_progress.is_empty());
+        assert_eq!(project.statuses.done, ["code review", "qa"]);
+        assert!(written.contains("[statuses]"), "{written}");
+        assert!(
+            !written.contains("in_progress"),
+            "empty lists are not written: {written}"
+        );
+        let without = toml::to_string(&ProjectFile::from(&parse(SAMPLE).unwrap())).unwrap();
+        assert!(!without.contains("[statuses]"), "{without}");
     }
 
     #[test]

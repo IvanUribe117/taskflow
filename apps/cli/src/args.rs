@@ -110,8 +110,9 @@ pub enum Command {
     },
     /// Empieza una sesión de trabajo: contador, análisis con IA y estado sugerido.
     Start {
+        /// Sin ID, eliges de tu lista priorizada.
         #[arg(value_parser = parse_task_id)]
-        task_id: TaskId,
+        task_id: Option<TaskId>,
         /// Si hay un contador corriendo en otra tarea, detenerlo sin preguntar.
         #[arg(long)]
         yes: bool,
@@ -150,6 +151,12 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Abre el agente de código en el repo del proyecto con el prompt de la sesión aprobada.
+    Agent {
+        /// Solo imprime el prompt completo, sin abrir nada.
+        #[arg(long)]
+        print: bool,
+    },
     /// La sesión activa: ver, cambiar el estado de la tarea o reintentar.
     Session {
         #[command(subcommand)]
@@ -186,6 +193,8 @@ pub enum SessionSubcommand {
 pub enum ReportSubcommand {
     /// El reporte tal como está en disco, con tus ediciones.
     Show,
+    /// Lo abre en tu editor (`$VISUAL`, `$EDITOR` o `vi`).
+    Edit,
     /// Lo publica como comentario en la tarea (pide confirmación).
     Publish {
         #[arg(long)]
@@ -528,7 +537,22 @@ mod tests {
     fn session_commands() {
         assert!(matches!(
             parse(&["start", "86b1", "--yes"]).unwrap().command,
-            Command::Start { yes: true, .. }
+            Command::Start {
+                task_id: Some(_),
+                yes: true
+            }
+        ));
+        assert!(matches!(
+            parse(&["start"]).unwrap().command,
+            Command::Start { task_id: None, .. }
+        ));
+        assert!(matches!(
+            parse(&["agent", "--print"]).unwrap().command,
+            Command::Agent { print: true }
+        ));
+        assert!(matches!(
+            parse(&["report", "edit"]).unwrap().command,
+            Command::Report(ReportSubcommand::Edit)
         ));
         assert!(matches!(
             parse(&["approve", "--status", "code review"])

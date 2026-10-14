@@ -234,6 +234,8 @@ pub struct SessionSettings {
     pub track_time: bool,
     /// Notificaciones de escritorio (reporte listo, sesión cerrada).
     pub notify: bool,
+    /// El programa que abre `taskflow agent`, con el prompt como argumento.
+    pub agent_command: String,
 }
 
 impl Default for SessionSettings {
@@ -242,6 +244,7 @@ impl Default for SessionSettings {
             dir: "sessions".to_owned(),
             track_time: true,
             notify: true,
+            agent_command: "claude".to_owned(),
         }
     }
 }

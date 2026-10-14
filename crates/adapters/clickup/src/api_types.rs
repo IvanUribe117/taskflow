@@ -54,6 +54,34 @@ pub(crate) struct ApiTask {
     pub space: ApiIdRef,
     #[serde(default)]
     pub tags: Vec<ApiTag>,
+    /// Solo con `?include_subtasks=true` (lo pide `task`).
+    #[serde(default)]
+    pub subtasks: Vec<ApiSubtask>,
+    #[serde(default)]
+    pub checklists: Vec<ApiChecklist>,
+}
+
+/// Una subtarea dentro de `GET /task/{id}`: es una tarea completa, pero solo se leen estos
+/// campos (`serde` ignora el resto).
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ApiSubtask {
+    pub id: String,
+    pub name: String,
+    pub status: ApiStatus,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ApiChecklist {
+    pub name: String,
+    #[serde(default)]
+    pub items: Vec<ApiChecklistItem>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ApiChecklistItem {
+    pub name: String,
+    #[serde(default)]
+    pub resolved: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

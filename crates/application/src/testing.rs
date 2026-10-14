@@ -551,6 +551,7 @@ impl Notifier for FakeNotifier {
 pub struct FakeSessionStore {
     active: Mutex<Option<WorkSession>>,
     reports: Mutex<HashMap<TaskId, String>>,
+    prompts: Mutex<HashMap<TaskId, String>>,
     archived: Mutex<Vec<WorkSession>>,
 }
 
@@ -600,12 +601,16 @@ impl SessionStore for FakeSessionStore {
         &self,
         task: &TaskId,
         report: &str,
-        _agent_prompt: &str,
+        agent_prompt: &str,
     ) -> Result<std::path::PathBuf, RepoError> {
         self.reports
             .lock()
             .expect("lock")
             .insert(task.clone(), report.to_owned());
+        self.prompts
+            .lock()
+            .expect("lock")
+            .insert(task.clone(), agent_prompt.to_owned());
         Ok(self.report_path(task))
     }
 
@@ -624,6 +629,15 @@ impl SessionStore for FakeSessionStore {
             .get(task)
             .cloned()
             .ok_or_else(|| RepoError::NotFound(format!("report of {}", task.as_str())))
+    }
+
+    async fn load_agent_prompt(&self, task: &TaskId) -> Result<String, RepoError> {
+        self.prompts
+            .lock()
+            .expect("lock")
+            .get(task)
+            .cloned()
+            .ok_or_else(|| RepoError::NotFound(format!("agent prompt of {}", task.as_str())))
     }
 
     async fn archive(&self, session: WorkSession) -> Result<std::path::PathBuf, RepoError> {
@@ -663,7 +677,9 @@ impl FakeSummarizer {
     pub fn summary() -> TaskSummary {
         TaskSummary {
             what_is_requested: "Corregir el redondeo".into(),
+            acceptance_criteria: vec!["Los totales cuadran al centavo".into()],
             suggested_steps: vec!["Reproducir".into(), "Corregir".into()],
+            risks: vec!["Facturas ya emitidas".into()],
             open_questions: vec!["¿Por línea o por total?".into()],
             estimated_complexity: Complexity::Medium,
             agent_prompt: "Corrige el redondeo en invoicing.".into(),

@@ -156,6 +156,12 @@ pub fn project_detail(project: &ProjectDetail) -> String {
     for rule in &project.rules {
         lines.push(format!("  - {rule}"));
     }
+    if !project.statuses.is_empty() {
+        lines.push("Estados sugeridos:".to_owned());
+        for line in &project.statuses {
+            lines.push(format!("  - {line}"));
+        }
+    }
     lines.join("\n")
 }
 
@@ -388,10 +394,26 @@ pub fn task_summary(summary: &TaskSummary) -> String {
         "Qué se pide:".to_owned(),
         summary.what_is_requested.clone(),
         String::new(),
-        "Pasos sugeridos:".to_owned(),
+        "Criterios de aceptación:".to_owned(),
     ];
+    if summary.acceptance_criteria.is_empty() {
+        lines.push("  (sin definir)".to_owned());
+    }
+    for criterion in &summary.acceptance_criteria {
+        lines.push(format!("  - {criterion}"));
+    }
+    lines.push(String::new());
+    lines.push("Pasos sugeridos:".to_owned());
     for (number, step) in summary.suggested_steps.iter().enumerate() {
         lines.push(format!("  {}. {step}", number + 1));
+    }
+    lines.push(String::new());
+    lines.push("Riesgos:".to_owned());
+    if summary.risks.is_empty() {
+        lines.push("  (ninguno)".to_owned());
+    }
+    for risk in &summary.risks {
+        lines.push(format!("  - {risk}"));
     }
     lines.push(String::new());
     lines.push("Preguntas abiertas:".to_owned());
@@ -608,6 +630,12 @@ pub fn session(view: &SessionView, offset: FixedOffset) -> String {
             duration_label(chrono::Duration::minutes(view.elapsed_minutes))
         ),
     ];
+    if view.timer_out_of_sync {
+        lines.push(
+            "⚠ El contador no corre en el proveedor (¿lo detuviste fuera de Taskflow?). Para reanudarlo: taskflow resume"
+                .to_owned(),
+        );
+    }
     if let Some(project) = &view.project {
         lines.push(format!("Proyecto: {project}"));
     }
@@ -1003,7 +1031,21 @@ mod tests {
             rules: vec!["list 901100200300".into(), "tag acme".into()],
             repo_path: repo.map(str::to_owned),
             priority_boost: boost,
+            statuses: vec![],
         }
+    }
+
+    #[test]
+    fn project_detail_lists_its_own_statuses() {
+        let mut project = detail("acme", None, 0);
+        project.statuses = vec!["ready: needs approval".into()];
+
+        let text = project_detail(&project);
+
+        assert!(
+            text.ends_with("Estados sugeridos:\n  - ready: needs approval"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -1274,7 +1316,9 @@ mod tests {
     fn summary() -> TaskSummary {
         TaskSummary {
             what_is_requested: "Corregir el redondeo.".into(),
+            acceptance_criteria: vec!["Cuadra al centavo".into()],
             suggested_steps: vec!["Reproducir".into(), "Corregir".into()],
+            risks: vec![],
             open_questions: vec![],
             estimated_complexity: Complexity::Medium,
             agent_prompt: "Corrige invoicing.".into(),
@@ -1297,7 +1341,23 @@ mod tests {
             report_path: "/s/86b1/report.md".into(),
             agent_prompt_path: "/s/86b1/agent-prompt.md".into(),
             pending: vec![],
+            timer_out_of_sync: false,
         }
+    }
+
+    #[test]
+    fn session_warns_when_the_timer_was_stopped_outside() {
+        let mut view = session_view("awaiting_approval");
+        view.timer_out_of_sync = true;
+
+        let text = session(&view, bogota());
+
+        assert_eq!(
+            text.lines().nth(2),
+            Some(
+                "⚠ El contador no corre en el proveedor (¿lo detuviste fuera de Taskflow?). Para reanudarlo: taskflow resume"
+            )
+        );
     }
 
     #[test]
@@ -1405,7 +1465,9 @@ mod tests {
         for expected in [
             "Análisis de la IA · complejidad: media",
             "Qué se pide:\nCorregir el redondeo.",
+            "Criterios de aceptación:\n  - Cuadra al centavo",
             "  1. Reproducir\n  2. Corregir",
+            "Riesgos:\n  (ninguno)",
             "Preguntas abiertas:\n  (ninguna)",
             "Prompt para el agente:",
             "Corrige invoicing.",

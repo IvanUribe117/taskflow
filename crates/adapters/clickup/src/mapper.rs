@@ -7,8 +7,8 @@ use application::ports::ProviderError;
 use chrono::{DateTime, Utc};
 use domain::DomainError;
 use domain::task::{
-    Comment, LocationLevel, LocationNode, LocationSegment, Priority, StatusKind, StatusOption,
-    Task, TaskId, TaskLocation, UserId,
+    Checklist, ChecklistItem, Comment, LocationLevel, LocationNode, LocationSegment, Priority,
+    StatusKind, StatusOption, Subtask, Task, TaskId, TaskLocation, UserId,
 };
 use thiserror::Error;
 
@@ -119,6 +119,33 @@ pub(crate) fn map_task(task: ApiTask, statuses: &StatusMap) -> Result<Task, MapE
         url: task.url,
         tags: task.tags.iter().map(|tag| tag.name.clone()).collect(),
         comments,
+        subtasks: task
+            .subtasks
+            .into_iter()
+            .map(|sub| {
+                Ok(Subtask {
+                    id: TaskId::new(sub.id)?,
+                    title: sub.name,
+                    done: status_option(sub.status.clone()).kind.is_final(),
+                    status: sub.status.status,
+                })
+            })
+            .collect::<Result<_, MapError>>()?,
+        checklists: task
+            .checklists
+            .into_iter()
+            .map(|list| Checklist {
+                name: list.name,
+                items: list
+                    .items
+                    .into_iter()
+                    .map(|item| ChecklistItem {
+                        text: item.name,
+                        done: item.resolved,
+                    })
+                    .collect(),
+            })
+            .collect(),
     };
     Ok(map_task)
 }
@@ -285,6 +312,40 @@ mod tests {
             .map(|s| s.level.clone())
             .collect();
         assert_eq!(levels, [LocationLevel::Space, LocationLevel::List]);
+    }
+
+    #[test]
+    fn maps_subtasks_and_checklists() {
+        let mut json: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/task.json")).unwrap();
+        json["subtasks"] = serde_json::json!([
+            {"id": "s1", "name": "Migración", "status": {"status": "complete", "type": "done"}},
+            {"id": "s2", "name": "Tests", "status": {"status": "in progress", "type": "custom"}}
+        ]);
+        json["checklists"] = serde_json::json!([
+            {"name": "QA", "items": [{"name": "Staging", "resolved": true}, {"name": "Prod", "resolved": false}]}
+        ]);
+
+        let task = map_task(serde_json::from_value(json).unwrap(), &StatusMap::default()).unwrap();
+
+        assert_eq!(task.subtasks.len(), 2);
+        assert!(task.subtasks[0].done);
+        assert!(!task.subtasks[1].done);
+        assert_eq!(task.subtasks[1].status, "in progress");
+        assert_eq!(task.checklists[0].name, "QA");
+        assert_eq!(
+            task.checklists[0].items,
+            [
+                ChecklistItem {
+                    text: "Staging".into(),
+                    done: true
+                },
+                ChecklistItem {
+                    text: "Prod".into(),
+                    done: false
+                },
+            ]
+        );
     }
 
     #[test]

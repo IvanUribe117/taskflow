@@ -14,9 +14,15 @@ use crate::ports::Complexity;
 /// ### Qué se pide
 /// Corregir el redondeo de las facturas.
 ///
+/// ### Criterios de aceptación
+/// - Los totales cuadran al centavo      (o "Sin definir.")
+///
 /// ### Plan
 /// 1. Reproducir
 /// 2. Corregir
+///
+/// ### Riesgos
+/// - Facturas ya emitidas                (o "Ninguno identificado.")
 ///
 /// ### Preguntas abiertas
 /// - ¿Por línea o por total?            (o "Ninguna.")
@@ -33,21 +39,48 @@ pub fn render(insight: &TaskInsight) -> String {
         Complexity::High => "alta",
     };
     let mut report = format!(
-        "## Reporte de trabajo · {}\n\n**Complejidad estimada:** {complexity}\n\n### Qué se pide\n{}\n\n### Plan\n",
+        "## Reporte de trabajo · {}\n\n**Complejidad estimada:** {complexity}\n\n### Qué se pide\n{}\n\n",
         insight.detail.task.title,
         summary.what_is_requested.trim()
     );
+    bullets(
+        &mut report,
+        "Criterios de aceptación",
+        &summary.acceptance_criteria,
+        "Sin definir.",
+    );
+    report.push_str("### Plan\n");
     for (number, step) in summary.suggested_steps.iter().enumerate() {
         let _ = writeln!(report, "{}. {step}", number + 1);
     }
-    report.push_str("\n### Preguntas abiertas\n");
-    if summary.open_questions.is_empty() {
-        report.push_str("Ninguna.\n");
-    }
-    for question in &summary.open_questions {
-        let _ = writeln!(report, "- {question}");
-    }
+    report.push('\n');
+    bullets(
+        &mut report,
+        "Riesgos",
+        &summary.risks,
+        "Ninguno identificado.",
+    );
+    bullets(
+        &mut report,
+        "Preguntas abiertas",
+        &summary.open_questions,
+        "Ninguna.",
+    );
+    report.truncate(report.trim_end().len());
+    report.push('\n');
     report
+}
+
+/// `### <título>` y una viñeta por elemento, o `empty` si no hay; una línea en blanco al final.
+fn bullets(report: &mut String, title: &str, items: &[String], empty: &str) {
+    let _ = writeln!(report, "### {title}");
+    if items.is_empty() {
+        let _ = writeln!(report, "{empty}");
+    }
+    for item in items {
+        let _ = writeln!(report, "- {item}");
+    }
+    report.push('\n');
 }
 
 #[cfg(test)]
@@ -64,7 +97,9 @@ mod tests {
             detail: TaskDetail::new(&task("1"), None, &user("me"), at("2026-10-14T15:00:00Z")),
             summary: TaskSummary {
                 what_is_requested: "Corregir el redondeo.\n".into(),
+                acceptance_criteria: vec!["Cuadra al centavo".into()],
                 suggested_steps: vec!["Reproducir".into(), "Corregir".into()],
+                risks: vec![],
                 open_questions: vec!["¿Por línea?".into()],
                 estimated_complexity: Complexity::Medium,
                 agent_prompt: "SECRETO DEL AGENTE".into(),
@@ -78,7 +113,9 @@ mod tests {
             "## Reporte de trabajo · Task 1\n\n\
              **Complejidad estimada:** media\n\n\
              ### Qué se pide\nCorregir el redondeo.\n\n\
+             ### Criterios de aceptación\n- Cuadra al centavo\n\n\
              ### Plan\n1. Reproducir\n2. Corregir\n\n\
+             ### Riesgos\nNinguno identificado.\n\n\
              ### Preguntas abiertas\n- ¿Por línea?\n"
         );
         assert!(!report.contains("SECRETO"));
@@ -90,7 +127,9 @@ mod tests {
             detail: TaskDetail::new(&task("1"), None, &user("me"), at("2026-10-14T15:00:00Z")),
             summary: TaskSummary {
                 what_is_requested: "X".into(),
+                acceptance_criteria: vec![],
                 suggested_steps: vec![],
+                risks: vec![],
                 open_questions: vec![],
                 estimated_complexity: Complexity::Low,
                 agent_prompt: String::new(),

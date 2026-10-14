@@ -130,7 +130,7 @@ impl ProjectRepository for FsProjectRepository {
 
 #[cfg(test)]
 mod tests {
-    use domain::project::{MatchRule, ProjectKind};
+    use domain::project::{MatchRule, ProjectKind, StatusSuggestions};
     use domain::task::LocationLevel;
     use tempfile::TempDir;
 
@@ -166,6 +166,7 @@ mod tests {
             }],
             repo_path: Some("/code/acme".into()),
             priority_boost: 5,
+            statuses: StatusSuggestions::default(),
         }
     }
 

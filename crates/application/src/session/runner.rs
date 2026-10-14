@@ -11,7 +11,9 @@ use domain::task::find_status;
 use crate::ai::SummarizeTask;
 use crate::dto::{SessionOutcome, SessionView};
 use crate::ports::Notice;
-use crate::session::{SessionPrefs, duration_label, effect_label, report};
+use crate::session::{
+    SessionPrefs, Suggestion, duration_label, effect_label, report, suggested_statuses,
+};
 use crate::tasks::unknown_status;
 use crate::{AppContext, AppError};
 
@@ -233,16 +235,17 @@ async fn set_status(
         .map_err(|e| e.to_string())?;
     let name = match target {
         StatusTarget::Suggested(stage) => {
-            let (key, names) = match stage {
-                Stage::Ready => ("ready", &prefs.ready),
-                Stage::Working => ("in_progress", &prefs.working),
+            let (key, which) = match stage {
+                Stage::Ready => ("ready", Suggestion::Ready),
+                Stage::Working => ("in_progress", Suggestion::Working),
             };
+            let names = suggested_statuses(ctx, prefs, session.project.as_ref(), which).await;
             match names.iter().find_map(|name| find_status(&statuses, name)) {
                 Some(option) => option.name.clone(),
                 None if names.is_empty() => return Ok(Step::default()),
                 None => {
                     return Ok(Step::warn(format!(
-                        "ningún estado de `provider.status_map.{key}` ({}) existe en esta lista; no se cambió el estado",
+                        "ningún estado sugerido para `{key}` ({}) existe en esta lista; no se cambió el estado. Configúralo en `provider.status_map.{key}` o en `[statuses]` del proyecto",
                         names.join(", ")
                     )));
                 }

@@ -50,8 +50,6 @@ impl fmt::Display for Status {
             Self::Done => f.write_str("done"),
             Self::Other(name) => f.write_str(name),
         }
-        // _ => write!(f, "Don't exists status"),        }
-        // todo!("Fase 2: implementar Display para Status")
     }
 }
 
@@ -65,7 +63,6 @@ impl fmt::Display for Priority {
             Self::Low => f.write_str("low"),
             Self::None => f.write_str("none"),
         }
-        // todo!("Fase 2: implementar Display para Priority")
     }
 }
 

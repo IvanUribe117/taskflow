@@ -65,8 +65,6 @@ pub(crate) fn map_priority(priority: Option<&ApiPriority>) -> Result<Priority, M
         Some("4") => Ok(Priority::Low),
         Some(other) => Err(MapError::UnknownPriority(other.to_string())),
     }
-
-    // todo!("Fase 3: traducir la prioridad")
 }
 
 /// Ruta de la tarea: espacio → carpeta → lista.

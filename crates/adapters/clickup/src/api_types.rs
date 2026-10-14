@@ -82,8 +82,18 @@ pub(crate) struct ApiNamedRef {
 pub(crate) struct ApiFolder {
     pub id: String,
     pub name: String,
+    /// `Option` porque `GET /task/{id}` puede mandar `"hidden": null` (la búsqueda manda
+    /// `true` o `false`). `#[serde(default)]` solo cubre que el campo **falte**; un `null`
+    /// presente necesita `Option`. Usa [`ApiFolder::is_hidden`].
     #[serde(default)]
-    pub hidden: bool,
+    pub hidden: Option<bool>,
+}
+
+impl ApiFolder {
+    /// Ausente o `null` cuentan como carpeta visible.
+    pub fn is_hidden(&self) -> bool {
+        self.hidden.unwrap_or(false)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -157,7 +167,7 @@ mod tests {
         let minimal: ApiTask =
             serde_json::from_str(include_str!("../tests/fixtures/task_minimal.json")).unwrap();
         assert!(minimal.priority.is_none());
-        assert!(minimal.folder.unwrap().hidden);
+        assert!(minimal.folder.unwrap().is_hidden());
 
         let page: ApiTasksPage =
             serde_json::from_str(include_str!("../tests/fixtures/tasks_page_0.json")).unwrap();

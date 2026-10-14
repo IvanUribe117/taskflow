@@ -457,6 +457,9 @@ En el punto 4, `raw.parse()` no sabe de qué tipo es su error hasta que lo usas,
 
 ## Paso 8: crear tus secciones
 
+> Para el uso del día a día (qué secciones escribir en cada proyecto, cómo mantenerlas y cómo generarlas con un agente) está la guía [`docs/guias/contexto-por-proyecto.md`](../guias/contexto-por-proyecto.md).
+
+
 No hay un comando para crearlas todavía (FR-40 lo prevé como mejora): se escriben a mano. `taskflow config path` dice dónde está tu `config.toml`, y las carpetas van junto a él.
 
 1. **Una sección global de aprendizaje.** Va en `<config_dir>/context/90-aprendizaje-rust.md`:

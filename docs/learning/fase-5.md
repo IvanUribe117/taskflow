@@ -1037,3 +1037,23 @@ tracing_subscriber::fmt()
 - **Por qué no `println!` en el adaptador:** la app de escritorio no tiene terminal, y un servidor web querría el aviso en sus logs. El adaptador emite el evento; cada interfaz lo muestra a su manera. Es el mismo principio que el `presenter`.
 - **Por qué `stderr`:** `taskflow today --json | jq` lee la salida normal (`stdout`). Si el aviso fuera ahí, rompería el JSON. Los avisos van a la salida de errores, que la tubería no toca.
 - **Lo que viene:** §19 prevé `-v` para ver también los mensajes de nivel `debug` (duración de cada petición, por ejemplo).
+
+### Validar donde se pregunta, no al final
+
+La primera versión del asistente dejaba avanzar sin marcar ninguna ubicación ni escribir etiquetas, preguntaba slug, nombre, tipo y repositorio, y recién al final `CreateProject` respondía `a project needs at least one rule`. Además el texto decía "espacio para marcar", que se confunde con un espacio de ClickUp.
+
+Ahora las ubicaciones y las etiquetas van dentro de un `loop` que solo termina con al menos una regla:
+
+```rust
+let (chosen, rules) = loop {
+    let chosen = MultiSelect::with_theme(&theme).with_prompt("... (barra espaciadora para marcar, Enter para continuar)")...;
+    let mut rules = /* ubicaciones + etiquetas */;
+    if !rules.is_empty() {
+        break (chosen, rules);      // el loop "devuelve" una tupla con los dos valores
+    }
+    println!("Marca al menos una ubicación con la barra espaciadora, o escribe una etiqueta.");
+};
+```
+
+- **`break` con una tupla:** el `loop` como expresión (fase 3) puede devolver varios valores a la vez. Se necesitan los dos: `rules` para el proyecto y `chosen` para sugerir el nombre.
+- **La regla sigue en `CreateProject`.** El asistente valida para dar una mejor experiencia; el caso de uso valida para que **ninguna** interfaz pueda crear un proyecto sin reglas. Las dos validaciones tienen motivos distintos, y no sobra ninguna.

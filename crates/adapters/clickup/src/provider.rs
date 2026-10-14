@@ -60,7 +60,7 @@ impl ClickUpProvider {
             folders
                 .folders
                 .into_iter()
-                .filter(|folder| !folder.hidden)
+                .filter(|folder| !folder.is_hidden())
                 .map(|folder| self.folder_node(folder)),
         )
         .await?;

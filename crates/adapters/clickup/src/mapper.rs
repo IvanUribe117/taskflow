@@ -81,7 +81,7 @@ pub(crate) fn map_location(task: &ApiTask) -> TaskLocation {
         name: String::new(),
     });
 
-    if let Some(folder) = task.folder.as_ref().filter(|f| !f.hidden) {
+    if let Some(folder) = task.folder.as_ref().filter(|f| !f.is_hidden()) {
         segments.push(LocationSegment {
             level: LocationLevel::Folder,
             id: folder.id.clone(),
@@ -244,6 +244,34 @@ mod tests {
                 (&LocationLevel::Space, "90110001", ""),
                 (&LocationLevel::Folder, "90110002", "Backend"),
                 (&LocationLevel::List, "901100200300", "ACME – Sprint"),
+            ]
+        );
+    }
+
+    /// Caso real: `GET /task/{id}` puede mandar `"hidden": null` en la carpeta (la búsqueda
+    /// manda `false`). Antes fallaba con "invalid type: null, expected a boolean".
+    #[test]
+    fn null_hidden_flag_means_a_visible_folder() {
+        let json = include_str!("../tests/fixtures/task.json")
+            .replace("\"hidden\": false", "\"hidden\": null");
+        assert!(
+            json.contains("\"hidden\": null"),
+            "the fixture must contain the flag"
+        );
+
+        let task = fixture_task(&json);
+
+        let levels: Vec<LocationLevel> = map_location(&task)
+            .segments()
+            .iter()
+            .map(|s| s.level.clone())
+            .collect();
+        assert_eq!(
+            levels,
+            [
+                LocationLevel::Space,
+                LocationLevel::Folder,
+                LocationLevel::List
             ]
         );
     }

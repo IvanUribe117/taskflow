@@ -852,3 +852,46 @@ Es la diferencia entre fixtures escritos **a partir de la documentación** (lo q
 | Tests de integración con wiremock                          | `tests/provider.rs`                       |
 | Cadena de errores, mensajes útiles                         | `text()` + `serde_json::from_str`       |
 | `u64` contra `i64`, test primero ante datos reales      | Ids negativos en comentarios                |
+
+## Segundo caso real: `null` donde se esperaba un booleano (2026-10-14)
+
+`taskflow context preview 86bcfn2dc` falló con:
+
+```text
+unexpected response from the provider: /task/86bcfn2dc: invalid type: null, expected a boolean at line 1 column 30083
+```
+
+`today` funcionaba con esa misma tarea porque usa la **búsqueda** (`GET /team/{id}/task`), que manda `"hidden": false` en la carpeta. La consulta de **una** tarea (`GET /task/{id}`, que usan `show`, `close` y `context preview`) a veces manda `"hidden": null`. El mismo dato, dos formas según el endpoint.
+
+### `#[serde(default)]` no cubre `null`
+
+| JSON | `hidden: bool` + `#[serde(default)]` | `hidden: Option<bool>` + `#[serde(default)]` |
+| --- | --- | --- |
+| `"hidden": true` | `true` | `Some(true)` |
+| campo ausente | `false` (el *default*) | `None` |
+| `"hidden": null` | ❌ error: `null` no es un booleano | `None` |
+
+`default` se usa solo cuando el campo **falta**. Un `null` presente es un valor, y `bool` no lo acepta. Para aceptar `null` hace falta `Option`.
+
+La corrección mantiene la regla en un solo lugar:
+
+```rust
+pub hidden: Option<bool>,
+
+impl ApiFolder {
+    /// Ausente o `null` cuentan como carpeta visible.
+    pub fn is_hidden(&self) -> bool {
+        self.hidden.unwrap_or(false)
+    }
+}
+```
+
+`map_location` y `space_children` llaman a `is_hidden()`. Si mañana la regla cambia, se cambia en un método, no en cada `filter`.
+
+### El mismo ciclo que con los ids negativos
+
+1. Leer el error: endpoint, tipo recibido (`null`) y tipo esperado (booleano). En `ApiTask` solo hay un campo booleano, `folder.hidden`.
+2. Test que reproduce el caso real (`null_hidden_flag_means_a_visible_folder`): el fixture con `"hidden": null`. Falló con el mismo mensaje.
+3. Corregir y ver el test en verde.
+
+La lección para los tipos que reflejan una API externa: **un campo opcional en la documentación puede llegar ausente o como `null`**, y en Rust son dos casos distintos. Ante la duda, `Option<T>` con `#[serde(default)]` acepta los dos.

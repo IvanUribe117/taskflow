@@ -149,31 +149,41 @@ pub async fn project_add(ctx: &AppContext) -> anyhow::Result<()> {
     }];
     let nodes = flatten(&tree);
 
-    // 2. Ubicaciones elegidas → reglas de ubicación.
+    // 2 y 3. Ubicaciones y etiquetas → reglas. Se repite hasta que haya al menos una:
+    //    un proyecto sin reglas nunca tendría tareas, y es mejor avisarlo aquí que después
+    //    de preguntar todo lo demás.
     let labels: Vec<String> = nodes.iter().map(presenter::location_label).collect();
-    let chosen = MultiSelect::with_theme(&theme)
-        .with_prompt("Ubicaciones del proyecto (espacio para marcar, enter para seguir)")
-        .items(&labels)
-        .interact()?;
-    let mut rules: Vec<MatchRule> = chosen
-        .iter()
-        .map(|&i| MatchRule::Location {
-            level: nodes[i].segment.level.clone(),
-            id: nodes[i].segment.id.clone(),
-        })
-        .collect();
+    let (chosen, rules) = loop {
+        let chosen = MultiSelect::with_theme(&theme)
+            .with_prompt(
+                "Ubicaciones del proyecto (barra espaciadora para marcar, Enter para continuar)",
+            )
+            .items(&labels)
+            .interact()?;
+        let mut rules: Vec<MatchRule> = chosen
+            .iter()
+            .map(|&i| MatchRule::Location {
+                level: nodes[i].segment.level.clone(),
+                id: nodes[i].segment.id.clone(),
+            })
+            .collect();
 
-    // 3. Etiquetas → reglas de etiqueta.
-    let tags: String = Input::with_theme(&theme)
-        .with_prompt("Etiquetas (separadas por coma, opcional)")
-        .allow_empty(true)
-        .interact_text()?;
-    rules.extend(
-        tags.split(',')
-            .map(str::trim)
-            .filter(|tag| !tag.is_empty())
-            .map(|tag| MatchRule::Tag(tag.to_owned())),
-    );
+        let tags: String = Input::with_theme(&theme)
+            .with_prompt("Etiquetas (separadas por coma, opcional)")
+            .allow_empty(true)
+            .interact_text()?;
+        rules.extend(
+            tags.split(',')
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(|tag| MatchRule::Tag(tag.to_owned())),
+        );
+
+        if !rules.is_empty() {
+            break (chosen, rules);
+        }
+        println!("Marca al menos una ubicación con la barra espaciadora, o escribe una etiqueta.");
+    };
 
     // 4. Slug, nombre, tipo y repositorio.
     let slug: ProjectSlug = Input::<String>::with_theme(&theme)

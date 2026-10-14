@@ -3,12 +3,14 @@
 //! Las interfaces nunca reciben entidades del dominio sino estas estructuras serializables:
 //! el mismo resultado sirve para la terminal, `--json`, Tauri o una API web.
 
-use chrono::{DateTime, Utc};
+use std::path::PathBuf;
+
+use chrono::{DateTime, NaiveDateTime, Utc};
 use domain::context::ContextSection;
 use domain::project::{Project, ProjectKey, ProjectResolver};
 use domain::task::{Comment, StatusOption, Task, UserId};
 
-use crate::ports::{PlanTask, TaskSummary};
+use crate::ports::{HistoryEntry, PlanTask, RecordSubject, TaskSummary};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -572,5 +574,36 @@ mod tests {
 
         assert_eq!(json["generated_at"], "2026-10-10T15:00:00Z");
         assert_eq!(json["groups"][0]["project"], serde_json::Value::Null);
+    }
+}
+
+/// Un registro del historial, para `history`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HistoryItem {
+    /// "analysis" o "plan".
+    pub kind: &'static str,
+    /// Solo en los análisis.
+    pub task_id: Option<String>,
+    pub project: Option<String>,
+    /// Hora local del usuario.
+    pub saved_at: NaiveDateTime,
+    pub title: String,
+    pub path: PathBuf,
+}
+
+impl From<&HistoryEntry> for HistoryItem {
+    fn from(entry: &HistoryEntry) -> Self {
+        let (kind, task_id) = match &entry.subject {
+            RecordSubject::Analysis(id) => ("analysis", Some(id.as_str().to_owned())),
+            RecordSubject::Plan => ("plan", None),
+        };
+        Self {
+            kind,
+            task_id,
+            project: entry.project.as_ref().map(ToString::to_string),
+            saved_at: entry.saved_at,
+            title: entry.title.clone(),
+            path: entry.path.clone(),
+        }
     }
 }

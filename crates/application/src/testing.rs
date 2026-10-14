@@ -13,9 +13,10 @@ use domain::task::{Comment, LocationNode, LocationSegment, StatusOption, Task, T
 
 use crate::AppContext;
 use crate::ports::{
-    AiError, Clock, Complexity, ContextRepository, ExposeSecret, PlanInput, ProjectRepository,
-    ProviderError, RepoError, SecretError, SecretName, SecretStore, SecretString, Summarizer,
-    SummaryInput, TaskProvider, TaskQuery, TaskSummary,
+    AiError, Clock, Complexity, ContextRepository, ExposeSecret, HistoryEntry, HistoryFilter,
+    HistoryRecord, HistoryRepository, PlanInput, ProjectRepository, ProviderError, RepoError,
+    SecretError, SecretName, SecretStore, SecretString, Summarizer, SummaryInput, TaskProvider,
+    TaskQuery, TaskSummary, markdown_title,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
@@ -289,6 +290,7 @@ pub fn context(
         projects: Arc::new(FakeProjectRepository::new(projects)),
         context: Arc::new(FakeContextRepository::default()),
         ai: Arc::new(FakeSummarizer::default()),
+        history: Arc::new(FakeHistoryRepository::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -361,6 +363,71 @@ impl ContextRepository for FakeContextRepository {
 
     async fn project_sections(&self, slug: &ProjectSlug) -> Result<Vec<ContextSection>, RepoError> {
         Ok(self.projects.get(slug).cloned().unwrap_or_default())
+    }
+}
+
+/// Historial en memoria. Las rutas son de mentira: `mem/<n>.md`.
+#[derive(Debug, Default)]
+pub struct FakeHistoryRepository {
+    records: Mutex<Vec<(HistoryEntry, String)>>,
+}
+
+impl FakeHistoryRepository {
+    /// Lo guardado hasta ahora, en orden de llegada.
+    pub fn saved(&self) -> Vec<HistoryRecord> {
+        self.records
+            .lock()
+            .expect("lock")
+            .iter()
+            .map(|(entry, content)| HistoryRecord {
+                subject: entry.subject.clone(),
+                project: entry.project.clone(),
+                saved_at: entry.saved_at,
+                content: content.clone(),
+            })
+            .collect()
+    }
+}
+
+#[async_trait]
+impl HistoryRepository for FakeHistoryRepository {
+    async fn save(&self, record: &HistoryRecord) -> Result<std::path::PathBuf, RepoError> {
+        let mut records = self.records.lock().expect("lock");
+        let path = std::path::PathBuf::from(format!("mem/{}.md", records.len() + 1));
+        let entry = HistoryEntry {
+            subject: record.subject.clone(),
+            project: record.project.clone(),
+            saved_at: record.saved_at,
+            title: markdown_title(&record.content)
+                .unwrap_or("sin título")
+                .to_owned(),
+            path: path.clone(),
+        };
+        records.push((entry, record.content.clone()));
+        Ok(path)
+    }
+
+    async fn list(&self, filter: &HistoryFilter) -> Result<Vec<HistoryEntry>, RepoError> {
+        let mut entries: Vec<HistoryEntry> = self
+            .records
+            .lock()
+            .expect("lock")
+            .iter()
+            .map(|(entry, _)| entry.clone())
+            .filter(|entry| filter.matches(&entry.subject, entry.project.as_ref()))
+            .collect();
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.saved_at));
+        Ok(entries)
+    }
+
+    async fn read(&self, entry: &HistoryEntry) -> Result<String, RepoError> {
+        self.records
+            .lock()
+            .expect("lock")
+            .iter()
+            .find(|(saved, _)| saved.path == entry.path)
+            .map(|(_, content)| content.clone())
+            .ok_or_else(|| RepoError::NotFound(entry.path.display().to_string()))
     }
 }
 

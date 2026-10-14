@@ -38,6 +38,7 @@ impl ConfigKey {
         "ai.max_description_chars",
         "ai.max_comments",
         "ai.read_repo",
+        "history.dir",
         "ui.group_by",
     ];
 

@@ -36,6 +36,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub ai: AiSettings,
     #[serde(default)]
+    pub history: HistorySettings,
+    #[serde(default)]
     pub ui: UiSettings,
 }
 
@@ -202,6 +204,23 @@ impl Default for ProjectsSettings {
     }
 }
 
+/// Sección `[history]` (§14.4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HistorySettings {
+    /// Carpeta del historial de análisis y planes (`--save`). Relativa al directorio de
+    /// `config.toml`, o absoluta.
+    pub dir: String,
+}
+
+impl Default for HistorySettings {
+    fn default() -> Self {
+        Self {
+            dir: "history".to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UiSettings {
@@ -234,6 +253,7 @@ impl AppSettings {
             projects: ProjectsSettings::default(),
             context: ContextSettings::default(),
             ai: AiSettings::default(),
+            history: HistorySettings::default(),
             ui: UiSettings::default(),
         }
     }

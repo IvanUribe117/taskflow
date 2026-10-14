@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use adapter_fs::{FsConfigStore, FsContextRepository, FsProjectRepository};
+use adapter_fs::{FsConfigStore, FsContextRepository, FsHistoryRepository, FsProjectRepository};
 use adapter_keyring::{EnvSecretStore, KeyringSecretStore, LayeredSecretStore};
 use application::AppContext;
 use application::ports::{ProviderError, SecretError, SecretName, SecretStore, SystemClock};
@@ -59,6 +59,7 @@ pub fn secret_store() -> LayeredSecretStore {
 /// - `tasks`: el adaptador que construye el descriptor de `settings.provider.kind`.
 /// - `projects`: `FsProjectRepository` en [`projects_dir`].
 /// - `ai`: el proveedor de IA que construye el descriptor de `settings.ai.kind`.
+/// - `history`: `FsHistoryRepository` en [`history_dir`].
 /// - `policy`: `WeightedPolicy` con los pesos de `settings.policy`.
 /// - `clock`: `SystemClock`.
 ///
@@ -80,6 +81,7 @@ pub fn build(
             config_path,
         ))),
         ai: (registry::find_ai(settings.ai.kind).build)(settings, secrets)?,
+        history: Arc::new(FsHistoryRepository::new(history_dir(settings, config_path))),
         context: Arc::new(FsContextRepository::new(
             context_dir(settings, config_path),
             projects_dir(settings, config_path),
@@ -114,6 +116,16 @@ pub fn projects_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or(Path::new("."))
         .join(&settings.projects.dir)
+}
+
+/// La carpeta del historial: `settings.history.dir` relativa a la carpeta de `config.toml`,
+/// o absoluta. Igual que [`projects_dir`].
+#[must_use]
+pub fn history_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(&settings.history.dir)
 }
 
 #[cfg(test)]
@@ -190,6 +202,19 @@ mod tests {
         );
 
         assert_eq!(dir, Path::new("/home/ivan/.config/taskflow/context"));
+    }
+
+    #[test]
+    fn history_lives_next_to_the_config_file_unless_absolute() {
+        let config = Path::new("/home/ivan/.config/taskflow/config.toml");
+        let mut settings = settings();
+
+        assert_eq!(
+            history_dir(&settings, config),
+            Path::new("/home/ivan/.config/taskflow/history")
+        );
+        settings.history.dir = "/srv/history".into();
+        assert_eq!(history_dir(&settings, config), Path::new("/srv/history"));
     }
 
     #[test]

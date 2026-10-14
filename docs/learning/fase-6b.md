@@ -356,7 +356,7 @@ Mientras la IA trabaja, verás `Analizando la tarea con claude_code…` en la sa
 ## Limitaciones conocidas
 
 - **El plan usa el contexto global y, con `--project`, el de ese proyecto.** Sin `--project`, el conocimiento de cada proyecto no entra (repartir el presupuesto entre varios proyectos queda para después).
-- **`show --ai` y `plan` no guardan caché:** cada ejecución es una llamada nueva (fase 12).
+- **`show --ai` y `plan` no guardan caché:** cada ejecución es una llamada nueva (fase 12). Lo que sí puedes hacer es guardar el resultado con `--save` (ver [el historial](#ajuste-posterior-historial-de-análisis-y-planes)).
 - **Un solo proveedor de IA.** El registro ya admite más: la API de Anthropic, OpenAI y Gemini son un descriptor y un adaptador cada uno (ADR-027).
 - **Sin portapapeles:** el prompt se guarda con `--out` (FR-09, decisión abierta en §26).
 
@@ -465,3 +465,82 @@ Otros detalles:
 - Se borraron los bloques `#![allow(...)]` de `application` y `adapter-claude-code`.
 - `cargo test --workspace`: 335 tests. Clippy y `cargo fmt` sin avisos.
 - Falta el **paso 7**: `show --ai` y `plan` con tus tareas reales.
+
+---
+
+## Ajuste posterior: historial de análisis y planes
+
+Pedido el 2026-10-14: "que si coloco un archivo o una flag me guarde ese archivo en una ruta específica en la cual yo pueda consultar después, y tener como un registro", ordenado por proyecto. Lo implementé yo completo.
+
+### Cómo se usa
+
+```sh
+taskflow show 86bcfn2dc --ai --save          # guarda el análisis completo
+taskflow plan --project idk-base --save      # guarda el plan
+taskflow history                             # todo, lo más reciente primero
+taskflow history 86bcfn2dc                   # los análisis de esa tarea
+taskflow history --project idk-base --plans  # los planes de un proyecto
+taskflow history 86bcfn2dc --last            # el contenido del último análisis
+taskflow history --json                      # para scripts
+```
+
+La ruta de cada archivo nuevo sale en la salida de errores (`Análisis guardado en ...`), así no ensucia `--json`.
+
+```text
+~/Library/Application Support/taskflow/history/      taskflow config set history.dir <otra carpeta>
+├── idk-base/
+│   ├── analyses/86bcfn2dc/2026-10-14_150152.md
+│   └── plans/2026-10-14_150214.md
+└── _general/                                        tareas sin proyecto; planes sin --project
+```
+
+Cada análisis guarda el análisis de la IA y la tarea tal como la viste (descripción y comentarios), en bloques `text`. Cada plan guarda el plan y la lista de tareas. Las dos cosas llevan fecha, IA y proyecto al principio.
+
+### Qué se agregó, por capa
+
+| Capa | Archivo | Qué |
+| --- | --- | --- |
+| Puerto | `application/src/ports/history_repository.rs` | `HistoryRepository` (`save`, `list`, `read`), `HistoryRecord`, `HistoryEntry`, `HistoryFilter::matches`, `markdown_title` |
+| Casos de uso | `application/src/history/mod.rs` | `SaveToHistory` (pone la hora local) y `ListHistory` (`execute` con límite, `latest`) |
+| DTO | `application/src/dto.rs` | `HistoryItem`, lo que ven la tabla y `--json` |
+| Configuración | `settings/mod.rs`, `key.rs` | `[history] dir = "history"` y la clave `history.dir` |
+| Adaptador | `adapters/fs/src/history.rs` | `FsHistoryRepository` sobre carpetas y archivos |
+| Armado | `bootstrap/src/build.rs` | `history_dir` y `AppContext::history` |
+| CLI | `apps/cli/src/record.rs` | Los documentos Markdown (`analysis`, `plan`) |
+| CLI | `commands/history.rs`, `show.rs`, `plan.rs`, `args.rs` | `--save` y el comando `history` |
+| Fake | `application/src/testing.rs` | `FakeHistoryRepository`, en memoria |
+
+Tests: de 335 a 354.
+
+### Conceptos aplicados
+
+- **Un puerto nuevo, el mismo patrón.** `HistoryRepository` es un trait como `ProjectRepository`: la aplicación no sabe que hay archivos, y un fake en memoria basta para probar los casos de uso. Para guardarlo en una base de datos o en un backend (fase 12), se escribe otro adaptador.
+- **La interfaz arma el documento, el adaptador guarda texto.** El Markdown es presentación, igual que la tabla de `today`. Por eso `record.rs` vive en `apps/cli`, al lado de `presenter.rs`, y reutiliza `presenter::task_summary`, `task_detail` y `daily_plan`. Lo guardado es lo mismo que viste.
+- **Lógica compartida en el puerto.** `HistoryFilter::matches` y `markdown_title` están junto al trait, y los usan el adaptador real y el fake. Así los dos filtran igual y un test del fake vale para el real.
+- **No pisar nunca: `persist_noclobber`.** `atomic::write` usa `persist`, que **reemplaza** el destino. Aquí se quiere lo contrario: `persist_noclobber` **falla** con `AlreadyExists` si el archivo existe. En el error viene el temporal de vuelta (`e.file`), así que el bucle prueba `-2`, `-3`... sin volver a escribirlo:
+
+  ```rust
+  match file.persist_noclobber(&path) {
+      Ok(_) => return Ok(path),
+      Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => file = e.file,
+      Err(e) => return Err(storage(e.error)),
+  }
+  ```
+
+  Es un *ownership* muy de Rust: `persist_noclobber` **consume** `file`; si falla, te lo devuelve dentro del error para que no se pierda.
+- **`for attempt in 1..` + `unreachable!`.** Un rango sin fin es un bucle infinito con contador. El compilador no sabe que nunca termina, así que después del `for` hace falta un valor: `unreachable!` lo deja explícito.
+- **Nombres de archivo que se ordenan solos.** `2026-10-14_153012` se ordena bien como texto, no tiene `:` (inválido en Windows) y se vuelve a leer con `NaiveDateTime::parse_from_str(stem, "%Y-%m-%d_%H%M%S")`. `stem.get(..17)` (y no `&stem[..17]`) devuelve `None` en vez de hacer *panic* si el nombre es más corto.
+- **Datos de afuera, nombres seguros.** Un id de tarea se vuelve nombre de carpeta: `safe_name` deja solo letras, dígitos, `-` y `_`. Un id como `../../x` no puede escribir fuera del historial. Hay un test que lo prueba.
+- **Carpeta reservada que no choca.** `_general` tiene un `_`, que no es válido en un `ProjectSlug`. Ningún proyecto puede llamarse así, y al listar, una carpeta que no es slug se ignora.
+- **Ordenar al revés: `sort_by_key(|e| Reverse(e.saved_at))`.** `std::cmp::Reverse` invierte la comparación. Clippy (`unnecessary_sort_by`) lo prefiere a `sort_by(|a, b| b.x.cmp(&a.x))`.
+- **Hora local sin fracciones.** `SaveToHistory` guarda `naive_local().with_nanosecond(0)`: la misma precisión que el nombre del archivo, así lo que se guarda y lo que se lee coinciden.
+- **Cercas de código que crecen.** Si la descripción de ClickUp trae ```` ``` ````, un bloque de tres comillas invertidas se cerraría antes de tiempo. `fenced` cuenta la racha más larga y usa una más.
+- **Un `struct` local para `--json`.** `history --last --json` necesita el registro **y** su contenido. Un `struct Latest` dentro de la función con `#[serde(flatten)]` lo resuelve sin agregar un DTO que solo usa un comando.
+
+### Probado contra tus datos (2026-10-14)
+
+Con una copia de tu `config.toml` en una carpeta temporal, para no llenar tu historial real:
+
+- `show 86bcfn2dc --ai --save`: se guardó en `history/idk-base/analyses/86bcfn2dc/` (la tarea es de `idk-base`), con el título de la tarea.
+- `plan --project idk-base --max 3 --save`: se guardó en `history/idk-base/plans/`.
+- `history`, `history --plans`, `history 86bcfn2dc --json`, `history --plans --last` y `history --project otro` (vacío) dieron lo esperado.

@@ -1,6 +1,6 @@
 # Taskflow — Documento de arquitectura de software
 
-*Versión 0.7 · 2026-10-14 · Estado: borrador*
+*Versión 0.8 · 2026-10-14 · Estado: borrador*
 
 > **Cambios en 0.3:** configuración persistente con asistente interactivo, proyectos (cliente/proyecto) y agrupación de tareas, contexto por proyecto en secciones abiertas, automatizaciones con **Playbooks** y patrones de diseño de Rust asociados.
 >
@@ -11,6 +11,8 @@
 > **Cambios en 0.6:** los descriptores de proveedores viven en `bootstrap`, no en cada adaptador, para evitar un ciclo de dependencias (ADR-026).
 >
 > **Cambios en 0.7:** varios proveedores de IA con el mismo registro que los de tareas (Anthropic por API, Claude Code con tu suscripción, OpenAI, Gemini...), elegidos por configuración (ADR-027).
+>
+> **Cambios en 0.8:** historial de análisis y planes (`--save` y `taskflow history`), guardado por proyecto (§14.4). Cumple FR-16.
 
 ## 1. Propósito del documento
 
@@ -75,7 +77,7 @@ Prioridad según MoSCoW: **Debe** (imprescindible en v1), **Debería** (importan
 | FR-13 | El sistema debe permitir elegir el proveedor de tareas y el proveedor de IA solo mediante configuración.                                          | Debe      |
 | FR-14 | El sistema debe mapear los estados propios del proveedor a los estados del dominio mediante configuración.                                        | Debe      |
 | FR-15 | El sistema debería exportar el resultado de cualquier consulta en JSON.                                                                           | Debería  |
-| FR-16 | El sistema podría guardar el plan del día como archivo Markdown.                                                                                 | Podría   |
+| FR-16 | El sistema podría guardar el plan del día como archivo Markdown (hecho: `plan --save`, §14.4).                                                                                 | Podría   |
 | FR-17 | El sistema podría guardar en caché local los datos de tareas y los resúmenes de IA para evitar llamadas repetidas.                              | Podría   |
 
 ### 4.2 Configuración persistente
@@ -506,6 +508,10 @@ Separada del código. Ubicación con el crate `directories` (`~/.config/taskflow
 │   │       └── release.toml
 │   └── interno/
 │       └── project.toml
+├── history/                          # análisis y planes guardados con --save (§14.4)
+│   ├── <slug>/analyses/<tarea>/2026-10-14_153012.md
+│   ├── <slug>/plans/2026-10-14_090010.md
+│   └── _general/                     # tareas sin proyecto y planes de todos
 ├── runs/                             # registros de ejecución de Playbooks (JSON Lines)
 │   └── 2026-10-10T14-02-11_acme_release.jsonl
 └── sessions/                         # sesiones de trabajo (§9.6)
@@ -516,7 +522,7 @@ Separada del código. Ubicación con el crate `directories` (`~/.config/taskflow
     └── history/                      # sesiones cerradas o abortadas
 ```
 
-Todo es texto plano, por lo que el directorio completo (sin `runs/` ni `sessions/`) puede versionarse con git (NFR-16).
+Todo es texto plano, por lo que el directorio completo (sin `history/`, `runs/` ni `sessions/`) puede versionarse con git (NFR-16).
 
 ## 9. Modelo de dominio
 
@@ -2499,6 +2505,9 @@ default = "acme"                  # opcional
 global_dir = "context"
 budget_chars = 12000              # presupuesto total de contexto por llamada a la IA
 
+[history]
+dir = "history"                   # relativo al directorio de configuración, o absoluto
+
 [playbooks]
 shell = "auto"                    # auto | sh | bash | zsh | pwsh | cmd
 default_timeout_secs = 600
@@ -2724,6 +2733,28 @@ La clave de la sección (`SectionKey`) es el nombre del archivo sin prefijo num�
 - Las de **conocimiento** van en el mensaje del usuario, dentro de un bloque delimitado, porque son datos de referencia.
 - Las secciones omitidas por presupuesto se informan en la salida (`omitted_sections`) y en modo verbose.
 - `taskflow context preview <TASK_ID>` muestra exactamente este resultado sin llamar a la IA.
+
+### 14.4 Historial de análisis y planes
+
+Cada respuesta de la IA cuesta tiempo y cuota. Con `--save` queda un registro en Markdown para consultarlo después, ordenado por proyecto:
+
+```text
+<config_dir>/history/                 [history] dir
+├── idk-base/
+│   ├── analyses/86bcfn2dc/
+│   │   ├── 2026-10-14_153012.md      show 86bcfn2dc --ai --save
+│   │   └── 2026-10-15_091544.md      cada ejecución, un archivo nuevo
+│   └── plans/2026-10-14_090010.md    plan --project idk-base --save
+└── _general/                         tareas sin proyecto; planes sin --project
+```
+
+- **Puerto `HistoryRepository`** (`save`, `list`, `read`) con `FsHistoryRepository` en `adapter-fs`. Los casos de uso `SaveToHistory` y `ListHistory` ponen la hora local del usuario (`Clock`).
+- **Nunca se pisa un registro:** el archivo se escribe en un temporal y se renombra con `persist_noclobber`; si ya hay uno en ese segundo, se usa `-2`, `-3`...
+- **El documento lo arma la interfaz** (`apps/cli/src/record.rs`): el adaptador guarda texto y no sabe de Markdown. El primer encabezado `# ...` es el título que muestra `history`.
+- **El proyecto** es el de la tarea (`TaskDetail::project`) o el de `plan --project`. `_general` no puede chocar con un proyecto porque `_` no es válido en un slug.
+- **Ids raros no escapan de la carpeta:** el id de la tarea se usa como nombre de carpeta cambiando por `_` todo lo que no sea letra, dígito, `-` o `_`.
+- **Consulta:** `taskflow history [TASK_ID] [--project SLUG] [--plans] [--limit N] [--last] [--json]`. `--last` imprime el documento más reciente.
+- Los registros incluyen descripciones y comentarios de las tareas: el historial queda fuera de git, igual que `sessions/` (NFR-16).
 
 ## 15. Playbooks
 

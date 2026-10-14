@@ -9,6 +9,7 @@ pub mod ai;
 pub mod context;
 pub mod dto;
 pub mod error;
+pub mod history;
 pub mod ports;
 pub mod projects;
 pub mod sections;

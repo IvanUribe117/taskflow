@@ -3,12 +3,13 @@
 mod close;
 mod config;
 mod context;
+mod history;
 mod plan;
 mod project;
 mod show;
 mod today;
 
-use application::ports::ConfigStore;
+use application::ports::{ConfigStore, HistoryFilter, SubjectFilter};
 
 use crate::args::{Cli, Command, ConfigCommand};
 use crate::wizard;
@@ -17,8 +18,8 @@ use crate::wizard;
 ///
 /// 1. `config init` y `config path` funcionan **sin** configuración (todavía no existe).
 /// 2. El resto de `config` necesita el archivo, pero no el `AppContext`.
-/// 3. `today`, `show`, `plan`, `close`, `project` y `context` necesitan el `AppContext`
-///    completo.
+/// 3. `today`, `show`, `plan`, `history`, `close`, `project` y `context` necesitan el
+///    `AppContext` completo.
 pub async fn run(cli: Cli) -> anyhow::Result<()> {
     let store = bootstrap::config_store(cli.config.as_deref())?;
     let secrets = bootstrap::secret_store();
@@ -46,19 +47,44 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
             json,
             ai,
             out,
+            save,
         } => {
             let settings = store.load()?;
             let ctx = bootstrap::build(&settings, &secrets, store.path())?;
             if ai {
-                show::run_with_ai(&ctx, &settings, &task_id, json, out.as_deref()).await
+                show::run_with_ai(&ctx, &settings, &task_id, json, out.as_deref(), save).await
             } else {
                 show::run(&ctx, &task_id, json).await
             }
         }
-        Command::Plan { max, project, json } => {
+        Command::Plan {
+            max,
+            project,
+            json,
+            save,
+        } => {
             let settings = store.load()?;
             let ctx = bootstrap::build(&settings, &secrets, store.path())?;
-            plan::run(&ctx, &settings, max, project, json).await
+            plan::run(&ctx, &settings, max, project, json, save).await
+        }
+        Command::History {
+            task_id,
+            project,
+            plans,
+            limit,
+            last,
+            json,
+        } => {
+            let settings = store.load()?;
+            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
+            let subject = match (task_id, plans) {
+                (Some(id), _) => SubjectFilter::Task(id),
+                (None, true) => SubjectFilter::Plans,
+                (None, false) => SubjectFilter::Any,
+            };
+            let filter = HistoryFilter { project, subject };
+            let base = bootstrap::history_dir(&settings, store.path());
+            history::run(&ctx, &base, filter, limit, last, json).await
         }
         Command::Close {
             task_id,

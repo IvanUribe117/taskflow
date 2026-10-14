@@ -7,6 +7,7 @@
 mod args;
 mod commands;
 mod presenter;
+mod record;
 mod wizard;
 
 use clap::Parser;

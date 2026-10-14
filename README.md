@@ -17,6 +17,7 @@ El diseño completo está en [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Las
 | 7 | `close`: cerrar tareas en ClickUp (escritura) | Hecho; falta probarla contra ClickUp real ([guía](docs/learning/fase-7.md)) |
 | 6A | Contexto por proyecto (secciones, `context list`/`preview`) | Hecho ([guía](docs/learning/fase-6.md)) |
 | 6B | IA: `show --ai`, `plan` y prompt para el agente con Claude Code (`claude -p`), leyendo el repositorio del proyecto | Hecho; falta probarla con tus tareas ([guía](docs/learning/fase-6b.md)) |
+| 6B+ | Historial: `show --ai --save`, `plan --save` y `history`, por proyecto | Hecho ([guía](docs/learning/fase-6b.md#ajuste-posterior-historial-de-análisis-y-planes)) |
 | 8 | Sesión de trabajo (`start` → `done`) | Pendiente |
 
 Orden acordado el 2026-10-14: **7 → 6 → 8**. La 7 no depende de la IA y es útil desde ya; la 8 necesita la 6 (el reporte con IA) y la 7 (escribir en ClickUp).

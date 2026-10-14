@@ -56,6 +56,9 @@ pub enum Command {
         /// Guarda el prompt para el agente en este archivo (requiere --ai).
         #[arg(long, value_name = "FILE", requires = "ai")]
         out: Option<PathBuf>,
+        /// Guarda el análisis completo en el historial (ver `taskflow history`). Requiere --ai.
+        #[arg(long, requires = "ai")]
+        save: bool,
     },
     /// Plan del día con IA a partir de tus tareas priorizadas.
     Plan {
@@ -65,6 +68,29 @@ pub enum Command {
         /// Solo un proyecto; también suma su contexto.
         #[arg(long, value_name = "SLUG")]
         project: Option<ProjectSlug>,
+        #[arg(long)]
+        json: bool,
+        /// Guarda el plan en el historial (ver `taskflow history`).
+        #[arg(long)]
+        save: bool,
+    },
+    /// Los análisis y planes guardados con --save, del más reciente al más antiguo.
+    History {
+        /// Solo los análisis de esta tarea.
+        #[arg(value_parser = parse_task_id)]
+        task_id: Option<TaskId>,
+        /// Solo los de este proyecto.
+        #[arg(long, value_name = "SLUG")]
+        project: Option<ProjectSlug>,
+        /// Solo los planes.
+        #[arg(long, conflicts_with = "task_id")]
+        plans: bool,
+        /// Máximo de registros.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Muestra el contenido del más reciente en vez de la lista.
+        #[arg(long)]
+        last: bool,
         #[arg(long)]
         json: bool,
     },
@@ -238,12 +264,64 @@ mod tests {
     fn plan_flags() {
         let cli = parse(&["plan", "--max", "5", "--project", "idk-base"]).unwrap();
 
-        let Command::Plan { max, project, json } = cli.command else {
+        let Command::Plan {
+            max,
+            project,
+            json,
+            save,
+        } = cli.command
+        else {
             panic!("expected plan");
         };
         assert_eq!(max, Some(5));
         assert_eq!(project.map(|p| p.to_string()).as_deref(), Some("idk-base"));
         assert!(!json);
+        assert!(!save);
+    }
+
+    #[test]
+    fn save_flags() {
+        let Command::Show { save, .. } = parse(&["show", "1", "--ai", "--save"]).unwrap().command
+        else {
+            panic!("expected show");
+        };
+        assert!(save);
+        assert!(
+            parse(&["show", "1", "--save"]).is_err(),
+            "--save requires --ai"
+        );
+        assert!(matches!(
+            parse(&["plan", "--save"]).unwrap().command,
+            Command::Plan { save: true, .. }
+        ));
+    }
+
+    #[test]
+    fn history_filters() {
+        let cli = parse(&["history", "86b1", "--project", "idk-base", "--last"]).unwrap();
+
+        let Command::History {
+            task_id,
+            project,
+            plans,
+            limit,
+            last,
+            json,
+        } = cli.command
+        else {
+            panic!("expected history");
+        };
+        assert_eq!(task_id.unwrap().as_str(), "86b1");
+        assert_eq!(project.map(|p| p.to_string()).as_deref(), Some("idk-base"));
+        assert!(!plans);
+        assert_eq!(limit, None);
+        assert!(last);
+        assert!(!json);
+        assert!(matches!(
+            parse(&["history", "--plans"]).unwrap().command,
+            Command::History { plans: true, .. }
+        ));
+        assert!(parse(&["history", "86b1", "--plans"]).is_err());
     }
 
     #[test]

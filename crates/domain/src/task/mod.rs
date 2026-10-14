@@ -4,7 +4,7 @@ mod location;
 mod status;
 
 pub use location::{FlatNode, LocationLevel, LocationNode, LocationSegment, TaskLocation, flatten};
-pub use status::{Priority, Status};
+pub use status::{Priority, Status, StatusKind, StatusOption, find_status, suggest_final};
 
 use chrono::{DateTime, Utc};
 

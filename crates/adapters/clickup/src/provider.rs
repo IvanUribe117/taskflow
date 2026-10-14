@@ -1,14 +1,16 @@
 use application::ports::{ProviderError, TaskProvider, TaskQuery};
 use async_trait::async_trait;
-use domain::task::{Comment, LocationLevel, LocationNode, Task, TaskId, UserId};
+use domain::task::{Comment, LocationLevel, LocationNode, StatusOption, Task, TaskId, UserId};
 use futures::future::try_join_all;
+use serde::de::IgnoredAny;
+use serde_json::json;
 
 use crate::api_types::{
-    ApiCommentsPage, ApiFolder, ApiFoldersPage, ApiListsPage, ApiNamedRef, ApiSpacesPage, ApiTask,
-    ApiTasksPage, ApiUserEnvelope,
+    ApiCommentsPage, ApiFolder, ApiFoldersPage, ApiList, ApiListsPage, ApiNamedRef, ApiSpacesPage,
+    ApiTask, ApiTasksPage, ApiUserEnvelope,
 };
 use crate::client::ClickUpClient;
-use crate::mapper::{location_node, map_task, user_id};
+use crate::mapper::{location_node, map_task, status_option, user_id};
 use crate::query::task_search_params;
 use crate::{ClickUpConfig, StatusMap};
 
@@ -160,6 +162,49 @@ impl TaskProvider for ClickUpProvider {
     ///
     /// Con `S` espacios y `F` carpetas son `1 + 2·S + F` peticiones; el semáforo del
     /// cliente limita cuántas van a la vez.
+    /// 1. `GET /task/{id}` (un `ApiTask`) para saber en qué lista está: `task.list.id`.
+    /// 2. `GET /list/{list_id}` (un `ApiList`) y cada estado con `status_option`, en el
+    ///    mismo orden.
+    async fn available_statuses(&self, id: &TaskId) -> Result<Vec<StatusOption>, ProviderError> {
+        let task: ApiTask = self
+            .client
+            .get(&format!("/task/{}", id.as_str()), &[])
+            .await?;
+        let list: ApiList = self
+            .client
+            .get(&format!("/list/{}", task.list.id), &[])
+            .await?;
+        Ok(list.statuses.into_iter().map(status_option).collect())
+    }
+
+    /// `PUT /task/{id}` con el cuerpo `{"status": "<status>"}`.
+    ///
+    /// `ClickUp` responde con la tarea completa, pero no la necesitamos: se deserializa como
+    /// `serde::de::IgnoredAny`, un tipo que acepta cualquier JSON y lo descarta.
+    async fn set_status(&self, id: &TaskId, status: &str) -> Result<(), ProviderError> {
+        let _: IgnoredAny = self
+            .client
+            .put(
+                &format!("/task/{}", id.as_str()),
+                &json!({ "status": status }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// `POST /task/{id}/comment` con `{"comment_text": "<body>", "notify_all": false}`.
+    /// La respuesta (`{"id", "hist_id", "date"}`) también se ignora con `IgnoredAny`.
+    async fn add_comment(&self, id: &TaskId, body: &str) -> Result<(), ProviderError> {
+        let _: IgnoredAny = self
+            .client
+            .post(
+                &format!("/task/{}/comment", id.as_str()),
+                &json!({ "comment_text": body, "notify_all": false }),
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn locations(&self) -> Result<Vec<LocationNode>, ProviderError> {
         let path = format!("/team/{}/space", self.team_id);
         let page: ApiSpacesPage = self.client.get(&path, &archived_false()).await?;

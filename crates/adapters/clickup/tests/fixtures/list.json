@@ -1,0 +1,18 @@
+{
+  "id": "901100200300",
+  "name": "ACME – Sprint",
+  "orderindex": 0,
+  "content": "",
+  "folder": { "id": "90110002", "name": "Backend", "hidden": false, "access": true },
+  "space": { "id": "90110001", "name": "Clientes", "access": true },
+  "archived": false,
+  "override_statuses": true,
+  "statuses": [
+    { "status": "to do", "orderindex": 0, "color": "#d3d3d3", "type": "open" },
+    { "status": "in progress", "orderindex": 1, "color": "#4194f6", "type": "custom" },
+    { "status": "Code Review", "orderindex": 2, "color": "#a875ff", "type": "custom" },
+    { "status": "complete", "orderindex": 3, "color": "#6bc950", "type": "done" },
+    { "status": "Closed", "orderindex": 4, "color": "#6bc950", "type": "closed" }
+  ],
+  "permission_level": "create"
+}

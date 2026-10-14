@@ -133,6 +133,12 @@ pub(crate) struct ApiListsPage {
     pub lists: Vec<ApiNamedRef>,
 }
 
+/// `GET /list/{list_id}`: solo interesan sus estados.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ApiList {
+    pub statuses: Vec<ApiStatus>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

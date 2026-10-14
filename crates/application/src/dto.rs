@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use domain::project::{Project, ProjectKey, ProjectResolver};
-use domain::task::{Comment, Task, UserId};
+use domain::task::{Comment, StatusOption, Task, UserId};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -135,6 +135,45 @@ impl From<&Project> for ProjectDetail {
                 .map(|path| path.display().to_string()),
         }
     }
+}
+
+/// Un estado disponible para la tarea, para mostrarlo en un selector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StatusOptionView {
+    pub name: String,
+    /// `"open"`, `"custom"`, `"done"` o `"closed"`.
+    pub kind: String,
+}
+
+impl From<&StatusOption> for StatusOptionView {
+    fn from(option: &StatusOption) -> Self {
+        Self {
+            kind: option.kind.to_string(),
+            name: option.name.clone(),
+        }
+    }
+}
+
+/// Lo que la interfaz necesita para preguntar cómo cerrar una tarea (UC-04).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CloseOptions {
+    pub task_id: String,
+    pub title: String,
+    /// El estado actual, con el `Display` de `Status`.
+    pub current_status: String,
+    /// Todos los estados de la lista de la tarea, en el orden del proveedor.
+    pub statuses: Vec<StatusOptionView>,
+    /// El nombre del estado sugerido (`suggest_final`), si hay alguno.
+    pub suggested: Option<String>,
+}
+
+/// El resultado de cerrar una tarea.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CloseResult {
+    pub task_id: String,
+    /// El nombre exacto con que quedó en el proveedor.
+    pub final_status: String,
+    pub commented: bool,
 }
 
 /// Detalle de una tarea para `show` (UC-03). En la fase 6 se suma el resumen de la IA.
@@ -341,6 +380,19 @@ mod tests {
                 rules: vec!["list L1".into(), "tag acme".into()],
                 repo_path: Some("/code/acme".into()),
                 priority_boost: 20,
+            }
+        );
+    }
+
+    #[test]
+    fn status_option_view_uses_name_and_kind() {
+        let option = StatusOption::new("Code Review", domain::task::StatusKind::Custom);
+
+        assert_eq!(
+            StatusOptionView::from(&option),
+            StatusOptionView {
+                name: "Code Review".into(),
+                kind: "custom".into(),
             }
         );
     }

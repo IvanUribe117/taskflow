@@ -7,13 +7,13 @@ use application::ports::ProviderError;
 use chrono::{DateTime, Utc};
 use domain::DomainError;
 use domain::task::{
-    Comment, LocationLevel, LocationNode, LocationSegment, Priority, Task, TaskId, TaskLocation,
-    UserId,
+    Comment, LocationLevel, LocationNode, LocationSegment, Priority, StatusKind, StatusOption,
+    Task, TaskId, TaskLocation, UserId,
 };
 use thiserror::Error;
 
 use crate::StatusMap;
-use crate::api_types::{ApiComment, ApiNamedRef, ApiPriority, ApiTask, ApiUser};
+use crate::api_types::{ApiComment, ApiNamedRef, ApiPriority, ApiStatus, ApiTask, ApiUser};
 
 /// Datos de `ClickUp` que no se pueden traducir al dominio.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -137,6 +137,27 @@ pub(crate) fn location_node(
             name: item.name,
         },
         children,
+    }
+}
+
+/// Un estado disponible: `status` → `name`, `type` → `kind`.
+///
+/// `type` (en `ApiStatus::kind`) se traduce así: `"open"` → `Open`, `"done"` → `Done`,
+/// `"closed"` → `Closed`, y **cualquier otro valor** (incluido `"custom"`) → `Custom`.
+///
+/// A diferencia de la prioridad (fase 3), aquí un valor desconocido **no** es un error: si
+/// `ClickUp` agrega un tipo nuevo, cerrar tareas debe seguir funcionando. Lo peor que pasa
+/// es que ese estado no se sugiera.
+pub(crate) fn status_option(status: ApiStatus) -> StatusOption {
+    let kind = match status.kind.as_str() {
+        "open" => StatusKind::Open,
+        "done" => StatusKind::Done,
+        "closed" => StatusKind::Closed,
+        _ => StatusKind::Custom,
+    };
+    StatusOption {
+        kind,
+        name: status.status,
     }
 }
 
@@ -371,6 +392,41 @@ mod tests {
         assert_eq!(node.segment.id, "F1");
         assert_eq!(node.segment.name, "Backend");
         assert_eq!(node.children, [child]);
+    }
+
+    #[test]
+    fn status_options_translate_the_type() {
+        let api = |name: &str, kind: &str| ApiStatus {
+            status: name.to_owned(),
+            kind: kind.to_owned(),
+        };
+
+        assert_eq!(
+            status_option(api("to do", "open")),
+            StatusOption::new("to do", StatusKind::Open)
+        );
+        assert_eq!(
+            status_option(api("Code Review", "custom")),
+            StatusOption::new("Code Review", StatusKind::Custom)
+        );
+        assert_eq!(
+            status_option(api("complete", "done")),
+            StatusOption::new("complete", StatusKind::Done)
+        );
+        assert_eq!(
+            status_option(api("Closed", "closed")),
+            StatusOption::new("Closed", StatusKind::Closed)
+        );
+    }
+
+    #[test]
+    fn unknown_status_types_are_custom() {
+        let status = ApiStatus {
+            status: "Blocked".into(),
+            kind: "something_new".into(),
+        };
+
+        assert_eq!(status_option(status).kind, StatusKind::Custom);
     }
 
     #[test]

@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use adapter_clickup::{ClickUpConfig, ClickUpProvider};
 use application::ports::{ProviderError, TaskProvider, TaskQuery};
-use domain::task::{LocationLevel, LocationNode, Status, TaskId, UserId, flatten};
-use wiremock::matchers::{header, method, path, query_param};
+use domain::task::{
+    LocationLevel, LocationNode, Status, StatusKind, StatusOption, TaskId, UserId, flatten,
+};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const TOKEN: &str = "pk_test_token";
@@ -23,6 +25,7 @@ fn fixture(name: &str) -> serde_json::Value {
         "tasks_page_no_flag" => include_str!("fixtures/tasks_page_no_flag.json"),
         "comments" => include_str!("fixtures/comments.json"),
         "spaces" => include_str!("fixtures/spaces.json"),
+        "list" => include_str!("fixtures/list.json"),
         "folders" => include_str!("fixtures/folders.json"),
         "folders_empty" => include_str!("fixtures/folders_empty.json"),
         "folder_lists" => include_str!("fixtures/folder_lists.json"),
@@ -327,4 +330,98 @@ async fn hidden_folders_are_not_requested() {
         .map(|n| n.segment.name.as_str())
         .collect();
     assert_eq!(names, ["Backend", "Soporte"]);
+}
+
+fn task_id() -> TaskId {
+    TaskId::new("86b2x1abc").unwrap()
+}
+
+#[tokio::test]
+async fn available_statuses_come_from_the_task_list() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/task/86b2x1abc"))
+        .respond_with(ok("task"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/list/901100200300"))
+        .respond_with(ok("list"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let statuses = provider(&server)
+        .available_statuses(&task_id())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        statuses,
+        [
+            StatusOption::new("to do", StatusKind::Open),
+            StatusOption::new("in progress", StatusKind::Custom),
+            StatusOption::new("Code Review", StatusKind::Custom),
+            StatusOption::new("complete", StatusKind::Done),
+            StatusOption::new("Closed", StatusKind::Closed),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn set_status_sends_a_put_with_the_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/task/86b2x1abc"))
+        .and(header("Authorization", TOKEN))
+        .and(body_json(serde_json::json!({ "status": "Code Review" })))
+        .respond_with(ok("task"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    provider(&server)
+        .set_status(&task_id(), "Code Review")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn add_comment_posts_the_text_without_notifying_everyone() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/task/86b2x1abc/comment"))
+        .and(header("Authorization", TOKEN))
+        .and(body_json(serde_json::json!({
+            "comment_text": "Listo, con test de regresión.",
+            "notify_all": false
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "458",
+            "hist_id": "26508",
+            "date": 1_568_036_964_079_i64
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    provider(&server)
+        .add_comment(&task_id(), "Listo, con test de regresión.")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn writing_to_a_missing_task_is_not_found() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/task/86b2x1abc"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let result = provider(&server).set_status(&task_id(), "complete").await;
+
+    assert!(matches!(result, Err(ProviderError::NotFound(_))));
 }

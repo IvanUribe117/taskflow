@@ -4,8 +4,9 @@ use std::fmt;
 use std::time::Duration;
 
 use application::ports::ProviderError;
-use reqwest::StatusCode;
+use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 use tokio::sync::Semaphore;
 
 use crate::ClickUpConfig;
@@ -43,9 +44,50 @@ impl ClickUpClient {
 
     /// `GET {base_url}{path}?{query}` y deserializa la respuesta como `T`.
     ///
+    /// # Errors
+    ///
+    /// Los de [`Self::send`].
+    pub(crate) async fn get<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(String, String)],
+    ) -> Result<T, ProviderError> {
+        self.send(Method::GET, path, query, None).await
+    }
+
+    /// `PUT {base_url}{path}` con `body` como JSON.
+    ///
+    /// # Errors
+    ///
+    /// Los de [`Self::send`].
+    pub(crate) async fn put<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> Result<T, ProviderError> {
+        self.send(Method::PUT, path, &[], Some(body)).await
+    }
+
+    /// `POST {base_url}{path}` con `body` como JSON.
+    ///
+    /// # Errors
+    ///
+    /// Los de [`Self::send`].
+    pub(crate) async fn post<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> Result<T, ProviderError> {
+        self.send(Method::POST, path, &[], Some(body)).await
+    }
+
+    /// Una petición con cualquier método: autenticación, límite de concurrencia, reintentos
+    /// ante 429, errores HTTP y deserialización. Es el cuerpo que antes tenía `get`.
+    ///
     /// Pasos:
     /// 1. Esperar un permiso del semáforo y conservarlo hasta terminar.
-    /// 2. Enviar la petición con el header `Authorization: <token>` (sin `Bearer`) y `query`.
+    /// 2. Enviar la petición con `method`, el header `Authorization`, `query` y, si `body`
+    ///    es `Some`, el cuerpo como JSON.
     /// 3. Si la respuesta es 429 y quedan reintentos: esperar `retry_delay` y repetir desde 2.
     /// 4. Si [`status_error`] devuelve un error, devolverlo.
     /// 5. Deserializar el cuerpo JSON como `T`.
@@ -55,10 +97,12 @@ impl ClickUpClient {
     /// - Errores HTTP según [`status_error`] (429 tras agotar los reintentos).
     /// - [`ProviderError::Network`] si la petición no llega (DNS, timeout, conexión).
     /// - [`ProviderError::InvalidResponse`] si el cuerpo no es el JSON esperado.
-    pub(crate) async fn get<T: DeserializeOwned>(
+    async fn send<T: DeserializeOwned>(
         &self,
+        method: Method,
         path: &str,
         query: &[(String, String)],
+        body: Option<&Value>,
     ) -> Result<T, ProviderError> {
         let url = format!("{}{path}", self.base_url);
         let _permit = self
@@ -68,11 +112,15 @@ impl ClickUpClient {
             .expect("the semaphore is never closed");
         let mut attempt: u32 = 0;
         let response = loop {
-            let response = self
+            let mut request = self
                 .http
-                .get(&url)
+                .request(method.clone(), &url)
                 .header("Authorization", &self.token)
-                .query(query)
+                .query(query);
+            if let Some(body) = body {
+                request = request.json(body);
+            }
+            let response = request
                 .send()
                 .await
                 .map_err(|e| ProviderError::Network(e.to_string()))?;
@@ -89,12 +137,12 @@ impl ClickUpClient {
             return Err(error);
         }
 
-        let body = response
+        let text = response
             .text()
             .await
             .map_err(|e| ProviderError::Network(e.to_string()))?;
 
-        serde_json::from_str::<T>(&body)
+        serde_json::from_str::<T>(&text)
             .map_err(|e| ProviderError::InvalidResponse(format!("{path}: {e}")))
     }
 }

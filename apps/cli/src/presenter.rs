@@ -1,7 +1,10 @@
 //! Presentación en la terminal: DTOs → texto. Funciones puras (sin imprimir), así se
 //! pueden probar comparando cadenas.
 
-use application::dto::{ProjectDetail, TaskDetail, TaskGroup, TaskView, TodayReport};
+use application::dto::{
+    CloseOptions, CloseResult, ProjectDetail, StatusOptionView, TaskDetail, TaskGroup, TaskView,
+    TodayReport,
+};
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use comfy_table::Table;
 use comfy_table::presets::NOTHING;
@@ -168,6 +171,63 @@ pub fn location_label(node: &FlatNode<'_>) -> String {
         &segment.name
     };
     format!("{}{name} ({})", "  ".repeat(node.depth), segment.level)
+}
+
+/// `"open"` → `"abierto"`, `"custom"` → `"en curso"`, `"done"` → `"terminado"`,
+/// `"closed"` → `"cerrado"`; cualquier otro, tal cual.
+#[must_use]
+pub fn status_kind_label(kind: &str) -> &str {
+    match kind {
+        "open" => "abierto",
+        "custom" => "en curso",
+        "done" => "terminado",
+        "closed" => "cerrado",
+        other => other,
+    }
+}
+
+/// Una fila del selector de `close`: `"Code Review (en curso)"`, y si es el sugerido,
+/// `"complete (terminado) · sugerido"`.
+#[must_use]
+pub fn status_label(status: &StatusOptionView, suggested: bool) -> String {
+    let label = format!("{} ({})", status.name, status_kind_label(&status.kind));
+    if suggested {
+        format!("{label} · sugerido")
+    } else {
+        label
+    }
+}
+
+/// El resumen que se confirma antes de escribir:
+///
+/// ```text
+/// Fix invoice rounding (86b2x1abc)
+/// Estado: in progress → Code Review
+/// Comentario: Listo, con test de regresión.
+/// ```
+///
+/// Sin comentario, o si solo tiene espacios: `Comentario: (ninguno)`.
+#[must_use]
+pub fn close_summary(options: &CloseOptions, status: &str, comment: Option<&str>) -> String {
+    let comment = comment
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or("(ninguno)");
+    format!(
+        "{} ({})\nEstado: {} → {status}\nComentario: {comment}",
+        options.title, options.task_id, options.current_status
+    )
+}
+
+/// `"✔ 86b2x1abc → Code Review · comentario publicado"`, o sin la última parte si no
+/// hubo comentario: `"✔ 86b2x1abc → complete"`.
+#[must_use]
+pub fn close_result(result: &CloseResult) -> String {
+    let mut text = format!("✔ {} → {}", result.task_id, result.final_status);
+    if result.commented {
+        text.push_str(" · comentario publicado");
+    }
+    text
 }
 
 /// El detalle de `show`:
@@ -653,6 +713,79 @@ mod tests {
             }),
             "S1 (space)"
         );
+    }
+
+    fn close_options() -> CloseOptions {
+        CloseOptions {
+            task_id: "86b2x1abc".into(),
+            title: "Fix invoice rounding".into(),
+            current_status: "in progress".into(),
+            statuses: vec![],
+            suggested: Some("complete".into()),
+        }
+    }
+
+    #[test]
+    fn status_kind_labels() {
+        assert_eq!(status_kind_label("open"), "abierto");
+        assert_eq!(status_kind_label("custom"), "en curso");
+        assert_eq!(status_kind_label("done"), "terminado");
+        assert_eq!(status_kind_label("closed"), "cerrado");
+        assert_eq!(status_kind_label("blocked"), "blocked");
+    }
+
+    #[test]
+    fn status_labels_mark_the_suggestion() {
+        let review = StatusOptionView {
+            name: "Code Review".into(),
+            kind: "custom".into(),
+        };
+        let complete = StatusOptionView {
+            name: "complete".into(),
+            kind: "done".into(),
+        };
+
+        assert_eq!(status_label(&review, false), "Code Review (en curso)");
+        assert_eq!(
+            status_label(&complete, true),
+            "complete (terminado) · sugerido"
+        );
+    }
+
+    #[test]
+    fn close_summary_shows_the_change() {
+        let text = close_summary(&close_options(), "Code Review", Some("Listo."));
+
+        assert_eq!(
+            text,
+            "Fix invoice rounding (86b2x1abc)\nEstado: in progress → Code Review\nComentario: Listo."
+        );
+    }
+
+    #[test]
+    fn close_summary_without_comment() {
+        for comment in [None, Some("   ")] {
+            let text = close_summary(&close_options(), "complete", comment);
+
+            assert!(text.ends_with("Comentario: (ninguno)"), "{text}");
+        }
+    }
+
+    #[test]
+    fn close_results() {
+        let mut result = CloseResult {
+            task_id: "86b2x1abc".into(),
+            final_status: "Code Review".into(),
+            commented: true,
+        };
+
+        assert_eq!(
+            close_result(&result),
+            "✔ 86b2x1abc → Code Review · comentario publicado"
+        );
+
+        result.commented = false;
+        assert_eq!(close_result(&result), "✔ 86b2x1abc → Code Review");
     }
 
     #[test]

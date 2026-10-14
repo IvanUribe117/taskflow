@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
 use domain::policy::WeightedPolicy;
 use domain::project::{Project, ProjectSlug};
-use domain::task::{Comment, LocationNode, Task, TaskId, UserId};
+use domain::task::{Comment, LocationNode, StatusOption, Task, TaskId, UserId};
 
 use crate::AppContext;
 use crate::ports::{
@@ -53,6 +53,8 @@ pub struct FakeTaskProvider {
     comments: HashMap<TaskId, Vec<Comment>>,
     unauthorized: bool,
     locations: Vec<LocationNode>,
+    statuses: Vec<StatusOption>,
+    writes: Mutex<Vec<Write>>,
     queries: Mutex<Vec<TaskQuery>>,
     comment_requests: Mutex<Vec<TaskId>>,
 }
@@ -65,6 +67,8 @@ impl FakeTaskProvider {
             comments: HashMap::new(),
             unauthorized: false,
             locations: Vec::new(),
+            statuses: Vec::new(),
+            writes: Mutex::default(),
             queries: Mutex::default(),
             comment_requests: Mutex::default(),
         }
@@ -87,6 +91,26 @@ impl FakeTaskProvider {
     pub fn with_locations(mut self, locations: Vec<LocationNode>) -> Self {
         self.locations = locations;
         self
+    }
+
+    /// Los estados que devuelve `available_statuses` (los mismos para todas las tareas).
+    #[must_use]
+    pub fn with_statuses(mut self, statuses: Vec<StatusOption>) -> Self {
+        self.statuses = statuses;
+        self
+    }
+
+    /// Escrituras recibidas (`set_status`, `add_comment`), en orden.
+    pub fn writes(&self) -> Vec<Write> {
+        self.writes.lock().expect("lock").clone()
+    }
+
+    fn task_exists(&self, id: &TaskId) -> Result<(), ProviderError> {
+        if self.tasks.iter().any(|t| &t.id == id) {
+            Ok(())
+        } else {
+            Err(ProviderError::NotFound(id.as_str().to_owned()))
+        }
     }
 
     /// Todas las llamadas fallan con `ProviderError::Unauthorized`.
@@ -156,6 +180,39 @@ impl TaskProvider for FakeTaskProvider {
         self.check_auth()?;
         Ok(self.locations.clone())
     }
+
+    async fn available_statuses(&self, id: &TaskId) -> Result<Vec<StatusOption>, ProviderError> {
+        self.check_auth()?;
+        self.task_exists(id)?;
+        Ok(self.statuses.clone())
+    }
+
+    async fn set_status(&self, id: &TaskId, status: &str) -> Result<(), ProviderError> {
+        self.check_auth()?;
+        self.task_exists(id)?;
+        self.writes
+            .lock()
+            .expect("lock")
+            .push(Write::Status(id.as_str().to_owned(), status.to_owned()));
+        Ok(())
+    }
+
+    async fn add_comment(&self, id: &TaskId, body: &str) -> Result<(), ProviderError> {
+        self.check_auth()?;
+        self.task_exists(id)?;
+        self.writes
+            .lock()
+            .expect("lock")
+            .push(Write::Comment(id.as_str().to_owned(), body.to_owned()));
+        Ok(())
+    }
+}
+
+/// Una escritura registrada por `FakeTaskProvider`: `(id de la tarea, valor)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Write {
+    Status(String, String),
+    Comment(String, String),
 }
 
 /// Proyectos en memoria. `create` los agrega; `list` los devuelve ordenados por slug.

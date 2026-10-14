@@ -1,5 +1,6 @@
 //! Un módulo por comando. Cada uno recibe lo que necesita ya construido.
 
+mod close;
 mod config;
 mod project;
 mod show;
@@ -14,7 +15,7 @@ use crate::wizard;
 ///
 /// 1. `config init` y `config path` funcionan **sin** configuración (todavía no existe).
 /// 2. El resto de `config` necesita el archivo, pero no el `AppContext`.
-/// 3. `today`, `show` y `project` necesitan el `AppContext` completo.
+/// 3. `today`, `show`, `close` y `project` necesitan el `AppContext` completo.
 pub async fn run(cli: Cli) -> anyhow::Result<()> {
     let store = bootstrap::config_store(cli.config.as_deref())?;
     let secrets = bootstrap::secret_store();
@@ -41,6 +42,16 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
             let settings = store.load()?;
             let ctx = bootstrap::build(&settings, &secrets, store.path())?;
             show::run(&ctx, &task_id, json).await
+        }
+        Command::Close {
+            task_id,
+            status,
+            comment,
+            yes,
+        } => {
+            let settings = store.load()?;
+            let ctx = bootstrap::build(&settings, &secrets, store.path())?;
+            close::run(&ctx, &settings, &task_id, status, comment, yes).await
         }
         Command::Project(command) => {
             let settings = store.load()?;

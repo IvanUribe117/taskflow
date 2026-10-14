@@ -50,6 +50,20 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Cierra una tarea: estado final y comentario opcional, con confirmación.
+    Close {
+        #[arg(value_parser = parse_task_id)]
+        task_id: TaskId,
+        /// Estado final (sin distinguir mayúsculas). Sin él, se elige de una lista.
+        #[arg(long)]
+        status: Option<String>,
+        /// Comentario de cierre.
+        #[arg(long)]
+        comment: Option<String>,
+        /// No preguntar nada: usa el estado sugerido si no se indica `--status`.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Ver y cambiar la configuración.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -213,6 +227,39 @@ mod tests {
             parse(&["project", "add"]).unwrap().command,
             Command::Project(ProjectCommand::Add)
         ));
+    }
+
+    #[test]
+    fn close_with_every_flag() {
+        let cli = parse(&[
+            "close",
+            "86b2x1abc",
+            "--status",
+            "Code Review",
+            "--comment",
+            "Listo",
+            "--yes",
+        ])
+        .unwrap();
+
+        let Command::Close {
+            task_id,
+            status,
+            comment,
+            yes,
+        } = cli.command
+        else {
+            panic!("expected close");
+        };
+        assert_eq!(task_id.as_str(), "86b2x1abc");
+        assert_eq!(status.as_deref(), Some("Code Review"));
+        assert_eq!(comment.as_deref(), Some("Listo"));
+        assert!(yes);
+    }
+
+    #[test]
+    fn close_needs_a_task_id() {
+        assert!(parse(&["close"]).is_err());
     }
 
     #[test]

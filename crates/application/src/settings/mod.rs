@@ -32,6 +32,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub projects: ProjectsSettings,
     #[serde(default)]
+    pub context: ContextSettings,
+    #[serde(default)]
     pub ui: UiSettings,
 }
 
@@ -97,6 +99,25 @@ pub struct PolicySettings {
     pub in_review_bonus: i64,
 }
 
+/// Sección `[context]` (§13.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ContextSettings {
+    /// Carpeta de las secciones globales. Relativa al directorio de `config.toml`, o absoluta.
+    pub global_dir: String,
+    /// Máximo de caracteres de contexto por llamada a la IA (FR-38).
+    pub budget_chars: usize,
+}
+
+impl Default for ContextSettings {
+    fn default() -> Self {
+        Self {
+            global_dir: "context".to_owned(),
+            budget_chars: 12_000,
+        }
+    }
+}
+
 /// Sección `[projects]` (§13.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -148,6 +169,7 @@ impl AppSettings {
             version: Self::CURRENT_VERSION,
             policy: PolicySettings::default(),
             projects: ProjectsSettings::default(),
+            context: ContextSettings::default(),
             ui: UiSettings::default(),
         }
     }

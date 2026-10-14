@@ -4,6 +4,7 @@
 //! el mismo resultado sirve para la terminal, `--json`, Tauri o una API web.
 
 use chrono::{DateTime, Utc};
+use domain::context::ContextSection;
 use domain::project::{Project, ProjectKey, ProjectResolver};
 use domain::task::{Comment, StatusOption, Task, UserId};
 use serde::Serialize;
@@ -174,6 +175,62 @@ pub struct CloseResult {
     /// El nombre exacto con que quedó en el proveedor.
     pub final_status: String,
     pub commented: bool,
+}
+
+/// Una sección de contexto lista para enviarse a la IA: solo lo que la IA necesita.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContextBlock {
+    pub key: String,
+    pub title: String,
+    pub body: String,
+}
+
+impl From<&ContextSection> for ContextBlock {
+    fn from(section: &ContextSection) -> Self {
+        Self {
+            key: section.key.to_string(),
+            title: section.title.clone(),
+            body: section.body.clone(),
+        }
+    }
+}
+
+/// El contexto para una llamada a la IA (UC-07), separado por rol (§14.3).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct BuiltContext {
+    /// Secciones `instruction`: van al *system prompt*.
+    pub instructions: Vec<ContextBlock>,
+    /// Secciones `knowledge`: van en el mensaje, dentro de `<project_context>`.
+    pub knowledge: Vec<ContextBlock>,
+    /// Claves de las secciones que no entraron en el presupuesto (FR-38).
+    pub omitted: Vec<String>,
+}
+
+/// Una sección tal como la ve `context list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SectionView {
+    pub key: String,
+    pub title: String,
+    /// `"knowledge"` o `"instruction"`.
+    pub role: String,
+    /// Cada uso con su `Display`, en el orden de declaración de `Usage`.
+    pub usage: Vec<String>,
+    pub priority: u8,
+    pub private: bool,
+    /// Largo del cuerpo en caracteres: lo que cuenta para el presupuesto.
+    pub chars: usize,
+    /// `"global"`, `"project"` o `"override"` (del proyecto, reemplaza a una global).
+    pub origin: String,
+}
+
+/// Lo que recibiría la IA para una tarea (`context preview`, FR-40).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContextPreview {
+    pub task_id: String,
+    pub title: String,
+    pub project: Option<ProjectView>,
+    pub usage: String,
+    pub context: BuiltContext,
 }
 
 /// Detalle de una tarea para `show` (UC-03). En la fase 6 se suma el resumen de la IA.
@@ -393,6 +450,28 @@ mod tests {
             StatusOptionView {
                 name: "Code Review".into(),
                 kind: "custom".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn context_block_keeps_key_title_and_body() {
+        let section = domain::context::ContextSection {
+            key: "negocio".parse().unwrap(),
+            title: "Modelo de negocio".into(),
+            role: domain::context::SectionRole::Knowledge,
+            usage: enumset::EnumSet::all(),
+            priority: 10,
+            private: false,
+            body: "ACME vende software.".into(),
+        };
+
+        assert_eq!(
+            ContextBlock::from(&section),
+            ContextBlock {
+                key: "negocio".into(),
+                title: "Modelo de negocio".into(),
+                body: "ACME vende software.".into(),
             }
         );
     }

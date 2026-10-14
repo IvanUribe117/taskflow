@@ -956,3 +956,84 @@ Otras decisiones:
 
 - Se borraron los seis bloques `#![allow(...)]` con `TODO(fase 5)`. Clippy encontró tres imports que habían quedado sin usar en `project_file.rs` (`std::path::self`, `FromStr` y `LocationLevel`): exactamente lo que esos bloques ocultaban.
 - `cargo test --workspace`: 211 tests. Clippy y `cargo fmt` sin avisos.
+
+---
+
+## Ajuste posterior: el límite de peticiones de ClickUp
+
+Al usar `project add` con un workspace real, falló con `Error: rate limited by the provider`. ClickUp permite **100 peticiones por minuto** en los planes Free, Unlimited y Business, y el asistente pedía el árbol completo: `1 + 2·espacios + carpetas` peticiones antes de mostrar nada. Con 15 espacios y 80 carpetas son 111: se pasa del límite por sí solo.
+
+Se corrigió con dos cambios.
+
+### 1. Pedir por partes (*lazy loading*)
+
+El puerto pasó de un método a dos:
+
+```rust
+async fn root_locations(&self) -> Result<Vec<LocationSegment>, ProviderError>;   // 1 petición
+async fn location_children(&self, root: &LocationSegment) -> Result<Vec<LocationNode>, ProviderError>;
+```
+
+```text
+Antes:  espacios ─► TODOS los espacios ─► TODAS sus carpetas ─► selector     (~100 peticiones)
+Ahora:  espacios ─► selector de espacio ─► SOLO ese espacio ─► selector       (~2 + carpetas del espacio)
+```
+
+Es el mismo principio que una carpeta de archivos que se despliega al hacer clic: no se lee todo el disco para mostrar la raíz. El asistente es además más rápido, porque solo espera lo que va a mostrar.
+
+`location_node(...).segment` reutiliza la conversión del mapper para crear un `LocationSegment` desde un `ApiNamedRef`, sin escribir otra función. Y el asistente vuelve a armar un árbol con el espacio como raíz (`LocationNode { segment: root, children }`) para seguir usando `flatten` y `location_label` sin cambios.
+
+### 2. Esperar lo que indica ClickUp
+
+Ante un 429, ClickUp envía el header `X-RateLimit-Reset` con el momento en que se libera el cupo, como *timestamp* Unix. Antes el cliente esperaba 2 segundos fijos y se rendía a los 4; ahora espera hasta ese momento:
+
+```rust
+fn retry_wait(reset: Option<&str>, now: SystemTime, fallback: Duration) -> Duration {
+    let Some(value) = reset.and_then(|raw| raw.trim().parse::<u64>().ok()) else {
+        return fallback;
+    };
+    let reset_at = if value >= 1_000_000_000_000 {
+        UNIX_EPOCH + Duration::from_millis(value)
+    } else {
+        UNIX_EPOCH + Duration::from_secs(value)
+    };
+    match reset_at.duration_since(now) {
+        Ok(remaining) => (remaining + RATE_LIMIT_MARGIN).min(MAX_RATE_LIMIT_WAIT),
+        Err(_) => Duration::ZERO,
+    }
+}
+```
+
+| Concepto | Qué hace aquí |
+| --- | --- |
+| `SystemTime` y `UNIX_EPOCH` | `SystemTime` es un instante del reloj del sistema; `UNIX_EPOCH` es el 1 de enero de 1970. `UNIX_EPOCH + Duration` convierte un *timestamp* en un instante |
+| `duration_since` devuelve `Result` | Si `reset_at` ya pasó, no hay duración positiva: es un `Err`. El reloj del sistema puede incluso retroceder (ajustes de hora), y Rust obliga a manejarlo |
+| `Duration` con `+` y `.min(...)` | `Duration` se suma y se compara como un número. `.min(MAX)` acota la espera: un header raro no deja el programa colgado |
+| Segundos o milisegundos | La documentación de ClickUp no lo dice. Un *timestamp* en segundos tiene hoy 10 dígitos y uno en milisegundos 13, así que el umbral `1_000_000_000_000` los distingue |
+| Función pura con `now` como parámetro | El reloj entra como argumento (como `Clock` en la fase 2): los tests usan un instante fijo y comprueban la espera exacta sin dormir |
+| `const` con `Duration` | `Duration::from_mins(1)` y `from_millis(500)` se pueden usar en un `const` porque son funciones `const fn` |
+
+El margen de medio segundo (`RATE_LIMIT_MARGIN`) existe porque el *timestamp* viene en segundos enteros: llegar justo en el borde puede chocar otra vez con el límite.
+
+### Avisos con `tracing` en lugar de `println!`
+
+Cuando hay que esperar al menos un segundo, el usuario ve:
+
+```text
+ WARN límite de peticiones de ClickUp alcanzado; esperando 23 s
+```
+
+El adaptador **no imprime**: registra un evento con `tracing::warn!`. Quien decide si se muestra, dónde y con qué formato es la interfaz, que configura un *subscriber* al arrancar (`apps/cli/src/main.rs`):
+
+```rust
+tracing_subscriber::fmt()
+    .with_writer(std::io::stderr)          // salida de errores, no la normal
+    .with_max_level(tracing::Level::WARN)  // solo avisos y errores
+    .without_time()
+    .with_target(false)
+    .init();
+```
+
+- **Por qué no `println!` en el adaptador:** la app de escritorio no tiene terminal, y un servidor web querría el aviso en sus logs. El adaptador emite el evento; cada interfaz lo muestra a su manera. Es el mismo principio que el `presenter`.
+- **Por qué `stderr`:** `taskflow today --json | jq` lee la salida normal (`stdout`). Si el aviso fuera ahí, rompería el JSON. Los avisos van a la salida de errores, que la tubería no toca.
+- **Lo que viene:** §19 prevé `-v` para ver también los mensajes de nivel `debug` (duración de cada petición, por ejemplo).

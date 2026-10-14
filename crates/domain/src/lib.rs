@@ -4,6 +4,7 @@
 //! proveedor (`ClickUp`, `GitHub`...). Ver `docs/ARCHITECTURE.md`, §9.
 #![warn(clippy::pedantic)]
 
+pub mod context;
 pub mod error;
 pub mod policy;
 pub mod project;

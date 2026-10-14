@@ -5,13 +5,18 @@
 //! - `config_store`: `impl ConfigStore for FsConfigStore`.
 //! - `project_file`: el formato de `project.toml` y su traducción al dominio.
 //! - `projects`: `impl ProjectRepository for FsProjectRepository`.
+//! - `front_matter`: secciones de contexto en Markdown con *front matter* TOML.
+//! - `context`: `impl ContextRepository for FsContextRepository`.
 #![warn(clippy::pedantic)]
 
 mod atomic;
 mod config_store;
+mod context;
 mod edit;
+mod front_matter;
 mod project_file;
 mod projects;
 
 pub use config_store::FsConfigStore;
+pub use context::FsContextRepository;
 pub use projects::FsProjectRepository;

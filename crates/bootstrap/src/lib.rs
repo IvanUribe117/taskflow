@@ -13,4 +13,4 @@ mod build;
 mod clickup;
 pub mod registry;
 
-pub use build::{BuildError, build, config_store, projects_dir, secret_store};
+pub use build::{BuildError, build, config_store, context_dir, projects_dir, secret_store};

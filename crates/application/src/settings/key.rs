@@ -28,6 +28,8 @@ impl ConfigKey {
         "policy.in_review_bonus",
         "projects.dir",
         "projects.default",
+        "context.global_dir",
+        "context.budget_chars",
         "ui.group_by",
     ];
 

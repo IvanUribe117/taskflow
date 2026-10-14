@@ -1,6 +1,8 @@
 use application::ports::{ProviderError, TaskProvider, TaskQuery};
 use async_trait::async_trait;
-use domain::task::{Comment, LocationLevel, LocationNode, StatusOption, Task, TaskId, UserId};
+use domain::task::{
+    Comment, LocationLevel, LocationNode, LocationSegment, StatusOption, Task, TaskId, UserId,
+};
 use futures::future::try_join_all;
 use serde::de::IgnoredAny;
 use serde_json::json;
@@ -36,7 +38,7 @@ impl ClickUpProvider {
         })
     }
 
-    /// Un espacio con sus hijos: primero las carpetas visibles (cada una con sus listas),
+    /// Los hijos de un espacio: primero las carpetas visibles (cada una con sus listas),
     /// después las listas sin carpeta.
     ///
     /// 1. Pedir **a la vez** `GET /space/{id}/folder` y `GET /space/{id}/list`
@@ -44,10 +46,10 @@ impl ClickUpProvider {
     /// 2. Descartar las carpetas con `hidden: true`.
     /// 3. Construir cada carpeta con [`Self::folder_node`], **en paralelo** (`try_join_all`).
     /// 4. Agregar las listas sin carpeta como hojas (`LocationLevel::List`, sin hijos).
-    async fn space_node(&self, space: ApiNamedRef) -> Result<LocationNode, ProviderError> {
+    async fn space_children(&self, space_id: &str) -> Result<Vec<LocationNode>, ProviderError> {
         let params = archived_false();
-        let folders_path = format!("/space/{}/folder", space.id);
-        let lists_path = format!("/space/{}/list", space.id);
+        let folders_path = format!("/space/{space_id}/folder");
+        let lists_path = format!("/space/{space_id}/list");
 
         let (folders, lists) = futures::try_join!(
             self.client.get::<ApiFoldersPage>(&folders_path, &params),
@@ -69,7 +71,7 @@ impl ClickUpProvider {
                 .into_iter()
                 .map(|list| location_node(LocationLevel::List, list, Vec::new())),
         );
-        Ok(location_node(LocationLevel::Space, space, children))
+        Ok(children)
     }
 
     /// Una carpeta con sus listas: `GET /folder/{id}/list` con [`archived_false`].
@@ -158,10 +160,6 @@ impl TaskProvider for ClickUpProvider {
         Ok(comments)
     }
 
-    /// `GET /team/{team_id}/space` y, por cada espacio **en paralelo**, [`Self::space_node`].
-    ///
-    /// Con `S` espacios y `F` carpetas son `1 + 2·S + F` peticiones; el semáforo del
-    /// cliente limita cuántas van a la vez.
     /// 1. `GET /task/{id}` (un `ApiTask`) para saber en qué lista está: `task.list.id`.
     /// 2. `GET /list/{list_id}` (un `ApiList`) y cada estado con `status_option`, en el
     ///    mismo orden.
@@ -205,9 +203,23 @@ impl TaskProvider for ClickUpProvider {
         Ok(())
     }
 
-    async fn locations(&self) -> Result<Vec<LocationNode>, ProviderError> {
+    /// `GET /team/{team_id}/space`: los espacios, sin pedir nada más (una sola petición).
+    async fn root_locations(&self) -> Result<Vec<LocationSegment>, ProviderError> {
         let path = format!("/team/{}/space", self.team_id);
         let page: ApiSpacesPage = self.client.get(&path, &archived_false()).await?;
-        try_join_all(page.spaces.into_iter().map(|space| self.space_node(space))).await
+        Ok(page
+            .spaces
+            .into_iter()
+            .map(|space| location_node(LocationLevel::Space, space, Vec::new()).segment)
+            .collect())
+    }
+
+    /// Los hijos de un espacio, con [`Self::space_children`]: `2 + carpetas` peticiones,
+    /// solo de **ese** espacio.
+    async fn location_children(
+        &self,
+        root: &LocationSegment,
+    ) -> Result<Vec<LocationNode>, ProviderError> {
+        self.space_children(&root.id).await
     }
 }

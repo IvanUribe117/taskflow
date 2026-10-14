@@ -8,7 +8,8 @@ use std::time::Duration;
 use adapter_clickup::{ClickUpConfig, ClickUpProvider};
 use application::ports::{ProviderError, TaskProvider, TaskQuery};
 use domain::task::{
-    LocationLevel, LocationNode, Status, StatusKind, StatusOption, TaskId, UserId, flatten,
+    LocationLevel, LocationNode, LocationSegment, Status, StatusKind, StatusOption, TaskId, UserId,
+    flatten,
 };
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -259,16 +260,13 @@ async fn gives_up_after_max_retries() {
     assert!(matches!(result, Err(ProviderError::RateLimited { .. })));
 }
 
-/// Monta las respuestas del árbol: dos espacios; el primero con una carpeta visible, una
-/// oculta y una lista sin carpeta; el segundo vacío.
-async fn mount_locations(server: &MockServer) {
+/// Monta las respuestas de un espacio (`90110001`): una carpeta visible, una oculta y una
+/// lista sin carpeta.
+async fn mount_space_children(server: &MockServer) {
     let routes = [
-        (format!("/team/{TEAM}/space"), "spaces"),
-        ("/space/90110001/folder".to_owned(), "folders"),
-        ("/space/90110001/list".to_owned(), "space_lists"),
-        ("/folder/90110002/list".to_owned(), "folder_lists"),
-        ("/space/90110009/folder".to_owned(), "folders_empty"),
-        ("/space/90110009/list".to_owned(), "lists_empty"),
+        ("/space/90110001/folder", "folders"),
+        ("/space/90110001/list", "space_lists"),
+        ("/folder/90110002/list", "folder_lists"),
     ];
     for (route, body) in routes {
         Mock::given(method("GET"))
@@ -281,6 +279,14 @@ async fn mount_locations(server: &MockServer) {
     }
 }
 
+fn space(id: &str, name: &str) -> LocationSegment {
+    LocationSegment {
+        level: LocationLevel::Space,
+        id: id.to_owned(),
+        name: name.to_owned(),
+    }
+}
+
 /// `(profundidad, id)` de cada nodo, en preorden: fácil de comparar de un vistazo.
 fn shape(nodes: &[LocationNode]) -> Vec<(usize, String)> {
     flatten(nodes)
@@ -290,46 +296,86 @@ fn shape(nodes: &[LocationNode]) -> Vec<(usize, String)> {
 }
 
 #[tokio::test]
-async fn locations_build_the_space_folder_list_tree() {
+async fn root_locations_are_the_spaces_in_one_request() {
     let server = MockServer::start().await;
-    mount_locations(&server).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/team/{TEAM}/space")))
+        .and(query_param("archived", "false"))
+        .respond_with(ok("spaces"))
+        .expect(1)
+        .mount(&server)
+        .await;
 
-    let tree = provider(&server).locations().await.unwrap();
+    let roots = provider(&server).root_locations().await.unwrap();
 
     assert_eq!(
-        shape(&tree),
+        roots,
+        [space("90110001", "Clientes"), space("90110009", "Interno")]
+    );
+    // Ninguna otra ruta montada: si se hubiera pedido algo más, wiremock respondería 404.
+}
+
+#[tokio::test]
+async fn children_of_a_space_are_its_folders_and_lists() {
+    let server = MockServer::start().await;
+    mount_space_children(&server).await;
+
+    let children = provider(&server)
+        .location_children(&space("90110001", "Clientes"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        shape(&children),
         [
-            (0, "90110001".to_owned()),
-            (1, "90110002".to_owned()),
-            (2, "901100200300".to_owned()),
-            (2, "901100200301".to_owned()),
-            (1, "901100200900".to_owned()),
-            (0, "90110009".to_owned()),
+            (0, "90110002".to_owned()),
+            (1, "901100200300".to_owned()),
+            (1, "901100200301".to_owned()),
+            (0, "901100200900".to_owned()),
         ]
     );
-    assert_eq!(tree[0].segment.name, "Clientes");
-    assert_eq!(tree[0].children[0].segment.level, LocationLevel::Folder);
-    assert_eq!(tree[0].children[1].segment.level, LocationLevel::List);
+    assert_eq!(children[0].segment.level, LocationLevel::Folder);
+    assert_eq!(children[1].segment.level, LocationLevel::List);
 }
 
 #[tokio::test]
 async fn hidden_folders_are_not_requested() {
     let server = MockServer::start().await;
-    mount_locations(&server).await;
+    mount_space_children(&server).await;
     Mock::given(path("/folder/90110003/list"))
         .respond_with(ok("lists_empty"))
         .expect(0)
         .mount(&server)
         .await;
 
-    let tree = provider(&server).locations().await.unwrap();
+    let children = provider(&server)
+        .location_children(&space("90110001", "Clientes"))
+        .await
+        .unwrap();
 
-    let names: Vec<&str> = tree[0]
-        .children
-        .iter()
-        .map(|n| n.segment.name.as_str())
-        .collect();
+    let names: Vec<&str> = children.iter().map(|n| n.segment.name.as_str()).collect();
     assert_eq!(names, ["Backend", "Soporte"]);
+}
+
+#[tokio::test]
+async fn rate_limit_waits_until_the_reset_header() {
+    let server = MockServer::start().await;
+    // Un reinicio ya pasado: el cliente lo lee y reintenta sin esperar.
+    Mock::given(path("/user"))
+        .respond_with(ResponseTemplate::new(429).insert_header("X-RateLimit-Reset", "1"))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/user"))
+        .respond_with(ok("user"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let me = provider(&server).current_user().await.unwrap();
+
+    assert_eq!(me.as_str(), "183");
 }
 
 fn task_id() -> TaskId {

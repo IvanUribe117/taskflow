@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use application::settings::ConfigKey;
 use clap::{Parser, Subcommand};
 use domain::DomainError;
+use domain::context::Usage;
 use domain::project::ProjectSlug;
 use domain::task::TaskId;
 
@@ -70,6 +71,35 @@ pub enum Command {
     /// Proyectos: agrupan tareas por cliente o por proyecto de trabajo.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Secciones de contexto que acompañan a la IA.
+    #[command(subcommand)]
+    Context(ContextCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ContextCommand {
+    /// Las secciones globales, o las que aplican a un proyecto.
+    List {
+        #[arg(long, value_name = "SLUG")]
+        project: Option<ProjectSlug>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Exactamente lo que recibiría la IA para una tarea, sin llamarla.
+    Preview {
+        #[arg(value_parser = parse_task_id)]
+        task_id: TaskId,
+        // `help` en vez de un comentario `///`: clippy pediría comillas invertidas en
+        // `agent_prompt`, y aparecerían tal cual en `--help`.
+        #[arg(
+            long,
+            default_value = "summary",
+            help = "Uso: summary, plan, agent_prompt o playbook"
+        )]
+        usage: Usage,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -260,6 +290,41 @@ mod tests {
     #[test]
     fn close_needs_a_task_id() {
         assert!(parse(&["close"]).is_err());
+    }
+
+    #[test]
+    fn context_preview_defaults_to_summary() {
+        let cli = parse(&["context", "preview", "86b2x1abc"]).unwrap();
+
+        let Command::Context(ContextCommand::Preview { usage, json, .. }) = cli.command else {
+            panic!("expected context preview");
+        };
+        assert_eq!(usage, Usage::Summary);
+        assert!(!json);
+    }
+
+    #[test]
+    fn context_preview_parses_the_usage() {
+        let cli = parse(&["context", "preview", "1", "--usage", "agent_prompt"]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Command::Context(ContextCommand::Preview {
+                usage: Usage::AgentPrompt,
+                ..
+            })
+        ));
+        assert!(parse(&["context", "preview", "1", "--usage", "agent-prompt"]).is_err());
+    }
+
+    #[test]
+    fn context_list_with_project() {
+        let cli = parse(&["context", "list", "--project", "acme"]).unwrap();
+
+        let Command::Context(ContextCommand::List { project, .. }) = cli.command else {
+            panic!("expected context list");
+        };
+        assert_eq!(project.map(|p| p.to_string()).as_deref(), Some("acme"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "adapter-fs"
-description = "File-system adapters: config.toml and project.toml, with atomic writes."
+description = "File-system adapters: config.toml, project.toml and context sections, with atomic writes."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ application.workspace = true
 domain.workspace = true
 async-trait.workspace = true
 directories.workspace = true
+enumset.workspace = true
 serde.workspace = true
 tempfile.workspace = true
 toml.workspace = true

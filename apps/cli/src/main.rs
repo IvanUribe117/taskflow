@@ -13,5 +13,15 @@ use clap::Parser;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Los avisos de los adaptadores (por ejemplo, "esperando N s" ante el límite de
+    // ClickUp) llegan por `tracing`. Se muestran en la salida de errores, sin hora ni
+    // módulo, para que no se mezclen con la salida normal (`--json`).
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::WARN)
+        .without_time()
+        .with_target(false)
+        .init();
+
     commands::run(args::Cli::parse()).await
 }

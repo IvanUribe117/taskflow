@@ -10,6 +10,7 @@ publish.workspace = true
 domain.workspace = true
 async-trait.workspace = true
 chrono = { workspace = true, features = ["clock", "serde"] }
+enumset.workspace = true
 futures.workspace = true
 secrecy.workspace = true
 serde.workspace = true

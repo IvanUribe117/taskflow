@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::task::{
-    Comment, LocationLevel, LocationNode, Status, StatusOption, Task, TaskId, UserId,
+    Comment, LocationLevel, LocationNode, LocationSegment, Status, StatusOption, Task, TaskId,
+    UserId,
 };
 use thiserror::Error;
 
@@ -24,9 +25,18 @@ pub trait TaskProvider: Send + Sync {
 
     async fn comments(&self, id: &TaskId) -> Result<Vec<Comment>, ProviderError>;
 
-    /// Árbol de ubicaciones del workspace (en `ClickUp`: espacios → carpetas → listas).
-    /// Lo usa el asistente `project add` para elegir dónde vive cada proyecto (FR-29).
-    async fn locations(&self) -> Result<Vec<LocationNode>, ProviderError>;
+    /// Las ubicaciones de primer nivel (en `ClickUp`, los espacios), sin sus hijos.
+    ///
+    /// El árbol se pide en dos pasos para no recorrer todo el workspace de una vez:
+    /// con muchos espacios y carpetas, eso supera el límite de peticiones del proveedor.
+    async fn root_locations(&self) -> Result<Vec<LocationSegment>, ProviderError>;
+
+    /// Todo lo que cuelga de una ubicación de primer nivel (en `ClickUp`: sus carpetas, cada
+    /// una con sus listas, y después sus listas sin carpeta). Lo usa `project add` (FR-29).
+    async fn location_children(
+        &self,
+        root: &LocationSegment,
+    ) -> Result<Vec<LocationNode>, ProviderError>;
 
     /// Los estados que acepta **esta** tarea, según su lista y en el orden del proveedor.
     /// Cambian por lista y con el tiempo (ADR-023): siempre se piden, nunca se guardan.

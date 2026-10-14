@@ -1,7 +1,7 @@
 //! Cliente HTTP de bajo nivel: autenticación, límite de concurrencia, reintentos y errores.
 
 use std::fmt;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use application::ports::ProviderError;
 use reqwest::{Method, StatusCode};
@@ -127,7 +127,18 @@ impl ClickUpClient {
 
             if response.status() == StatusCode::TOO_MANY_REQUESTS && attempt < self.max_retries {
                 attempt += 1;
-                tokio::time::sleep(self.retry_delay).await;
+                let reset = response
+                    .headers()
+                    .get(RATE_LIMIT_RESET)
+                    .and_then(|value| value.to_str().ok());
+                let wait = retry_wait(reset, SystemTime::now(), self.retry_delay);
+                if wait >= Duration::from_secs(1) {
+                    tracing::warn!(
+                        "límite de peticiones de ClickUp alcanzado; esperando {} s",
+                        wait.as_secs()
+                    );
+                }
+                tokio::time::sleep(wait).await;
                 continue;
             }
             break response;
@@ -144,6 +155,40 @@ impl ClickUpClient {
 
         serde_json::from_str::<T>(&text)
             .map_err(|e| ProviderError::InvalidResponse(format!("{path}: {e}")))
+    }
+}
+
+/// Header con el momento en que se reinicia el cupo de peticiones (*timestamp* Unix).
+const RATE_LIMIT_RESET: &str = "x-ratelimit-reset";
+
+/// Espera máxima ante un 429, aunque el header pida más: que un valor raro no deje el
+/// programa colgado.
+const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_mins(1);
+
+/// Margen sobre el momento del reinicio: el *timestamp* viene en segundos enteros, y
+/// llegar justo en el borde puede volver a chocar con el límite.
+const RATE_LIMIT_MARGIN: Duration = Duration::from_millis(500);
+
+/// Cuánto esperar antes de reintentar un 429.
+///
+/// - Sin header, o si no es un número: `fallback` (`retry_delay` de la configuración).
+/// - Con header: lo que falta hasta ese momento, más [`RATE_LIMIT_MARGIN`], como máximo
+///   [`MAX_RATE_LIMIT_WAIT`]. Si el momento ya pasó, cero.
+///
+/// La documentación de `ClickUp` no dice si el *timestamp* está en segundos o en
+/// milisegundos: un número de 13 dígitos o más se trata como milisegundos.
+fn retry_wait(reset: Option<&str>, now: SystemTime, fallback: Duration) -> Duration {
+    let Some(value) = reset.and_then(|raw| raw.trim().parse::<u64>().ok()) else {
+        return fallback;
+    };
+    let reset_at = if value >= 1_000_000_000_000 {
+        UNIX_EPOCH + Duration::from_millis(value)
+    } else {
+        UNIX_EPOCH + Duration::from_secs(value)
+    };
+    match reset_at.duration_since(now) {
+        Ok(remaining) => (remaining + RATE_LIMIT_MARGIN).min(MAX_RATE_LIMIT_WAIT),
+        Err(_) => Duration::ZERO,
     }
 }
 
@@ -180,6 +225,50 @@ impl fmt::Debug for ClickUpClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2026-10-14 15:00:00 UTC. Se escribe en segundos, como los *timestamps* de `ClickUp`,
+    /// para que los tests se lean comparando números del mismo tipo.
+    #[allow(clippy::duration_suboptimal_units)]
+    fn now() -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(1_791_990_000)
+    }
+
+    #[test]
+    fn waits_until_the_reset_plus_a_margin() {
+        let wait = retry_wait(Some("1791990023"), now(), Duration::from_secs(2));
+
+        assert_eq!(wait, Duration::from_secs(23) + RATE_LIMIT_MARGIN);
+    }
+
+    #[test]
+    fn accepts_milliseconds_too() {
+        let wait = retry_wait(Some("1791990010000"), now(), Duration::from_secs(2));
+
+        assert_eq!(wait, Duration::from_secs(10) + RATE_LIMIT_MARGIN);
+    }
+
+    #[test]
+    fn never_waits_more_than_the_maximum() {
+        let wait = retry_wait(Some("1791999999"), now(), Duration::from_secs(2));
+
+        assert_eq!(wait, MAX_RATE_LIMIT_WAIT);
+    }
+
+    #[test]
+    fn a_reset_in_the_past_means_no_wait() {
+        assert_eq!(
+            retry_wait(Some("1791989000"), now(), Duration::from_secs(2)),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn missing_or_invalid_header_uses_the_fallback() {
+        let fallback = Duration::from_secs(2);
+
+        assert_eq!(retry_wait(None, now(), fallback), fallback);
+        assert_eq!(retry_wait(Some("mañana"), now(), fallback), fallback);
+    }
 
     #[test]
     fn success_codes_are_not_errors() {

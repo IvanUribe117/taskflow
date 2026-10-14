@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use adapter_fs::{FsConfigStore, FsProjectRepository};
+use adapter_fs::{FsConfigStore, FsContextRepository, FsProjectRepository};
 use adapter_keyring::{EnvSecretStore, KeyringSecretStore, LayeredSecretStore};
 use application::AppContext;
 use application::ports::{ProviderError, SecretError, SecretName, SecretStore, SystemClock};
@@ -78,9 +78,23 @@ pub fn build(
             settings,
             config_path,
         ))),
+        context: Arc::new(FsContextRepository::new(
+            context_dir(settings, config_path),
+            projects_dir(settings, config_path),
+        )),
         policy: Arc::new(WeightedPolicy::from(&settings.policy)),
         clock: Arc::new(SystemClock),
     })
+}
+
+/// La carpeta de las secciones globales: `settings.context.global_dir` relativa a la
+/// carpeta de `config.toml`, o absoluta. Igual que [`projects_dir`].
+#[must_use]
+pub fn context_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(&settings.context.global_dir)
 }
 
 /// La carpeta de proyectos: `settings.projects.dir` relativa a la carpeta de `config.toml`.
@@ -163,6 +177,16 @@ mod tests {
         );
 
         assert_eq!(dir, Path::new("/home/ivan/.config/taskflow/projects"));
+    }
+
+    #[test]
+    fn global_context_lives_next_to_the_config_file() {
+        let dir = context_dir(
+            &settings(),
+            Path::new("/home/ivan/.config/taskflow/config.toml"),
+        );
+
+        assert_eq!(dir, Path::new("/home/ivan/.config/taskflow/context"));
     }
 
     #[test]

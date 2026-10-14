@@ -16,4 +16,12 @@ pub enum DomainError {
     InvalidLevel(String),
     #[error("unknown project kind `{0}`: use client or internal")]
     InvalidKind(String),
+    #[error(
+        "invalid context section `{0}`: use `<key>.md` or `<number>-<key>.md`, where the key has lowercase letters, digits or dashes"
+    )]
+    InvalidSectionKey(String),
+    #[error("unknown section role `{0}`: use knowledge or instruction")]
+    InvalidSectionRole(String),
+    #[error("unknown usage `{0}`: use summary, plan, agent_prompt or playbook")]
+    InvalidUsage(String),
 }

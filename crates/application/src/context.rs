@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use domain::policy::PrioritizationPolicy;
 
-use crate::ports::{Clock, ProjectRepository, TaskProvider};
+use crate::ports::{Clock, ContextRepository, ProjectRepository, TaskProvider};
 
 /// Todas las dependencias que necesitan los casos de uso (§11.1).
 ///
@@ -13,6 +13,7 @@ use crate::ports::{Clock, ProjectRepository, TaskProvider};
 pub struct AppContext {
     pub tasks: Arc<dyn TaskProvider>,
     pub projects: Arc<dyn ProjectRepository>,
+    pub context: Arc<dyn ContextRepository>,
     pub policy: Arc<dyn PrioritizationPolicy>,
     pub clock: Arc<dyn Clock>,
 }

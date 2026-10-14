@@ -1,6 +1,6 @@
 # Taskflow — Documento de arquitectura de software
 
-*Versión 0.6 · 2026-10-13 · Estado: borrador*
+*Versión 0.7 · 2026-10-14 · Estado: borrador*
 
 > **Cambios en 0.3:** configuración persistente con asistente interactivo, proyectos (cliente/proyecto) y agrupación de tareas, contexto por proyecto en secciones abiertas, automatizaciones con **Playbooks** y patrones de diseño de Rust asociados.
 >
@@ -9,6 +9,8 @@
 > **Cambios en 0.5:** estados del flujo variables (sugerencias + elección y validación por tarea), cierre siempre explícito del usuario, reporte como borrador local con publicación explícita.
 >
 > **Cambios en 0.6:** los descriptores de proveedores viven en `bootstrap`, no en cada adaptador, para evitar un ciclo de dependencias (ADR-026).
+>
+> **Cambios en 0.7:** varios proveedores de IA con el mismo registro que los de tareas (Anthropic por API, Claude Code con tu suscripción, OpenAI, Gemini...), elegidos por configuración (ADR-027).
 
 ## 1. Propósito del documento
 
@@ -394,7 +396,9 @@ Dentro de `domain` y `application` el código se organiza **por capacidad** (tar
                                          │              │
  ADAPTERS (driven)   ┌──────────────────▼──┐   ┌───────▼────────────┐   ┌────────────────────┐
                      │ adapter-clickup     │   │ adapter-anthropic  │   │ adapter-fs         │
-                     │ adapter-github (+)  │   │ adapter-ollama (+) │   │ adapter-shell      │
+                     │ adapter-github (+)  │   │ adapter-claude-code│   │ adapter-shell      │
+                     │                     │   │ adapter-openai (+) │   │                    │
+                     │                     │   │ adapter-gemini (+) │   │                    │
                      └──────────┬──────────┘   └─────────┬──────────┘   │ adapter-keyring    │
                                 │                        │              │ adapter-notify     │
                                 │                        │              └─────────┬──────────┘
@@ -414,7 +418,9 @@ Dentro de `domain` y `application` el código se organiza **por capacidad** (tar
 | `domain`            | lib          | Entidades, value objects, política de prioridad, resolución de proyectos, selección de contexto, modelo validado de Playbooks, máquina de estados de la sesión de trabajo. Código puro, sin async ni I/O. | `chrono`, `thiserror`, `enumset`, `indexmap`, `serde` (solo derive)                                                        |
 | `application`       | lib          | Puertos (traits), casos de uso, DTOs serializables,`AppContext`, motor de Playbooks, servicio de sesiones de trabajo, decorador de caché.                                                                    | `domain`, `async-trait`, `serde`, `serde_json`, `futures`, `tokio` (`sync`, `macros`), `tokio-util`, `minijinja` |
 | `adapter-clickup`   | lib          | Implementa`TaskProvider` y `TimeTracker` para la API v2 de ClickUp.                                                                                                                                         | `application`, `reqwest`, `serde`                                                                                              |
-| `adapter-anthropic` | lib          | Implementa`Summarizer` usando la API de Messages.                                                                                                                                                             | `application`, `reqwest`, `serde`                                                                                              |
+| `adapter-anthropic` | lib          | Implementa`Summarizer` usando la API de Messages (pago por uso, API key).                                                                                                                                     | `application`, `reqwest`, `serde`                                                                                              |
+| `adapter-claude-code` | lib        | Implementa`Summarizer` ejecutando `claude -p` (Claude Code en modo no interactivo): usa la cuenta con la que ya iniciaste sesión en Claude Code.                                                          | `application`, `tokio` (`process`), `serde`                                                                                    |
+| `adapter-openai`, `adapter-gemini` (+) | lib | Implementan `Summarizer` con sus APIs. Se agregan cuando hagan falta, sin tocar el núcleo (ADR-027).                                                                                             | `application`, `reqwest`, `serde`                                                                                              |
 | `adapter-fs`        | lib          | Implementa`ConfigStore`, `ProjectRepository`, `ContextRepository`, `PlaybookRepository`, `RunLog`, `SessionStore` y `Cache` sobre archivos.                                                       | `application`, `toml`, `toml_edit`, `tempfile`, `directories`                                                              |
 | `adapter-shell`     | lib          | Implementa`CommandRunner` con `tokio::process`, tiempo máximo y cancelación.                                                                                                                              | `application`, `tokio` (`process`)                                                                                             |
 | `adapter-keyring`   | lib          | Implementa`SecretStore` con el llavero del sistema y fallback a variables de entorno.                                                                                                                         | `application`, `keyring`                                                                                                         |
@@ -1361,7 +1367,10 @@ pub trait TaskProvider: Send + Sync {
     async fn search_tasks(&self, query: &TaskQuery) -> Result<Vec<Task>, ProviderError>;
     async fn task(&self, id: &TaskId) -> Result<Task, ProviderError>;
     async fn comments(&self, id: &TaskId) -> Result<Vec<Comment>, ProviderError>;
-    async fn locations(&self) -> Result<Vec<LocationNode>, ProviderError>;
+    /// Primer nivel (en ClickUp, los espacios), sin hijos.
+    async fn root_locations(&self) -> Result<Vec<LocationSegment>, ProviderError>;
+    /// El subárbol de una raíz. Por partes para no superar el límite de peticiones.
+    async fn location_children(&self, root: &LocationSegment) -> Result<Vec<LocationNode>, ProviderError>;
     /// Estados válidos para la tarea según su lista; cambian por lista y con el tiempo.
     async fn available_statuses(&self, id: &TaskId) -> Result<Vec<StatusOption>, ProviderError>;
     async fn set_status(&self, id: &TaskId, status: &Status) -> Result<(), ProviderError>;
@@ -2468,8 +2477,8 @@ done        = ["complete", "closed"]
 done_target = "complete"          # status used by `close`
 
 [ai]
-kind = "anthropic"
-model = "<model-id>"
+kind = "claude_code"               # claude_code | anthropic | openai (+) | gemini (+)
+model = "<model-id>"               # opcional: el modelo por defecto de cada proveedor
 max_tasks = 10
 max_description_chars = 4000
 
@@ -2569,6 +2578,25 @@ pub fn task_providers() -> &'static [TaskProviderDescriptor] {
 Los descriptores viven en `bootstrap` y no en cada adaptador (ADR-026): el descriptor usa tipos de `bootstrap` (`BuildError`, `FieldSpec`), y si `adapter-clickup` dependiera de `bootstrap` mientras `bootstrap` depende de `adapter-clickup`, habría un ciclo. Cargo no permite dependencias circulares entre crates.
 
 El asistente recorre `fields` sin saber qué proveedor es. `bootstrap::build` usa el mismo descriptor para construir el adaptador: una sola fuente de verdad (NFR-17).
+
+**Proveedores de IA (ADR-027).** Funcionan igual que los de tareas: un `AiProviderDescriptor` por proveedor, con sus campos y su función `build` que devuelve un `Arc<dyn Summarizer>`. El asistente ofrece primero el proveedor de tareas y después el de IA; `[ai] kind` decide cuál se construye.
+
+```rust
+pub struct AiProviderDescriptor {
+    pub kind: AiKind,                  // ClaudeCode, Anthropic, OpenAi (+), Gemini (+)
+    pub display_name: &'static str,
+    pub fields: &'static [FieldSpec],  // Anthropic: API key (secreto); Claude Code: nada
+    pub build: fn(&AppSettings, &dyn SecretStore) -> Result<Arc<dyn Summarizer>, BuildError>,
+}
+```
+
+| Proveedor | Cómo se autentica | Cómo pide JSON con esquema | Costo |
+| --- | --- | --- | --- |
+| Claude Code (`claude_code`) | La sesión que ya tienes en Claude Code. No pide nada | `claude -p --output-format json --json-schema ...` | Incluido en tu plan de Claude |
+| Anthropic API (`anthropic`) | API key de la consola de Anthropic, en el llavero | `output_config.format` con `json_schema` | Pago por uso |
+| OpenAI, Gemini (+) | API key de cada uno, en el llavero | Lo que ofrezca cada API | Pago por uso |
+
+El dominio y los casos de uso solo conocen el puerto `Summarizer` y los DTO (`TaskSummary`, `BuiltContext`). Cada adaptador traduce el contexto y el esquema a lo que entiende su proveedor.
 
 La configuración se deserializa con `serde` a un enum etiquetado, lo que hace que `bootstrap` elija el adaptador con un `match` exhaustivo:
 
@@ -2834,7 +2862,8 @@ hint: run `taskflow playbook check release` after fixing the file
 | `search_tasks` con `ids` | `GET /task/{task_id}` por cada ID, concurrente con límite                                                                                                |
 | `task`                     | `GET /task/{task_id}`                                                                                                                                     |
 | `comments`                 | `GET /task/{task_id}/comment`                                                                                                                             |
-| `locations`                | `GET /team/{team_id}/space` → `GET /space/{space_id}/folder` → `GET /folder/{folder_id}/list` y `GET /space/{space_id}/list` (listas sin carpeta) |
+| `root_locations`           | `GET /team/{team_id}/space` (una sola petición) |
+| `location_children`        | `GET /space/{space_id}/folder` → `GET /folder/{folder_id}/list` por carpeta visible, y `GET /space/{space_id}/list` (listas sin carpeta) |
 | `set_status`               | `PUT /task/{task_id}` with `{ "status": "<name>" }`                                                                                                     |
 | `add_comment`              | `POST /task/{task_id}/comment` with `{ "comment_text": "...", "notify_all": false }`                                                                    |
 | `TimeTracker::start`       | `POST /team/{team_id}/time_entries/start` with `{ "tid": "<task_id>" }`                                                                                 |
@@ -2873,7 +2902,14 @@ hint: run `taskflow playbook check release` after fixing the file
 
 *Pendiente de verificar:* endpoints de time tracking (y si iniciar un contador detiene el anterior) y el límite de peticiones del plan.
 
-## 17. Adaptador de IA
+## 17. Adaptadores de IA
+
+Hay varios (ADR-027); todos implementan `Summarizer` y comparten el diseño de prompts de abajo. Lo que cambia es cómo se envía la petición:
+
+- **Claude Code** (`adapter-claude-code`): ejecuta `claude -p` como proceso hijo, con `--system-prompt`, `--json-schema`, `--output-format json`, `--model` opcional y sin herramientas ni persistencia de sesión. Lee el JSON de la salida estándar. Usa la cuenta con la que ya iniciaste sesión en Claude Code.
+- **Anthropic API** (`adapter-anthropic`), detallado a continuación.
+
+### Anthropic API
 
 - **Endpoint:** `POST https://api.anthropic.com/v1/messages`
 - **Headers:** `x-api-key`, `anthropic-version`, `content-type: application/json`
@@ -3060,7 +3096,7 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 | 3    | `adapter-clickup` de lectura                                     | Imprime las tareas reales con su ubicación                                                                                                                                            | `reqwest`, `serde`, `TryFrom`, paginación                       |
 | 4    | Configuración persistente +`bootstrap` + CLI `today`/`show` | `config init` interactivo deja todo listo; `taskflow today` reemplaza la revisión manual                                                                                          | `toml_edit`, escritura atómica, registro, `dialoguer`             |
 | 5    | Proyectos y agrupación                                            | `today --by-project`; `project add` elige listas de ClickUp                                                                                                                        | `FromStr`, `IndexMap`, tipos recursivos                            |
-| 6    | Contexto por proyecto +`adapter-anthropic` + `plan`            | Resúmenes y prompts usan las secciones;`context preview`                                                                                                                            | `EnumSet`, lifetimes en selección, prompts, JSON estructurado       |
+| 6    | Contexto por proyecto + proveedores de IA (Claude Code, Anthropic) + `plan` | Resúmenes y prompts usan las secciones;`context preview`                                                                                                                            | `EnumSet`, lifetimes en selección, prompts, JSON estructurado       |
 | 7    | `close` (escritura)                                              | Cerrar una tarea sin abrir ClickUp                                                                                                                                                     | Confirmaciones, errores HTTP                                           |
 | 8    | Sesión de trabajo                                                 | `start` → reporte → `approve` → `done` con el contador de ClickUp, estados sugeridos y validados por lista, publicación explícita del reporte y notificación de escritorio | Máquina de estados con enums, efectos,`TimeTracker`, `Notifier`   |
 | 9    | Playbooks v1                                                       | `release` corre de punta a punta con `shell`, `select_tasks`, `comment`, `set_status`, `confirm`, `--dry-run`                                                            | Typestate, enum dispatch,`tokio::process`, canales, `select!`      |
@@ -3099,6 +3135,7 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 | ADR-024 | Publicar el reporte es un comando explícito (`PublishReport`)            | El reporte es un borrador de trabajo; el usuario decide qué y cuándo se comparte             |
 | ADR-025 | Solo`done` (usuario) lleva la sesión a `Closed`                        | El usuario es quien declara terminada una tarea; el agente no cierra nada                      |
 | ADR-026 | Descriptores de proveedores en `bootstrap`, no en los adaptadores        | Evita el ciclo `adapter → bootstrap → adapter`; los adaptadores no conocen el registro          |
+| ADR-027 | Varios proveedores de IA con el mismo registro que los de tareas         | Claude Code (suscripción), Anthropic, OpenAI, Gemini... se eligen por configuración; el núcleo solo ve `Summarizer` |
 
 ## 26. Decisiones abiertas
 
@@ -3113,9 +3150,9 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 - [ ] Evaluar un lenguaje embebido (`rhai`) o plugins WASM para Playbooks avanzados después de v1.
 - [ ] Definir la política de `select_tasks`: solo tareas propias o todas las del proyecto por defecto.
 - [ ] Decidir si el tiempo se registra con el contador en vivo de ClickUp o como una entrada con duración al cerrar.
-- [ ] **Importante — límite de peticiones de ClickUp (encontrado el 2026-10-14).** Los planes Free, Unlimited y Business permiten 100 peticiones por minuto por token. `project add` hace `1 + 2·espacios + carpetas` peticiones y falló con `RateLimited` en un workspace real. Dos frentes:
-  - **Corto plazo:** ante un 429, esperar lo que indica `X-RateLimit-Reset` (*timestamp* Unix; la documentación no aclara si en segundos o milisegundos), acotado a 60 s, en lugar de `retry_delay` fijo.
-  - **Mediano plazo:** un backend o caché local que sincronice con ClickUp y evite consultar la API en cada comando (relacionado con la fase 12, caché local).
+- [ ] **Importante — límite de peticiones de ClickUp (encontrado el 2026-10-14).** Los planes Free, Unlimited y Business permiten 100 peticiones por minuto por token. `project add` hacía `1 + 2·espacios + carpetas` peticiones y falló con `RateLimited` en un workspace real.
+  - [X] **Corto plazo (2026-10-14):** `project add` pide primero los espacios (1 petición) y después solo el árbol del espacio elegido (`root_locations` + `location_children`). Ante un 429, el cliente espera lo que indica `X-RateLimit-Reset` (acotado a 60 s; acepta segundos o milisegundos) y avisa por `tracing`.
+  - [ ] **Mediano plazo:** un backend o caché local que sincronice con ClickUp y evite consultar la API en cada comando (relacionado con la fase 12, caché local).
 
 ### Decisiones tomadas
 

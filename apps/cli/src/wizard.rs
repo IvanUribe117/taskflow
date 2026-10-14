@@ -13,7 +13,7 @@ use bootstrap::registry::{self, FieldKind, FieldSpec, FieldValues};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, MultiSelect, Password, Select};
 use domain::project::{MatchRule, ProjectKind, ProjectSlug};
-use domain::task::flatten;
+use domain::task::{FlatNode, LocationNode, flatten};
 
 use crate::presenter;
 
@@ -108,7 +108,8 @@ fn ask(field: &FieldSpec, theme: &ColorfulTheme) -> anyhow::Result<Answer> {
 
 /// `taskflow project add` (FR-29): crea un proyecto eligiendo sus ubicaciones del proveedor.
 ///
-/// 1. `BrowseLocations` y `flatten` del árbol. Si está vacío, un error.
+/// 1. `BrowseLocations::roots` y elegir un espacio (`Select`); después
+///    `BrowseLocations::children` de ese espacio y `flatten` del espacio con su árbol.
 /// 2. `MultiSelect` con una fila por nodo (`presenter::location_label`). Cada nodo elegido
 ///    es una regla `MatchRule::Location` con su nivel y su id.
 /// 3. Etiquetas opcionales, separadas por coma (`Input` con `allow_empty(true)`): cada una
@@ -124,10 +125,29 @@ fn ask(field: &FieldSpec, theme: &ColorfulTheme) -> anyhow::Result<Answer> {
 pub async fn project_add(ctx: &AppContext) -> anyhow::Result<()> {
     let theme = ColorfulTheme::default();
 
-    // 1. El árbol del proveedor, como lista.
-    let tree = BrowseLocations::new(ctx).execute().await?;
+    // 1. Primero el espacio (una sola petición) y después solo su árbol. Pedir el árbol
+    //    completo del workspace supera el límite de peticiones de ClickUp.
+    let browse = BrowseLocations::new(ctx);
+    let roots = browse.roots().await?;
+    anyhow::ensure!(!roots.is_empty(), "el proveedor no devolvió ubicaciones");
+    let root_labels: Vec<String> = roots
+        .iter()
+        .map(|segment| presenter::location_label(&FlatNode { depth: 0, segment }))
+        .collect();
+    let root_index = Select::with_theme(&theme)
+        .with_prompt("Espacio del proyecto")
+        .items(&root_labels)
+        .default(0)
+        .interact()?;
+    let root = roots[root_index].clone();
+    let children = browse.children(&root).await?;
+
+    // El espacio y su árbol, como lista: el espacio mismo también se puede elegir.
+    let tree = vec![LocationNode {
+        segment: root,
+        children,
+    }];
     let nodes = flatten(&tree);
-    anyhow::ensure!(!nodes.is_empty(), "el proveedor no devolvió ubicaciones");
 
     // 2. Ubicaciones elegidas → reglas de ubicación.
     let labels: Vec<String> = nodes.iter().map(presenter::location_label).collect();

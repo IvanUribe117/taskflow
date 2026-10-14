@@ -6,14 +6,15 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
+use domain::context::ContextSection;
 use domain::policy::WeightedPolicy;
 use domain::project::{Project, ProjectSlug};
-use domain::task::{Comment, LocationNode, StatusOption, Task, TaskId, UserId};
+use domain::task::{Comment, LocationNode, LocationSegment, StatusOption, Task, TaskId, UserId};
 
 use crate::AppContext;
 use crate::ports::{
-    Clock, ExposeSecret, ProjectRepository, ProviderError, RepoError, SecretError, SecretName,
-    SecretStore, SecretString, TaskProvider, TaskQuery,
+    Clock, ContextRepository, ExposeSecret, ProjectRepository, ProviderError, RepoError,
+    SecretError, SecretName, SecretStore, SecretString, TaskProvider, TaskQuery,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
@@ -176,9 +177,25 @@ impl TaskProvider for FakeTaskProvider {
         Ok(self.comments.get(id).cloned().unwrap_or_default())
     }
 
-    async fn locations(&self) -> Result<Vec<LocationNode>, ProviderError> {
+    async fn root_locations(&self) -> Result<Vec<LocationSegment>, ProviderError> {
         self.check_auth()?;
-        Ok(self.locations.clone())
+        Ok(self
+            .locations
+            .iter()
+            .map(|node| node.segment.clone())
+            .collect())
+    }
+
+    async fn location_children(
+        &self,
+        root: &LocationSegment,
+    ) -> Result<Vec<LocationNode>, ProviderError> {
+        self.check_auth()?;
+        self.locations
+            .iter()
+            .find(|node| node.segment.id == root.id)
+            .map(|node| node.children.clone())
+            .ok_or_else(|| ProviderError::NotFound(root.id.clone()))
     }
 
     async fn available_statuses(&self, id: &TaskId) -> Result<Vec<StatusOption>, ProviderError> {
@@ -269,6 +286,7 @@ pub fn context(
     let ctx = AppContext {
         tasks: tasks.clone(),
         projects: Arc::new(FakeProjectRepository::new(projects)),
+        context: Arc::new(FakeContextRepository::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -308,5 +326,38 @@ impl SecretStore for MemorySecretStore {
             .expect("lock")
             .insert(name, value.expose_secret().to_owned());
         Ok(())
+    }
+}
+
+/// Secciones de contexto en memoria. Reemplázalo en `ctx.context` para cada test.
+#[derive(Debug, Default)]
+pub struct FakeContextRepository {
+    global: Vec<ContextSection>,
+    projects: HashMap<ProjectSlug, Vec<ContextSection>>,
+}
+
+impl FakeContextRepository {
+    #[must_use]
+    pub fn with_global(mut self, sections: Vec<ContextSection>) -> Self {
+        self.global = sections;
+        self
+    }
+
+    #[must_use]
+    pub fn with_project(mut self, slug: &str, sections: Vec<ContextSection>) -> Self {
+        let slug = slug.parse().expect("valid slug in test");
+        self.projects.insert(slug, sections);
+        self
+    }
+}
+
+#[async_trait]
+impl ContextRepository for FakeContextRepository {
+    async fn global_sections(&self) -> Result<Vec<ContextSection>, RepoError> {
+        Ok(self.global.clone())
+    }
+
+    async fn project_sections(&self, slug: &ProjectSlug) -> Result<Vec<ContextSection>, RepoError> {
+        Ok(self.projects.get(slug).cloned().unwrap_or_default())
     }
 }

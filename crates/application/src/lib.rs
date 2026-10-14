@@ -10,6 +10,7 @@ pub mod dto;
 pub mod error;
 pub mod ports;
 pub mod projects;
+pub mod sections;
 pub mod settings;
 pub mod tasks;
 

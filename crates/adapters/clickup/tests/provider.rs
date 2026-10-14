@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use adapter_clickup::{ClickUpConfig, ClickUpProvider};
 use application::ports::{ProviderError, TaskProvider, TaskQuery};
-use domain::task::{Status, TaskId, UserId};
+use domain::task::{LocationLevel, LocationNode, Status, TaskId, UserId, flatten};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -22,6 +22,12 @@ fn fixture(name: &str) -> serde_json::Value {
         "tasks_page_1" => include_str!("fixtures/tasks_page_1.json"),
         "tasks_page_no_flag" => include_str!("fixtures/tasks_page_no_flag.json"),
         "comments" => include_str!("fixtures/comments.json"),
+        "spaces" => include_str!("fixtures/spaces.json"),
+        "folders" => include_str!("fixtures/folders.json"),
+        "folders_empty" => include_str!("fixtures/folders_empty.json"),
+        "folder_lists" => include_str!("fixtures/folder_lists.json"),
+        "space_lists" => include_str!("fixtures/space_lists.json"),
+        "lists_empty" => include_str!("fixtures/lists_empty.json"),
         other => panic!("unknown fixture {other}"),
     };
     serde_json::from_str(raw).expect("valid fixture")
@@ -248,4 +254,77 @@ async fn gives_up_after_max_retries() {
     let result = provider(&server).current_user().await;
 
     assert!(matches!(result, Err(ProviderError::RateLimited { .. })));
+}
+
+/// Monta las respuestas del árbol: dos espacios; el primero con una carpeta visible, una
+/// oculta y una lista sin carpeta; el segundo vacío.
+async fn mount_locations(server: &MockServer) {
+    let routes = [
+        (format!("/team/{TEAM}/space"), "spaces"),
+        ("/space/90110001/folder".to_owned(), "folders"),
+        ("/space/90110001/list".to_owned(), "space_lists"),
+        ("/folder/90110002/list".to_owned(), "folder_lists"),
+        ("/space/90110009/folder".to_owned(), "folders_empty"),
+        ("/space/90110009/list".to_owned(), "lists_empty"),
+    ];
+    for (route, body) in routes {
+        Mock::given(method("GET"))
+            .and(path(route))
+            .and(query_param("archived", "false"))
+            .respond_with(ok(body))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+}
+
+/// `(profundidad, id)` de cada nodo, en preorden: fácil de comparar de un vistazo.
+fn shape(nodes: &[LocationNode]) -> Vec<(usize, String)> {
+    flatten(nodes)
+        .iter()
+        .map(|n| (n.depth, n.segment.id.clone()))
+        .collect()
+}
+
+#[tokio::test]
+async fn locations_build_the_space_folder_list_tree() {
+    let server = MockServer::start().await;
+    mount_locations(&server).await;
+
+    let tree = provider(&server).locations().await.unwrap();
+
+    assert_eq!(
+        shape(&tree),
+        [
+            (0, "90110001".to_owned()),
+            (1, "90110002".to_owned()),
+            (2, "901100200300".to_owned()),
+            (2, "901100200301".to_owned()),
+            (1, "901100200900".to_owned()),
+            (0, "90110009".to_owned()),
+        ]
+    );
+    assert_eq!(tree[0].segment.name, "Clientes");
+    assert_eq!(tree[0].children[0].segment.level, LocationLevel::Folder);
+    assert_eq!(tree[0].children[1].segment.level, LocationLevel::List);
+}
+
+#[tokio::test]
+async fn hidden_folders_are_not_requested() {
+    let server = MockServer::start().await;
+    mount_locations(&server).await;
+    Mock::given(path("/folder/90110003/list"))
+        .respond_with(ok("lists_empty"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let tree = provider(&server).locations().await.unwrap();
+
+    let names: Vec<&str> = tree[0]
+        .children
+        .iter()
+        .map(|n| n.segment.name.as_str())
+        .collect();
+    assert_eq!(names, ["Backend", "Soporte"]);
 }

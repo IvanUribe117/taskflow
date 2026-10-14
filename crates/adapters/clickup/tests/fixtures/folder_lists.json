@@ -1,0 +1,26 @@
+{
+  "lists": [
+    {
+      "id": "901100200300",
+      "name": "ACME – Sprint",
+      "orderindex": 0,
+      "status": null,
+      "priority": null,
+      "assignee": null,
+      "task_count": "8",
+      "due_date": null,
+      "start_date": null,
+      "folder": { "id": "90110002", "name": "Backend", "hidden": false, "access": true },
+      "space": { "id": "90110001", "name": "Clientes", "access": true },
+      "archived": false,
+      "override_statuses": false,
+      "permission_level": "create"
+    },
+    {
+      "id": "901100200301",
+      "name": "ACME – Backlog",
+      "folder": { "id": "90110002", "name": "Backend", "hidden": false, "access": true },
+      "space": { "id": "90110001", "name": "Clientes", "access": true }
+    }
+  ]
+}

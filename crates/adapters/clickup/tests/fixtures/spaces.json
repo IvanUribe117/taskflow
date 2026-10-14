@@ -1,0 +1,22 @@
+{
+  "spaces": [
+    {
+      "id": "90110001",
+      "name": "Clientes",
+      "private": false,
+      "color": null,
+      "archived": false,
+      "statuses": [{ "status": "to do", "type": "open", "orderindex": 0, "color": "#d3d3d3" }],
+      "multiple_assignees": true,
+      "features": { "due_dates": { "enabled": true } }
+    },
+    {
+      "id": "90110009",
+      "name": "Interno",
+      "private": false,
+      "statuses": [],
+      "multiple_assignees": false,
+      "features": {}
+    }
+  ]
+}

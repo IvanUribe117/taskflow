@@ -1,0 +1,24 @@
+{
+  "folders": [
+    {
+      "id": "90110002",
+      "name": "Backend",
+      "orderindex": 0,
+      "override_statuses": false,
+      "hidden": false,
+      "space": { "id": "90110001", "name": "Clientes", "access": true },
+      "task_count": "12",
+      "lists": []
+    },
+    {
+      "id": "90110003",
+      "name": "hidden",
+      "orderindex": 1,
+      "override_statuses": false,
+      "hidden": true,
+      "space": { "id": "90110001", "name": "Clientes", "access": true },
+      "task_count": "3",
+      "lists": []
+    }
+  ]
+}

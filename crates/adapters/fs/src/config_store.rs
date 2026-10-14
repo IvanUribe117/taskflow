@@ -164,7 +164,7 @@ mod tests {
         let (_dir, store) = store();
 
         store
-            .apply(&SettingsChange::Replace(settings("9001")))
+            .apply(&SettingsChange::Replace(Box::new(settings("9001"))))
             .unwrap();
 
         assert_eq!(store.load().unwrap(), settings("9001"));
@@ -179,7 +179,7 @@ mod tests {
     fn replace_rejects_invalid_settings_without_writing() {
         let (_dir, store) = store();
 
-        let result = store.apply(&SettingsChange::Replace(settings("abc")));
+        let result = store.apply(&SettingsChange::Replace(Box::new(settings("abc"))));
 
         assert!(matches!(result, Err(ConfigError::Invalid(_))));
         assert!(!store.path().exists());
@@ -189,7 +189,7 @@ mod tests {
     fn set_changes_one_key_and_keeps_comments() {
         let (_dir, store) = store();
         store
-            .apply(&SettingsChange::Replace(settings("9001")))
+            .apply(&SettingsChange::Replace(Box::new(settings("9001"))))
             .unwrap();
         let mut text = fs::read_to_string(store.path()).unwrap();
         text.push_str("# nota personal\n");
@@ -209,7 +209,7 @@ mod tests {
     fn set_keeps_numeric_looking_strings_as_strings() {
         let (_dir, store) = store();
         store
-            .apply(&SettingsChange::Replace(settings("9001")))
+            .apply(&SettingsChange::Replace(Box::new(settings("9001"))))
             .unwrap();
 
         set(&store, "provider.clickup.team_id", "0042").unwrap();
@@ -222,7 +222,7 @@ mod tests {
     fn set_accepts_lists_and_new_sections() {
         let (_dir, store) = store();
         store
-            .apply(&SettingsChange::Replace(settings("9001")))
+            .apply(&SettingsChange::Replace(Box::new(settings("9001"))))
             .unwrap();
 
         set(
@@ -242,7 +242,7 @@ mod tests {
     fn invalid_values_leave_the_file_untouched() {
         let (_dir, store) = store();
         store
-            .apply(&SettingsChange::Replace(settings("9001")))
+            .apply(&SettingsChange::Replace(Box::new(settings("9001"))))
             .unwrap();
         let before = fs::read_to_string(store.path()).unwrap();
 
@@ -258,7 +258,7 @@ mod tests {
     fn get_raw_reads_what_is_written() {
         let (_dir, store) = store();
         store
-            .apply(&SettingsChange::Replace(settings("9001")))
+            .apply(&SettingsChange::Replace(Box::new(settings("9001"))))
             .unwrap();
 
         let team = store

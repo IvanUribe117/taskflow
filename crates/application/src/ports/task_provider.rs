@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use domain::task::{Comment, LocationLevel, Status, Task, TaskId, UserId};
+use domain::task::{Comment, LocationLevel, LocationNode, Status, Task, TaskId, UserId};
 use thiserror::Error;
 
 /// Fuente de tareas: `ClickUp` hoy, otro proveedor mañana.
@@ -9,8 +9,8 @@ use thiserror::Error;
 /// `#[async_trait]` convierte cada `async fn` en un método que devuelve
 /// `Pin<Box<dyn Future + Send>>`; así el trait se puede usar como `dyn TaskProvider` (ADR-002).
 ///
-/// Métodos que llegan en fases posteriores: `locations`, `available_statuses`,
-/// `set_status`, `add_comment` y `task_ref_pattern` (§10.1).
+/// Métodos que llegan en fases posteriores: `available_statuses`, `set_status`,
+/// `add_comment` y `task_ref_pattern` (§10.1).
 #[async_trait]
 pub trait TaskProvider: Send + Sync {
     fn name(&self) -> &'static str;
@@ -22,6 +22,10 @@ pub trait TaskProvider: Send + Sync {
     async fn task(&self, id: &TaskId) -> Result<Task, ProviderError>;
 
     async fn comments(&self, id: &TaskId) -> Result<Vec<Comment>, ProviderError>;
+
+    /// Árbol de ubicaciones del workspace (en `ClickUp`: espacios → carpetas → listas).
+    /// Lo usa el asistente `project add` para elegir dónde vive cada proyecto (FR-29).
+    async fn locations(&self) -> Result<Vec<LocationNode>, ProviderError>;
 }
 
 /// Filtros para `search_tasks`. `Default` = sin filtros.

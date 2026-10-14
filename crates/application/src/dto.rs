@@ -107,6 +107,36 @@ pub struct TodayReport {
     pub groups: Vec<TaskGroup>,
 }
 
+/// Un proyecto con todas sus reglas, para `project list` y `project show` (UC-06).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProjectDetail {
+    pub slug: String,
+    pub name: String,
+    /// "client" o "internal".
+    pub kind: String,
+    /// Cada regla con su `Display`: `"list 901100200300"`, `"tag acme"`.
+    pub rules: Vec<String>,
+    /// La ruta como texto (`Path::display`), o `None`.
+    pub repo_path: Option<String>,
+    pub priority_boost: i64,
+}
+
+impl From<&Project> for ProjectDetail {
+    fn from(project: &Project) -> Self {
+        Self {
+            kind: project.kind.to_string(),
+            slug: project.slug.to_string(),
+            name: project.name.clone(),
+            priority_boost: project.priority_boost,
+            rules: project.rules.iter().map(ToString::to_string).collect(),
+            repo_path: project
+                .repo_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+        }
+    }
+}
+
 /// Detalle de una tarea para `show` (UC-03). En la fase 6 se suma el resumen de la IA.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TaskDetail {
@@ -284,6 +314,35 @@ mod tests {
 
         assert_eq!(group.project, None);
         assert_eq!(group.tasks.len(), 1);
+    }
+
+    #[test]
+    fn project_detail_lists_rules_and_repo() {
+        let mut p = project(
+            "acme",
+            vec![
+                MatchRule::Location {
+                    level: LocationLevel::List,
+                    id: "L1".into(),
+                },
+                MatchRule::Tag("acme".into()),
+            ],
+        );
+        p.name = "ACME Corp".into();
+        p.repo_path = Some("/code/acme".into());
+        p.priority_boost = 20;
+
+        assert_eq!(
+            ProjectDetail::from(&p),
+            ProjectDetail {
+                slug: "acme".into(),
+                name: "ACME Corp".into(),
+                kind: "client".into(),
+                rules: vec!["list L1".into(), "tag acme".into()],
+                repo_path: Some("/code/acme".into()),
+                priority_boost: 20,
+            }
+        );
     }
 
     #[test]

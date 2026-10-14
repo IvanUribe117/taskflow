@@ -59,6 +59,22 @@ impl fmt::Display for ProjectKind {
     }
 }
 
+/// El inverso del `Display` de arriba: `"client"` o `"internal"`.
+impl FromStr for ProjectKind {
+    type Err = DomainError;
+
+    /// # Errors
+    ///
+    /// [`DomainError::InvalidKind`] para cualquier otro texto.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "client" => Ok(Self::Client),
+            "internal" => Ok(Self::Internal),
+            other => Err(DomainError::InvalidKind(other.to_owned())),
+        }
+    }
+}
+
 /// Regla que asocia tareas a un proyecto.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchRule {
@@ -84,7 +100,17 @@ impl MatchRule {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Para mostrar la regla al usuario: `list 901100200300` o `tag acme`.
+impl fmt::Display for MatchRule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Location { level, id } => write!(f, "{level} {id}"),
+            Self::Tag(name) => write!(f, "tag {name}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
     pub slug: ProjectSlug,
     pub name: String,
@@ -112,6 +138,28 @@ mod tests {
             let slug: ProjectSlug = raw.parse().unwrap();
             assert_eq!(slug.as_str(), raw);
         }
+    }
+
+    #[test]
+    fn project_kinds_round_trip() {
+        for kind in [ProjectKind::Client, ProjectKind::Internal] {
+            assert_eq!(kind.to_string().parse::<ProjectKind>(), Ok(kind));
+        }
+        assert_eq!(
+            "cliente".parse::<ProjectKind>(),
+            Err(DomainError::InvalidKind("cliente".into()))
+        );
+    }
+
+    #[test]
+    fn rules_display_their_level_and_value() {
+        let list = MatchRule::Location {
+            level: LocationLevel::List,
+            id: "901100200300".into(),
+        };
+
+        assert_eq!(list.to_string(), "list 901100200300");
+        assert_eq!(MatchRule::Tag("acme".into()).to_string(), "tag acme");
     }
 
     #[test]

@@ -3,7 +3,7 @@
 mod location;
 mod status;
 
-pub use location::{LocationLevel, LocationNode, LocationSegment, TaskLocation};
+pub use location::{FlatNode, LocationLevel, LocationNode, LocationSegment, TaskLocation, flatten};
 pub use status::{Priority, Status};
 
 use chrono::{DateTime, Utc};

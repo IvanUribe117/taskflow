@@ -763,7 +763,7 @@ impl ProjectResolver {
     /// Agrupa tareas ya ordenadas. `IndexMap` conserva el orden de inserción, así que
     /// el primer grupo es el del proyecto con la tarea más prioritaria.
     pub fn group<'t>(&self, tasks: &'t [Task]) -> IndexMap<ProjectKey, Vec<&'t Task>> {
-        elet mut groups: IndexMap<ProjectKey, Vec<&Task>> = IndexMap::new();
+        let mut groups: IndexMap<ProjectKey, Vec<&Task>> = IndexMap::new();
         for task in tasks {
             let key = self
                 .resolve(task)
@@ -2864,6 +2864,13 @@ hint: run `taskflow playbook check release` after fixing the file
 - Tarea: `status { status, type }`, `priority` nulo o `{ id: "1".."4", priority }`, `due_date` y `date_updated` en milisegundos como texto, `folder { hidden }` (las listas sin carpeta tienen una carpeta oculta), `space` solo con `id`.
 - `GET /task/{id}/comment`: los 25 comentarios más recientes; cada uno con `comment_text`, `user`, `resolved`, `assignee` (nulo si no está asignado) y `date` en milisegundos. Se pagina con `start` + `start_id` del último comentario.
 
+**Verificado en la documentación oficial (fase 5, 2026-10-13):**
+
+- `GET /team/{team_id}/space` → `{ "spaces": [{ "id", "name", ... }] }`.
+- `GET /space/{space_id}/folder` → `{ "folders": [{ "id", "name", "hidden", "lists", ... }] }`. Las subcarpetas vienen en la misma lista plana, con `parent_folder`. El esquema documenta `lists` como textos y los ejemplos lo muestran vacío: por eso las listas de cada carpeta se piden aparte con `GET /folder/{folder_id}/list`.
+- `GET /folder/{folder_id}/list` y `GET /space/{space_id}/list` (listas sin carpeta) → `{ "lists": [{ "id", "name", ... }] }`.
+- Los cuatro aceptan `?archived=false`.
+
 *Pendiente de verificar:* endpoints de time tracking (y si iniciar un contador detiene el anterior) y el límite de peticiones del plan.
 
 ## 17. Adaptador de IA
@@ -3106,6 +3113,9 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 - [ ] Evaluar un lenguaje embebido (`rhai`) o plugins WASM para Playbooks avanzados después de v1.
 - [ ] Definir la política de `select_tasks`: solo tareas propias o todas las del proyecto por defecto.
 - [ ] Decidir si el tiempo se registra con el contador en vivo de ClickUp o como una entrada con duración al cerrar.
+- [ ] **Importante — límite de peticiones de ClickUp (encontrado el 2026-10-14).** Los planes Free, Unlimited y Business permiten 100 peticiones por minuto por token. `project add` hace `1 + 2·espacios + carpetas` peticiones y falló con `RateLimited` en un workspace real. Dos frentes:
+  - **Corto plazo:** ante un 429, esperar lo que indica `X-RateLimit-Reset` (*timestamp* Unix; la documentación no aclara si en segundos o milisegundos), acotado a 60 s, en lugar de `retry_delay` fijo.
+  - **Mediano plazo:** un backend o caché local que sincronice con ClickUp y evite consultar la API en cada comando (relacionado con la fase 12, caché local).
 
 ### Decisiones tomadas
 

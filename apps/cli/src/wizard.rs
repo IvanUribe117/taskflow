@@ -3,11 +3,19 @@
 //! Las preguntas son de la interfaz; las reglas son de `application` y `bootstrap`:
 //! el asistente recorre los campos del descriptor sin saber qué proveedor es.
 
+use std::path::PathBuf;
+
+use application::AppContext;
 use application::ports::{ConfigStore, SecretName, SecretStore, SecretString};
+use application::projects::{BrowseLocations, CreateProject, ProjectDraft};
 use application::settings::{AppSettings, SettingsChange};
 use bootstrap::registry::{self, FieldKind, FieldSpec, FieldValues};
 use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Confirm, Input, Password, Select};
+use dialoguer::{Confirm, Input, MultiSelect, Password, Select};
+use domain::project::{MatchRule, ProjectKind, ProjectSlug};
+use domain::task::flatten;
+
+use crate::presenter;
 
 /// 1. Si `store.path()` ya existe, preguntar si se reemplaza (por defecto, no). Si la
 ///    respuesta es no, terminar sin cambios.
@@ -65,7 +73,7 @@ pub fn config_init(store: &impl ConfigStore, secrets: &impl SecretStore) -> anyh
     for (name, value) in new_secrets {
         secrets.set(name, value)?;
     }
-    store.apply(&SettingsChange::Replace(settings))?;
+    store.apply(&SettingsChange::Replace(Box::new(settings)))?;
 
     println!("✔ Configuración guardada en {}", store.path().display());
     println!("Prueba la conexión con `taskflow config check`.");
@@ -96,4 +104,95 @@ fn ask(field: &FieldSpec, theme: &ColorfulTheme) -> anyhow::Result<Answer> {
             Ok(Answer::Secret(name, SecretString::from(value)))
         }
     }
+}
+
+/// `taskflow project add` (FR-29): crea un proyecto eligiendo sus ubicaciones del proveedor.
+///
+/// 1. `BrowseLocations` y `flatten` del árbol. Si está vacío, un error.
+/// 2. `MultiSelect` con una fila por nodo (`presenter::location_label`). Cada nodo elegido
+///    es una regla `MatchRule::Location` con su nivel y su id.
+/// 3. Etiquetas opcionales, separadas por coma (`Input` con `allow_empty(true)`): cada una
+///    es una regla `MatchRule::Tag`.
+/// 4. Slug (`Input` validado con `ProjectSlug::from_str`), nombre (por defecto, el del
+///    primer nodo elegido), tipo (`Select`: cliente o interno) y repositorio local
+///    opcional.
+/// 5. `CreateProject` y mostrar el resultado con `presenter::project_detail`.
+///
+/// # Errors
+///
+/// Fallo del proveedor, entrada cancelada o proyecto inválido (por ejemplo, sin reglas).
+pub async fn project_add(ctx: &AppContext) -> anyhow::Result<()> {
+    let theme = ColorfulTheme::default();
+
+    // 1. El árbol del proveedor, como lista.
+    let tree = BrowseLocations::new(ctx).execute().await?;
+    let nodes = flatten(&tree);
+    anyhow::ensure!(!nodes.is_empty(), "el proveedor no devolvió ubicaciones");
+
+    // 2. Ubicaciones elegidas → reglas de ubicación.
+    let labels: Vec<String> = nodes.iter().map(presenter::location_label).collect();
+    let chosen = MultiSelect::with_theme(&theme)
+        .with_prompt("Ubicaciones del proyecto (espacio para marcar, enter para seguir)")
+        .items(&labels)
+        .interact()?;
+    let mut rules: Vec<MatchRule> = chosen
+        .iter()
+        .map(|&i| MatchRule::Location {
+            level: nodes[i].segment.level.clone(),
+            id: nodes[i].segment.id.clone(),
+        })
+        .collect();
+
+    // 3. Etiquetas → reglas de etiqueta.
+    let tags: String = Input::with_theme(&theme)
+        .with_prompt("Etiquetas (separadas por coma, opcional)")
+        .allow_empty(true)
+        .interact_text()?;
+    rules.extend(
+        tags.split(',')
+            .map(str::trim)
+            .filter(|tag| !tag.is_empty())
+            .map(|tag| MatchRule::Tag(tag.to_owned())),
+    );
+
+    // 4. Slug, nombre, tipo y repositorio.
+    let slug: ProjectSlug = Input::<String>::with_theme(&theme)
+        .with_prompt("Slug (minúsculas, dígitos y guiones)")
+        .validate_with(|raw: &String| raw.parse::<ProjectSlug>().map(|_| ()))
+        .interact_text()?
+        .parse()?;
+    let default_name = chosen
+        .first()
+        .map(|&i| nodes[i].segment.name.clone())
+        .unwrap_or_default();
+    let name: String = Input::with_theme(&theme)
+        .with_prompt("Nombre")
+        .default(default_name)
+        .interact_text()?;
+    let kinds = [ProjectKind::Client, ProjectKind::Internal];
+    let kind = Select::with_theme(&theme)
+        .with_prompt("Tipo")
+        .items(&["cliente", "interno"])
+        .default(0)
+        .interact()?;
+    let repo: String = Input::with_theme(&theme)
+        .with_prompt("Repositorio local (opcional)")
+        .allow_empty(true)
+        .interact_text()?;
+
+    // 5. Crear y mostrar.
+    let detail = CreateProject::new(ctx)
+        .execute(ProjectDraft {
+            slug,
+            name,
+            kind: kinds[kind],
+            rules,
+            repo_path: (!repo.trim().is_empty()).then(|| PathBuf::from(repo.trim())),
+        })
+        .await?;
+    println!(
+        "✔ Proyecto creado\n\n{}",
+        presenter::project_detail(&detail)
+    );
+    Ok(())
 }

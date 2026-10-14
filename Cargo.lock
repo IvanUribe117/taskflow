@@ -24,8 +24,12 @@ name = "adapter-fs"
 version = "0.1.0"
 dependencies = [
  "application",
+ "async-trait",
  "directories",
+ "domain",
+ "serde",
  "tempfile",
+ "tokio",
  "toml",
  "toml_edit",
 ]
@@ -186,8 +190,8 @@ dependencies = [
  "adapter-fs",
  "adapter-keyring",
  "application",
- "async-trait",
  "domain",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
 ]

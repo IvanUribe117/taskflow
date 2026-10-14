@@ -114,6 +114,25 @@ pub(crate) struct ApiComment {
     pub date: String,
 }
 
+/// `GET /team/{team_id}/space`. Cada espacio trae muchos más campos; solo se usan `id` y `name`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ApiSpacesPage {
+    pub spaces: Vec<ApiNamedRef>,
+}
+
+/// `GET /space/{space_id}/folder`. Las subcarpetas vienen en la misma lista plana, con un
+/// campo `parent_folder` que se ignora: se muestran como hermanas.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ApiFoldersPage {
+    pub folders: Vec<ApiFolder>,
+}
+
+/// `GET /folder/{folder_id}/list` y `GET /space/{space_id}/list` (listas sin carpeta).
+#[derive(Debug, Deserialize)]
+pub(crate) struct ApiListsPage {
+    pub lists: Vec<ApiNamedRef>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

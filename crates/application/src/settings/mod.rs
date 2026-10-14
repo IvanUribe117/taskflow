@@ -11,7 +11,7 @@ pub use key::ConfigKey;
 
 use std::collections::HashSet;
 
-use domain::policy::WeightedPolicy;
+use domain::{policy::WeightedPolicy, project::ProjectSlug};
 use serde::{Deserialize, Serialize};
 
 use crate::tasks::GroupBy;
@@ -29,6 +29,8 @@ pub struct AppSettings {
     pub provider: ProviderSettings,
     #[serde(default)]
     pub policy: PolicySettings,
+    #[serde(default)]
+    pub projects: ProjectsSettings,
     #[serde(default)]
     pub ui: UiSettings,
 }
@@ -95,6 +97,27 @@ pub struct PolicySettings {
     pub in_review_bonus: i64,
 }
 
+/// Sección `[projects]` (§13.1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectsSettings {
+    /// Carpeta con un subdirectorio por proyecto. Relativa al directorio de `config.toml`,
+    /// o absoluta.
+    pub dir: String,
+    /// Slug del proyecto que usan los comandos que necesitan uno y no lo reciben
+    /// (`project show` sin argumento).
+    pub default: Option<String>,
+}
+
+impl Default for ProjectsSettings {
+    fn default() -> Self {
+        Self {
+            dir: "projects".to_owned(),
+            default: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UiSettings {
@@ -107,7 +130,11 @@ pub enum SettingsChange {
     /// `config set <key> <value>`. `value` llega como texto, tal cual lo escribió el usuario.
     Set { key: ConfigKey, value: String },
     /// `config init`: reemplaza el archivo completo.
-    Replace(AppSettings),
+    ///
+    /// En una `Box` porque `AppSettings` es mucho más grande que `Set`: un enum ocupa lo que
+    /// su variante más grande, así que cada `Set` cargaría con ese espacio vacío. Con la `Box`
+    /// la variante guarda solo un puntero (8 bytes) y la configuración vive en el heap.
+    Replace(Box<AppSettings>),
 }
 
 impl AppSettings {
@@ -120,6 +147,7 @@ impl AppSettings {
             provider,
             version: Self::CURRENT_VERSION,
             policy: PolicySettings::default(),
+            projects: ProjectsSettings::default(),
             ui: UiSettings::default(),
         }
     }
@@ -134,6 +162,8 @@ impl AppSettings {
     ///    → clave `provider.clickup.team_id`.
     /// 4. Un mismo nombre de estado (sin distinguir mayúsculas) no puede estar en dos listas
     ///    de `status_map` → clave `provider.status_map`, una vez por nombre repetido.
+    /// 5. `projects.default`, si existe, debe ser un `ProjectSlug` válido
+    ///    → clave `projects.default`. (Fase 5)
     ///
     /// # Errors
     ///
@@ -188,6 +218,12 @@ impl AppSettings {
                     format!("`{name}` appears in more than one list"),
                 ));
             }
+        }
+
+        if let Some(default) = &self.projects.default
+            && let Err(error) = default.parse::<ProjectSlug>()
+        {
+            issues.push(SettingsIssue::new("projects.default", error.to_string()));
         }
 
         if issues.is_empty() {
@@ -347,6 +383,25 @@ mod tests {
             .push("Complete".into());
 
         assert_eq!(issue_keys(settings.validate()), ["provider.status_map"]);
+    }
+
+    #[test]
+    fn projects_section_defaults() {
+        let settings = clickup("9001");
+
+        assert_eq!(settings.projects.dir, "projects");
+        assert_eq!(settings.projects.default, None);
+    }
+
+    #[test]
+    fn default_project_must_be_a_valid_slug() {
+        let mut settings = clickup("9001");
+        settings.projects.default = Some("ACME Corp".into());
+
+        assert_eq!(issue_keys(settings.validate()), ["projects.default"]);
+
+        settings.projects.default = Some("acme".into());
+        assert!(settings.validate().is_ok());
     }
 
     #[test]

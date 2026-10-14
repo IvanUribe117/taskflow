@@ -12,4 +12,8 @@ pub enum DomainError {
         "invalid project slug `{0}`: use 1-40 lowercase letters, digits or dashes, not starting with a dash"
     )]
     InvalidSlug(String),
+    #[error("unknown location level `{0}`: use workspace, space, folder, list or repository")]
+    InvalidLevel(String),
+    #[error("unknown project kind `{0}`: use client or internal")]
+    InvalidKind(String),
 }

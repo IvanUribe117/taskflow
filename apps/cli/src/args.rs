@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use application::settings::ConfigKey;
 use clap::{Parser, Subcommand};
 use domain::DomainError;
+use domain::project::ProjectSlug;
 use domain::task::TaskId;
 
 #[derive(Debug, Parser)]
@@ -35,6 +36,12 @@ pub enum Command {
         /// Máximo de tareas.
         #[arg(long)]
         limit: Option<usize>,
+        /// Agrupar por proyecto (ignora `ui.group_by`).
+        #[arg(long)]
+        by_project: bool,
+        /// Solo las tareas de este proyecto.
+        #[arg(long, value_name = "SLUG")]
+        project: Option<ProjectSlug>,
     },
     /// Detalle de una tarea con sus comentarios.
     Show {
@@ -46,6 +53,26 @@ pub enum Command {
     /// Ver y cambiar la configuración.
     #[command(subcommand)]
     Config(ConfigCommand),
+    /// Proyectos: agrupan tareas por cliente o por proyecto de trabajo.
+    #[command(subcommand)]
+    Project(ProjectCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectCommand {
+    /// Todos los proyectos con sus reglas.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Un proyecto. Sin SLUG, usa `projects.default`.
+    Show {
+        slug: Option<ProjectSlug>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Asistente: elige espacios, carpetas o listas del proveedor y crea el proyecto.
+    Add,
 }
 
 #[derive(Debug, Subcommand)]
@@ -97,7 +124,9 @@ mod tests {
             cli.command,
             Command::Today {
                 json: false,
-                limit: None
+                limit: None,
+                by_project: false,
+                project: None,
             }
         ));
         assert_eq!(cli.config, None);
@@ -111,7 +140,8 @@ mod tests {
             cli.command,
             Command::Today {
                 json: true,
-                limit: Some(5)
+                limit: Some(5),
+                ..
             }
         ));
     }
@@ -146,6 +176,43 @@ mod tests {
     #[test]
     fn unknown_config_keys_are_rejected() {
         assert!(parse(&["config", "get", "policy.nope"]).is_err());
+    }
+
+    #[test]
+    fn today_by_project_and_filter() {
+        let cli = parse(&["today", "--by-project", "--project", "acme"]).unwrap();
+
+        let Command::Today {
+            by_project,
+            project,
+            ..
+        } = cli.command
+        else {
+            panic!("expected today");
+        };
+        assert!(by_project);
+        assert_eq!(project.map(|p| p.to_string()).as_deref(), Some("acme"));
+    }
+
+    #[test]
+    fn invalid_project_slugs_are_rejected() {
+        assert!(parse(&["today", "--project", "ACME Corp"]).is_err());
+    }
+
+    #[test]
+    fn project_subcommands() {
+        assert!(matches!(
+            parse(&["project", "list"]).unwrap().command,
+            Command::Project(ProjectCommand::List { json: false })
+        ));
+        assert!(matches!(
+            parse(&["project", "show"]).unwrap().command,
+            Command::Project(ProjectCommand::Show { slug: None, .. })
+        ));
+        assert!(matches!(
+            parse(&["project", "add"]).unwrap().command,
+            Command::Project(ProjectCommand::Add)
+        ));
     }
 
     #[test]

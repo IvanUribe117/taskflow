@@ -11,4 +11,7 @@ pub enum AppError {
     Provider(#[from] ProviderError),
     #[error(transparent)]
     Repo(#[from] RepoError),
+    /// Datos de entrada que no cumplen las reglas del caso de uso.
+    #[error("{0}")]
+    InvalidInput(String),
 }

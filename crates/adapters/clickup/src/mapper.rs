@@ -7,12 +7,13 @@ use application::ports::ProviderError;
 use chrono::{DateTime, Utc};
 use domain::DomainError;
 use domain::task::{
-    Comment, LocationLevel, LocationSegment, Priority, Task, TaskId, TaskLocation, UserId,
+    Comment, LocationLevel, LocationNode, LocationSegment, Priority, Task, TaskId, TaskLocation,
+    UserId,
 };
 use thiserror::Error;
 
 use crate::StatusMap;
-use crate::api_types::{ApiComment, ApiPriority, ApiTask, ApiUser};
+use crate::api_types::{ApiComment, ApiNamedRef, ApiPriority, ApiTask, ApiUser};
 
 /// Datos de `ClickUp` que no se pueden traducir al dominio.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -121,6 +122,22 @@ pub(crate) fn map_task(task: ApiTask, statuses: &StatusMap) -> Result<Task, MapE
         comments,
     };
     Ok(map_task)
+}
+
+/// Un nodo del árbol de ubicaciones. Recibe `item` **por valor**: mueve su `id` y su `name`.
+pub(crate) fn location_node(
+    level: LocationLevel,
+    item: ApiNamedRef,
+    children: Vec<LocationNode>,
+) -> LocationNode {
+    LocationNode {
+        segment: LocationSegment {
+            level,
+            id: item.id,
+            name: item.name,
+        },
+        children,
+    }
 }
 
 /// - `author`: `user.username`, o el id del usuario si no tiene nombre.
@@ -338,6 +355,22 @@ mod tests {
         let comment = Comment::try_from(api).unwrap();
 
         assert_eq!(comment.author, "-4270804");
+    }
+
+    #[test]
+    fn location_nodes_take_id_name_and_children() {
+        let child = LocationNode::leaf(LocationLevel::List, "L1", "Sprint");
+        let folder = ApiNamedRef {
+            id: "F1".into(),
+            name: "Backend".into(),
+        };
+
+        let node = location_node(LocationLevel::Folder, folder, vec![child.clone()]);
+
+        assert_eq!(node.segment.level, LocationLevel::Folder);
+        assert_eq!(node.segment.id, "F1");
+        assert_eq!(node.segment.name, "Backend");
+        assert_eq!(node.children, [child]);
     }
 
     #[test]

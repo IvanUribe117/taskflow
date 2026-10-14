@@ -4,8 +4,8 @@
 //! Cualquier interfaz (CLI hoy, Tauri o web mañana) obtiene la lógica completa con:
 //!
 //! ```ignore
-//! let settings = bootstrap::config_store(None)?.load()?;
-//! let ctx = bootstrap::build(&settings, &bootstrap::secret_store())?;
+//! let store = bootstrap::config_store(None)?;
+//! let ctx = bootstrap::build(&store.load()?, &bootstrap::secret_store(), store.path())?;
 //! ```
 #![warn(clippy::pedantic)]
 
@@ -13,4 +13,4 @@ mod build;
 mod clickup;
 pub mod registry;
 
-pub use build::{BuildError, NoProjects, build, config_store, secret_store};
+pub use build::{BuildError, build, config_store, projects_dir, secret_store};

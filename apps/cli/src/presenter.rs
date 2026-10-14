@@ -1,10 +1,11 @@
 //! Presentación en la terminal: DTOs → texto. Funciones puras (sin imprimir), así se
 //! pueden probar comparando cadenas.
 
-use application::dto::{TaskDetail, TaskView, TodayReport};
+use application::dto::{ProjectDetail, TaskDetail, TaskGroup, TaskView, TodayReport};
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use comfy_table::Table;
 use comfy_table::presets::NOTHING;
+use domain::task::FlatNode;
 use serde::Serialize;
 
 /// Vencimiento relativo al día local `today`:
@@ -34,7 +35,7 @@ pub fn due_label(due: Option<DateTime<Utc>>, offset: FixedOffset, today: NaiveDa
 
 /// La tabla de `today`. Por cada grupo:
 ///
-/// - Si tiene proyecto, una línea con su nombre antes de la tabla.
+/// - Su título ([`group_title`]), si tiene, en una línea antes de la tabla.
 /// - Una tabla sin bordes (`presets::NOTHING`) con las columnas
 ///   `#`, `ID`, `Title`, `Status`, `Priority`, `Due`, `Comments`.
 /// - `#` empieza en 1 y sigue contando entre grupos.
@@ -42,11 +43,17 @@ pub fn due_label(due: Option<DateTime<Utc>>, offset: FixedOffset, today: NaiveDa
 /// Sin tareas: `"No tienes tareas pendientes."`.
 #[must_use]
 pub fn today(report: &TodayReport, offset: FixedOffset, today: NaiveDate) -> String {
+    let groups: Vec<&TaskGroup> = report
+        .groups
+        .iter()
+        .filter(|g| !g.tasks.is_empty())
+        .collect();
+    let among_others = groups.len() > 1;
     let mut blocks = Vec::new();
     let mut number = 0;
-    for group in report.groups.iter().filter(|g| !g.tasks.is_empty()) {
-        if let Some(project) = &group.project {
-            blocks.push(project.name.clone());
+    for group in groups {
+        if let Some(title) = group_title(group, among_others) {
+            blocks.push(title);
         }
         let mut table = table();
         for task in &group.tasks {
@@ -59,6 +66,108 @@ pub fn today(report: &TodayReport, offset: FixedOffset, today: NaiveDate) -> Str
         return "No tienes tareas pendientes.".to_owned();
     }
     blocks.join("\n\n")
+}
+
+/// El título de un grupo de `today`:
+///
+/// - Con proyecto: `"ACME Corp (cliente)"`, con el tipo de [`kind_label`].
+/// - Sin proyecto y con otros grupos alrededor (`among_others`): `"Sin proyecto"`.
+/// - Sin proyecto y solo (la lista sin agrupar): `None`, sin título.
+#[must_use]
+pub fn group_title(group: &TaskGroup, among_others: bool) -> Option<String> {
+    match &group.project {
+        Some(project) => Some(format!("{} ({})", project.name, kind_label(&project.kind))),
+        None if among_others => Some("Sin proyecto".to_owned()),
+        None => None,
+    }
+}
+
+/// `"client"` → `"cliente"`, `"internal"` → `"interno"`; cualquier otro, tal cual.
+#[must_use]
+pub fn kind_label(kind: &str) -> &str {
+    match kind {
+        "client" => "cliente",
+        "internal" => "interno",
+        other => other,
+    }
+}
+
+/// La tabla de `project list`, sin bordes, con las columnas
+/// `Slug`, `Name`, `Kind` (con [`kind_label`]), `Rules` (cuántas) y `Repo` (o `—`).
+///
+/// Sin proyectos: `"No hay proyectos. Crea uno con `taskflow project add`."`.
+#[must_use]
+pub fn projects(projects: &[ProjectDetail]) -> String {
+    if projects.is_empty() {
+        return "No hay proyectos. Crea uno con `taskflow project add`.".to_owned();
+    }
+    let mut table = Table::new();
+    table
+        .load_preset(NOTHING)
+        .set_header(["Slug", "Name", "Kind", "Rules", "Repo"]);
+    for project in projects {
+        table.add_row(vec![
+            project.slug.clone(),
+            project.name.clone(),
+            kind_label(&project.kind).to_owned(),
+            project.rules.len().to_string(),
+            project.repo_path.clone().unwrap_or_else(|| "—".to_owned()),
+        ]);
+    }
+    table.to_string()
+}
+
+/// El detalle de `project show`:
+///
+/// ```text
+/// ACME Corp (acme) · cliente
+/// Repositorio: /Users/ivan/code/acme        (solo si tiene)
+/// Bonificación de prioridad: 20             (solo si no es 0)
+/// Reglas:
+///   - list 901100200300
+///   - tag acme
+/// ```
+#[must_use]
+pub fn project_detail(project: &ProjectDetail) -> String {
+    let mut lines = vec![format!(
+        "{} ({}) · {}",
+        project.name,
+        project.slug,
+        kind_label(&project.kind)
+    )];
+    if let Some(repo) = &project.repo_path {
+        lines.push(format!("Repositorio: {repo}"));
+    }
+    if project.priority_boost != 0 {
+        lines.push(format!(
+            "Bonificación de prioridad: {}",
+            project.priority_boost
+        ));
+    }
+    lines.push("Reglas:".to_owned());
+    for rule in &project.rules {
+        lines.push(format!("  - {rule}"));
+    }
+    lines.join("\n")
+}
+
+/// Una fila del selector de `project add`: dos espacios por nivel de profundidad, el
+/// nombre (o el id si no tiene) y el nivel entre paréntesis.
+///
+/// ```text
+/// Clientes (space)
+///   Backend (folder)
+///     ACME – Sprint (list)
+/// ```
+#[must_use]
+pub fn location_label(node: &FlatNode<'_>) -> String {
+    let segment = node.segment;
+    let name = if segment.name.is_empty() {
+        &segment.id
+    } else {
+        &segment.name
+    };
+    format!("{}{name} ({})", "  ".repeat(node.depth), segment.level)
 }
 
 /// El detalle de `show`:
@@ -398,6 +507,152 @@ mod tests {
         assert!(!table.contains(long), "{table}");
         assert!(table.contains(&truncate(long, TITLE_WIDTH)), "{table}");
         assert!(full.contains(long), "{full}");
+    }
+
+    fn acme() -> ProjectView {
+        ProjectView {
+            slug: "acme".into(),
+            name: "ACME Corp".into(),
+            kind: "client".into(),
+        }
+    }
+
+    #[test]
+    fn group_titles() {
+        let with_project = TaskGroup {
+            project: Some(acme()),
+            tasks: vec![],
+        };
+        let without = TaskGroup {
+            project: None,
+            tasks: vec![],
+        };
+
+        assert_eq!(
+            group_title(&with_project, false).as_deref(),
+            Some("ACME Corp (cliente)")
+        );
+        assert_eq!(group_title(&without, true).as_deref(), Some("Sin proyecto"));
+        assert_eq!(group_title(&without, false), None);
+    }
+
+    #[test]
+    fn kind_labels() {
+        assert_eq!(kind_label("client"), "cliente");
+        assert_eq!(kind_label("internal"), "interno");
+        assert_eq!(kind_label("partner"), "partner");
+    }
+
+    #[test]
+    fn today_titles_the_unassigned_group_when_grouped() {
+        let report = TodayReport {
+            generated_at: at("2026-10-10T15:00:00Z"),
+            groups: vec![
+                TaskGroup {
+                    project: Some(acme()),
+                    tasks: vec![view("a1", "Fix invoice rounding")],
+                },
+                TaskGroup {
+                    project: None,
+                    tasks: vec![view("b2", "Upgrade CI runners")],
+                },
+            ],
+        };
+
+        let text = today(&report, bogota(), day("2026-10-10"));
+
+        assert!(text.contains("ACME Corp (cliente)"), "{text}");
+        let unassigned = text.find("Sin proyecto").expect("unassigned title");
+        assert!(
+            unassigned < text.find("Upgrade CI runners").unwrap(),
+            "{text}"
+        );
+    }
+
+    fn detail(slug: &str, repo: Option<&str>, boost: i64) -> ProjectDetail {
+        ProjectDetail {
+            slug: slug.into(),
+            name: format!("{} Corp", slug.to_uppercase()),
+            kind: "client".into(),
+            rules: vec!["list 901100200300".into(), "tag acme".into()],
+            repo_path: repo.map(str::to_owned),
+            priority_boost: boost,
+        }
+    }
+
+    #[test]
+    fn projects_table() {
+        let text = projects(&[
+            detail("acme", Some("/code/acme"), 0),
+            detail("zeta", None, 0),
+        ]);
+
+        let acme = text.lines().find(|l| l.contains("acme")).expect("acme row");
+        assert!(acme.contains("ACME Corp"), "{text}");
+        assert!(acme.contains("cliente"), "{text}");
+        assert!(acme.contains('2'), "{text}");
+        assert!(acme.contains("/code/acme"), "{text}");
+        let zeta = text.lines().find(|l| l.contains("zeta")).expect("zeta row");
+        assert!(zeta.contains('—'), "{text}");
+        assert!(text.contains("Slug"), "{text}");
+    }
+
+    #[test]
+    fn projects_table_when_empty() {
+        assert_eq!(
+            projects(&[]),
+            "No hay proyectos. Crea uno con `taskflow project add`."
+        );
+    }
+
+    #[test]
+    fn project_detail_shows_optional_lines_only_when_set() {
+        let full = project_detail(&detail("acme", Some("/code/acme"), 20));
+        let bare = project_detail(&detail("acme", None, 0));
+
+        for expected in [
+            "ACME Corp (acme) · cliente",
+            "Repositorio: /code/acme",
+            "Bonificación de prioridad: 20",
+            "Reglas:",
+            "  - list 901100200300",
+            "  - tag acme",
+        ] {
+            assert!(full.contains(expected), "missing `{expected}` in:\n{full}");
+        }
+        assert!(!bare.contains("Repositorio"), "{bare}");
+        assert!(!bare.contains("Bonificación"), "{bare}");
+    }
+
+    #[test]
+    fn location_labels_are_indented_by_depth() {
+        use domain::task::{LocationLevel, LocationSegment};
+
+        let folder = LocationSegment {
+            level: LocationLevel::Folder,
+            id: "F1".into(),
+            name: "Backend".into(),
+        };
+        let unnamed = LocationSegment {
+            level: LocationLevel::Space,
+            id: "S1".into(),
+            name: String::new(),
+        };
+
+        assert_eq!(
+            location_label(&FlatNode {
+                depth: 1,
+                segment: &folder
+            }),
+            "  Backend (folder)"
+        );
+        assert_eq!(
+            location_label(&FlatNode {
+                depth: 0,
+                segment: &unnamed
+            }),
+            "S1 (space)"
+        );
     }
 
     #[test]

@@ -52,7 +52,7 @@ pub async fn run(
         }
         ConfigCommand::Check => {
             let settings = store.load()?;
-            let ctx = bootstrap::build(&settings, secrets)?;
+            let ctx = bootstrap::build(&settings, secrets, store.path())?;
             let me = ctx.tasks.current_user().await?;
             println!(
                 "✔ Configuración válida · conectado como usuario {}",

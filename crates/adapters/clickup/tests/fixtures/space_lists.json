@@ -1,0 +1,10 @@
+{
+  "lists": [
+    {
+      "id": "901100200900",
+      "name": "Soporte",
+      "folder": { "id": "90110004", "name": "hidden", "hidden": true, "access": true },
+      "space": { "id": "90110001", "name": "Clientes", "access": true }
+    }
+  ]
+}

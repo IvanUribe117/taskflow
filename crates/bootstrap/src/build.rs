@@ -1,16 +1,12 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use adapter_fs::FsConfigStore;
+use adapter_fs::{FsConfigStore, FsProjectRepository};
 use adapter_keyring::{EnvSecretStore, KeyringSecretStore, LayeredSecretStore};
 use application::AppContext;
-use application::ports::{
-    ProjectRepository, ProviderError, RepoError, SecretError, SecretName, SecretStore, SystemClock,
-};
+use application::ports::{ProviderError, SecretError, SecretName, SecretStore, SystemClock};
 use application::settings::{AppSettings, ConfigError};
-use async_trait::async_trait;
 use domain::policy::WeightedPolicy;
-use domain::project::Project;
 use thiserror::Error;
 
 use crate::registry;
@@ -61,33 +57,47 @@ pub fn secret_store() -> LayeredSecretStore {
 /// Arma el `AppContext` (§11.1):
 ///
 /// - `tasks`: el adaptador que construye el descriptor de `settings.provider.kind`.
-/// - `projects`: [`NoProjects`] hasta la fase 5.
+/// - `projects`: `FsProjectRepository` en [`projects_dir`].
 /// - `policy`: `WeightedPolicy` con los pesos de `settings.policy`.
 /// - `clock`: `SystemClock`.
+///
+/// `config_path` es la ruta de `config.toml`: los proyectos se buscan junto a ella.
 ///
 /// # Errors
 ///
 /// Los del `build` del descriptor (falta el token, falta la sección...).
-pub fn build(settings: &AppSettings, secrets: &dyn SecretStore) -> Result<AppContext, BuildError> {
+pub fn build(
+    settings: &AppSettings,
+    secrets: &dyn SecretStore,
+    config_path: &Path,
+) -> Result<AppContext, BuildError> {
     let descriptor = registry::find(settings.provider.kind);
     Ok(AppContext {
         tasks: (descriptor.build)(settings, secrets)?,
-        projects: Arc::new(NoProjects),
+        projects: Arc::new(FsProjectRepository::new(projects_dir(
+            settings,
+            config_path,
+        ))),
         policy: Arc::new(WeightedPolicy::from(&settings.policy)),
         clock: Arc::new(SystemClock),
     })
 }
 
-/// Objeto nulo: un `ProjectRepository` sin proyectos. Permite usar la aplicación antes de
-/// la fase 5 sin `Option` ni casos especiales en los casos de uso.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoProjects;
-
-#[async_trait]
-impl ProjectRepository for NoProjects {
-    async fn list(&self) -> Result<Vec<Project>, RepoError> {
-        Ok(Vec::new())
-    }
+/// La carpeta de proyectos: `settings.projects.dir` relativa a la carpeta de `config.toml`.
+///
+/// Si `projects.dir` es absoluta, se usa tal cual. Pista: `Path::join` ya hace eso solo.
+///
+/// ```text
+/// config_path = /Users/ivan/.config/taskflow/config.toml
+/// dir = "projects"        → /Users/ivan/.config/taskflow/projects
+/// dir = "/srv/projects"   → /srv/projects
+/// ```
+#[must_use]
+pub fn projects_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(&settings.projects.dir)
 }
 
 #[cfg(test)]
@@ -121,22 +131,69 @@ mod tests {
     fn builds_the_context_from_settings() {
         let secrets = MemorySecretStore::default().with(SecretName::ClickUpToken, "pk_123");
 
-        let ctx = build(&settings(), &secrets).unwrap();
+        let ctx = build(
+            &settings(),
+            &secrets,
+            Path::new("/tmp/taskflow/config.toml"),
+        )
+        .unwrap();
 
         assert_eq!(ctx.tasks.name(), "clickup");
     }
 
     #[test]
     fn missing_token_explains_how_to_fix_it() {
-        let error = build(&settings(), &MemorySecretStore::default()).unwrap_err();
+        let error = build(
+            &settings(),
+            &MemorySecretStore::default(),
+            Path::new("/tmp/taskflow/config.toml"),
+        )
+        .unwrap_err();
 
         let message = error.to_string();
         assert!(message.contains("TASKFLOW_CLICKUP_TOKEN"), "{message}");
         assert!(message.contains("config init"), "{message}");
     }
 
+    #[test]
+    fn projects_live_next_to_the_config_file() {
+        let dir = projects_dir(
+            &settings(),
+            Path::new("/home/ivan/.config/taskflow/config.toml"),
+        );
+
+        assert_eq!(dir, Path::new("/home/ivan/.config/taskflow/projects"));
+    }
+
+    #[test]
+    fn absolute_projects_dir_is_used_as_is() {
+        let mut settings = settings();
+        settings.projects.dir = "/srv/projects".into();
+
+        let dir = projects_dir(
+            &settings,
+            Path::new("/home/ivan/.config/taskflow/config.toml"),
+        );
+
+        assert_eq!(dir, Path::new("/srv/projects"));
+    }
+
     #[tokio::test]
-    async fn no_projects_is_empty() {
-        assert!(NoProjects.list().await.unwrap().is_empty());
+    async fn the_context_reads_projects_from_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("projects/acme/project.toml");
+        std::fs::create_dir_all(project.parent().unwrap()).unwrap();
+        std::fs::write(
+            &project,
+            "slug = \"acme\"\nname = \"ACME\"\nkind = \"client\"\n",
+        )
+        .unwrap();
+        let secrets = MemorySecretStore::default().with(SecretName::ClickUpToken, "pk_123");
+
+        let ctx = build(&settings(), &secrets, &tmp.path().join("config.toml")).unwrap();
+
+        let projects = ctx.projects.list().await.unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].slug.as_str(), "acme");
     }
 }

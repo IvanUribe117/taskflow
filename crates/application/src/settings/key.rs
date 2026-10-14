@@ -26,6 +26,8 @@ impl ConfigKey {
         "policy.due_this_week_bonus",
         "policy.pending_comment_weight",
         "policy.in_review_bonus",
+        "projects.dir",
+        "projects.default",
         "ui.group_by",
     ];
 

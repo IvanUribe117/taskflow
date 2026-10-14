@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
 use domain::policy::WeightedPolicy;
-use domain::project::Project;
-use domain::task::{Comment, Task, TaskId, UserId};
+use domain::project::{Project, ProjectSlug};
+use domain::task::{Comment, LocationNode, Task, TaskId, UserId};
 
 use crate::AppContext;
 use crate::ports::{
@@ -52,6 +52,7 @@ pub struct FakeTaskProvider {
     tasks: Vec<Task>,
     comments: HashMap<TaskId, Vec<Comment>>,
     unauthorized: bool,
+    locations: Vec<LocationNode>,
     queries: Mutex<Vec<TaskQuery>>,
     comment_requests: Mutex<Vec<TaskId>>,
 }
@@ -63,6 +64,7 @@ impl FakeTaskProvider {
             tasks: Vec::new(),
             comments: HashMap::new(),
             unauthorized: false,
+            locations: Vec::new(),
             queries: Mutex::default(),
             comment_requests: Mutex::default(),
         }
@@ -78,6 +80,12 @@ impl FakeTaskProvider {
     pub fn with_comments(mut self, task_id: &str, comments: Vec<Comment>) -> Self {
         let id = TaskId::new(task_id).expect("valid task id in test");
         self.comments.insert(id, comments);
+        self
+    }
+
+    #[must_use]
+    pub fn with_locations(mut self, locations: Vec<LocationNode>) -> Self {
+        self.locations = locations;
         self
     }
 
@@ -143,15 +151,52 @@ impl TaskProvider for FakeTaskProvider {
         self.comment_requests.lock().expect("lock").push(id.clone());
         Ok(self.comments.get(id).cloned().unwrap_or_default())
     }
+
+    async fn locations(&self) -> Result<Vec<LocationNode>, ProviderError> {
+        self.check_auth()?;
+        Ok(self.locations.clone())
+    }
 }
 
+/// Proyectos en memoria. `create` los agrega; `list` los devuelve ordenados por slug.
 #[derive(Debug, Default)]
-pub struct FakeProjectRepository(pub Vec<Project>);
+pub struct FakeProjectRepository {
+    projects: Mutex<Vec<Project>>,
+}
+
+impl FakeProjectRepository {
+    pub fn new(projects: Vec<Project>) -> Self {
+        Self {
+            projects: Mutex::new(projects),
+        }
+    }
+}
 
 #[async_trait]
 impl ProjectRepository for FakeProjectRepository {
     async fn list(&self) -> Result<Vec<Project>, RepoError> {
-        Ok(self.0.clone())
+        let mut projects = self.projects.lock().expect("lock").clone();
+        projects.sort_by(|a, b| a.slug.cmp(&b.slug));
+        Ok(projects)
+    }
+
+    async fn get(&self, slug: &ProjectSlug) -> Result<Project, RepoError> {
+        self.projects
+            .lock()
+            .expect("lock")
+            .iter()
+            .find(|p| &p.slug == slug)
+            .cloned()
+            .ok_or_else(|| RepoError::NotFound(slug.to_string()))
+    }
+
+    async fn create(&self, project: &Project) -> Result<(), RepoError> {
+        let mut projects = self.projects.lock().expect("lock");
+        if projects.iter().any(|p| p.slug == project.slug) {
+            return Err(RepoError::AlreadyExists(project.slug.to_string()));
+        }
+        projects.push(project.clone());
+        Ok(())
     }
 }
 
@@ -166,7 +211,7 @@ pub fn context(
     let tasks = Arc::new(tasks);
     let ctx = AppContext {
         tasks: tasks.clone(),
-        projects: Arc::new(FakeProjectRepository(projects)),
+        projects: Arc::new(FakeProjectRepository::new(projects)),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };

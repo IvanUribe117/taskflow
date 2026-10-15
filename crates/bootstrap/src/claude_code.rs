@@ -26,6 +26,8 @@ pub(crate) fn claude_code_config(settings: &AppSettings) -> ClaudeCodeConfig {
         effort: ai.effort.clone(),
         timeout: Duration::from_secs(ai.timeout_secs),
         read_repo: ai.read_repo,
+        report_language: ai.report_language.clone(),
+        agent_language: ai.agent_language.clone(),
         ..ClaudeCodeConfig::default()
     }
 }

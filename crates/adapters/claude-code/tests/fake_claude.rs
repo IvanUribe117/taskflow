@@ -64,6 +64,7 @@ fn input(repo: Option<PathBuf>) -> SummaryInput {
         }),
         context: BuiltContext::default(),
         note: None,
+        previous: None,
     }
 }
 
@@ -191,6 +192,7 @@ async fn summarize_work_resumes_the_agent_conversation_inside_the_repo() {
         changes: None,
         agent_session: Some("1b4e28ba-2fa1-41d2-883f-0016d3cca427".into()),
         context: BuiltContext::default(),
+        since: None,
     };
 
     let work = summarizer(&program, Duration::from_secs(10))

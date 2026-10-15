@@ -149,6 +149,12 @@ pub struct AiSettings {
     pub max_comments: usize,
     /// Si el proveedor puede leer el repositorio del proyecto (`repo_path`), solo lectura.
     pub read_repo: bool,
+    /// El idioma de lo que lees tú: análisis, planes, reportes y la conversación con el
+    /// agente.
+    pub report_language: String,
+    /// El idioma de lo que va al repositorio: el código, sus comentarios, los mensajes de
+    /// commit y el prompt del agente.
+    pub agent_language: String,
 }
 
 impl Default for AiSettings {
@@ -162,6 +168,8 @@ impl Default for AiSettings {
             max_description_chars: 4_000,
             max_comments: 10,
             read_repo: true,
+            report_language: "español".to_owned(),
+            agent_language: "English".to_owned(),
         }
     }
 }

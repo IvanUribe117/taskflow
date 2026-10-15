@@ -49,6 +49,13 @@ pub trait SessionStore: Send + Sync {
 
     fn work_report_path(&self, task: &TaskId) -> PathBuf;
 
+    /// Lee y **borra** `work-report.md`: al empezar una sesión nueva, el de la anterior no
+    /// debe publicarse por error. `None` si no había.
+    async fn take_work_report(&self, task: &TaskId) -> Result<Option<String>, RepoError>;
+
+    /// La última sesión archivada de una tarea, si hay (para continuarla).
+    async fn last_archived(&self, task: &TaskId) -> Result<Option<WorkSession>, RepoError>;
+
     /// Guarda la sesión terminada en el archivo y deja de haber sesión activa.
     ///
     /// Recibe la sesión **por valor**: después de archivarla ya no se puede usar, y el

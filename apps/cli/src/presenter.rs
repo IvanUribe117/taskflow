@@ -4,9 +4,9 @@
 use std::path::Path;
 
 use application::dto::{
-    CloseOptions, CloseResult, ContextBlock, ContextPreview, DailyPlan, HistoryItem, ProjectDetail,
-    SectionView, SessionOutcome, SessionView, StatusOptionView, TaskDetail, TaskGroup, TaskView,
-    TimerView, TodayReport,
+    CloseOptions, CloseResult, ContextBlock, ContextPreview, DailyPlan, HistoryItem, PreviousView,
+    ProjectDetail, SectionView, SessionOutcome, SessionView, StatusOptionView, TaskDetail,
+    TaskGroup, TaskView, TimerView, TodayReport,
 };
 use application::ports::{Complexity, TaskSummary};
 use application::session::duration_label;
@@ -641,10 +641,13 @@ pub fn session(view: &SessionView, offset: FixedOffset) -> String {
     }
     match (view.report, &view.report_error) {
         (Some("ready"), _) => {
-            lines.push(format!("Reporte: listo · {}", view.report_path.display()));
+            lines.push(format!(
+                "Reporte: listo · {}",
+                self::path(&view.report_path)
+            ));
             lines.push(format!(
                 "Prompt para el agente: {}",
-                view.agent_prompt_path.display()
+                self::path(&view.agent_prompt_path)
             ));
         }
         (_, Some(reason)) => lines.push(format!("Reporte: falló: {reason}")),
@@ -673,9 +676,31 @@ pub fn session_outcome(outcome: &SessionOutcome, offset: FixedOffset) -> String 
     let mut lines = vec![session(&outcome.session, offset)];
     lines.extend(outcome.warnings.iter().map(|w| format!("⚠ {w}")));
     if let Some(path) = &outcome.archived_to {
-        lines.push(format!("Sesión archivada en {}", path.display()));
+        lines.push(format!("Sesión archivada en {}", self::path(path)));
     }
     lines.join("\n")
+}
+
+/// `"Esta tarea ya se trabajó: sesión cerrada el 2026-10-14 18:00 · reporte publicado ·
+/// con conversación del agente."`
+#[must_use]
+pub fn previous_session(previous: &PreviousView, offset: FixedOffset) -> String {
+    let mut text = format!(
+        "Esta tarea ya se trabajó: sesión {} el {}",
+        session_state_label(previous.state),
+        previous
+            .ended_at
+            .with_timezone(&offset)
+            .format("%Y-%m-%d %H:%M")
+    );
+    if previous.published {
+        text.push_str(" · reporte publicado");
+    }
+    if previous.has_agent {
+        text.push_str(" · con conversación del agente");
+    }
+    text.push('.');
+    text
 }
 
 /// La pregunta antes de detener un contador ajeno a la sesión.
@@ -691,6 +716,13 @@ pub fn running_timer(timer: &TimerView, now: DateTime<Utc>, offset: FixedOffset)
         timer.started_at.with_timezone(&offset).format("%H:%M"),
         duration_label(now - timer.started_at)
     )
+}
+
+/// Una ruta entre comillas: `"/Users/ivan/Library/Application Support/taskflow/…"`. Sin
+/// ellas, el espacio de `Application Support` corta la ruta al copiarla o al hacer clic.
+#[must_use]
+pub fn path(path: &Path) -> String {
+    format!("\"{}\"", path.display())
 }
 
 /// Cualquier DTO como JSON legible (`--json`).
@@ -1369,8 +1401,8 @@ mod tests {
             "Fix rounding (86b1)\n\
              Estado: esperando tu aprobación · contador corriendo · 1 h 25 min\n\
              Proyecto: idk-base\n\
-             Reporte: listo · /s/86b1/report.md\n\
-             Prompt para el agente: /s/86b1/agent-prompt.md\n\
+             Reporte: listo · \"/s/86b1/report.md\"\n\
+             Prompt para el agente: \"/s/86b1/agent-prompt.md\"\n\
              Siguiente: taskflow report show · taskflow approve · taskflow reject \"<qué falta>\" · taskflow abort"
         );
     }
@@ -1406,8 +1438,23 @@ mod tests {
 
         assert!(text.contains("Estado: cerrada"), "{text}");
         assert!(
-            text.ends_with("⚠ no se pudo notificar\nSesión archivada en /s/archive/x.json"),
+            text.ends_with("⚠ no se pudo notificar\nSesión archivada en \"/s/archive/x.json\""),
             "{text}"
+        );
+    }
+
+    #[test]
+    fn previous_session_line() {
+        let previous = PreviousView {
+            ended_at: at("2026-10-14T23:00:00Z"),
+            state: "closed",
+            published: true,
+            has_agent: true,
+        };
+
+        assert_eq!(
+            previous_session(&previous, bogota()),
+            "Esta tarea ya se trabajó: sesión cerrada el 2026-10-14 18:00 · reporte publicado · con conversación del agente."
         );
     }
 

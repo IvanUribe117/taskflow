@@ -124,6 +124,43 @@ impl SessionStore for FsSessionStore {
         self.task_dir(task).join(WORK_REPORT)
     }
 
+    async fn take_work_report(&self, task: &TaskId) -> Result<Option<String>, RepoError> {
+        let path = self.work_report_path(task);
+        match read(&path) {
+            Ok(text) => {
+                fs::remove_file(&path).map_err(storage(&path))?;
+                Ok(Some(text))
+            }
+            Err(RepoError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Los archivos son `<fecha>_<tarea>.json`: el último por nombre es el más reciente.
+    async fn last_archived(&self, task: &TaskId) -> Result<Option<WorkSession>, RepoError> {
+        let dir = self.dir.join(ARCHIVE);
+        let suffix = format!("_{}.json", safe_name(task.as_str()));
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(storage(&dir)(e)),
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(Result::ok)
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|name| name.ends_with(&suffix))
+            .collect();
+        names.sort();
+        let Some(last) = names.last() else {
+            return Ok(None);
+        };
+        let path = dir.join(last);
+        let text = read(&path)?;
+        serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|e| RepoError::Invalid(format!("{}: {e}", path.display())))
+    }
+
     /// Primero escribe el archivo y **después** borra `active.json`: si algo falla en
     /// medio, la sesión sigue activa y no se pierde.
     async fn archive(&self, session: WorkSession) -> Result<PathBuf, RepoError> {
@@ -217,6 +254,15 @@ mod tests {
         let work = store.save_work_report(&id, "## Hecho").await.unwrap();
         assert_eq!(work, dir.path().join("86b1/work-report.md"));
         assert_eq!(store.load_work_report(&id).await.unwrap(), "## Hecho");
+        assert_eq!(
+            store.take_work_report(&id).await.unwrap().as_deref(),
+            Some("## Hecho")
+        );
+        assert_eq!(
+            store.take_work_report(&id).await.unwrap(),
+            None,
+            "taken: it is gone"
+        );
         let missing = TaskId::new("otra").unwrap();
         assert!(matches!(
             store.load_report(&missing).await,
@@ -231,8 +277,12 @@ mod tests {
         store.save(&session()).await.unwrap();
 
         let path = store.archive(session()).await.unwrap();
+        let id = TaskId::new("86b1").unwrap();
 
         assert_eq!(path, dir.path().join("archive/2026-10-14_150000_86b1.json"));
+        assert_eq!(store.last_archived(&id).await.unwrap(), Some(session()));
+        let other = TaskId::new("otra").unwrap();
+        assert_eq!(store.last_archived(&other).await.unwrap(), None);
         assert!(store.active().await.unwrap().is_none());
         let archived: WorkSession =
             serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();

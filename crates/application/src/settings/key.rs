@@ -38,6 +38,8 @@ impl ConfigKey {
         "ai.max_description_chars",
         "ai.max_comments",
         "ai.read_repo",
+        "ai.report_language",
+        "ai.agent_language",
         "history.dir",
         "session.dir",
         "session.track_time",

@@ -6,6 +6,7 @@
 
 mod args;
 mod commands;
+mod markdown;
 mod presenter;
 mod record;
 mod wizard;

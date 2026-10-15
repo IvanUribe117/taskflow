@@ -683,6 +683,21 @@ impl SessionStore for FakeSessionStore {
         std::path::PathBuf::from(format!("mem/{}/work-report.md", task.as_str()))
     }
 
+    async fn take_work_report(&self, task: &TaskId) -> Result<Option<String>, RepoError> {
+        Ok(self.work_reports.lock().expect("lock").remove(task))
+    }
+
+    async fn last_archived(&self, task: &TaskId) -> Result<Option<WorkSession>, RepoError> {
+        Ok(self
+            .archived
+            .lock()
+            .expect("lock")
+            .iter()
+            .rev()
+            .find(|s| &s.task_id == task)
+            .cloned())
+    }
+
     async fn archive(&self, session: WorkSession) -> Result<std::path::PathBuf, RepoError> {
         *self.active.lock().expect("lock") = None;
         self.archived.lock().expect("lock").push(session);

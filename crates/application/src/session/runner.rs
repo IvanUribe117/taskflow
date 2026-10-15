@@ -10,7 +10,7 @@ use domain::task::find_status;
 
 use crate::ai::SummarizeTask;
 use crate::dto::{SessionOutcome, SessionView};
-use crate::ports::Notice;
+use crate::ports::{Notice, PreviousWork};
 use crate::session::{
     SessionPrefs, Suggestion, duration_label, effect_label, report, suggested_statuses,
 };
@@ -192,8 +192,12 @@ async fn analyze(
     note: Option<&str>,
 ) -> Result<Step, String> {
     let id = session.task_id.clone();
+    let previous = session.continues.as_ref().map(|c| PreviousWork {
+        ended: local(ctx, c.ended_at),
+        work_report: c.work_report.clone(),
+    });
     let result = SummarizeTask::new(ctx)
-        .execute_with_note(&id, prefs.limits, note)
+        .execute_with_note(&id, prefs.limits, note, previous)
         .await;
     let command = match result {
         Ok(insight) => {
@@ -269,6 +273,13 @@ async fn set_status(
         .await
         .map_err(|e| e.to_string())?;
     Ok(Step::default())
+}
+
+/// `AAAA-MM-DD HH:MM` en la zona horaria del usuario.
+pub(crate) fn local(ctx: &AppContext, at: DateTime<Utc>) -> String {
+    at.with_timezone(&ctx.clock.offset())
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 /// El texto de cada aviso.

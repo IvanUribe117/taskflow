@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 /// El rol y las reglas para `summarize_task`.
 const SUMMARY_ROLE: &str = "Eres un asistente técnico que analiza tareas de desarrollo de software. \
-Responde siempre en español. Lee la tarea y su contexto y devuelve exclusivamente el JSON pedido: \
+Lee la tarea y su contexto y devuelve exclusivamente el JSON pedido: \
 qué se solicita (en 2-4 oraciones), los criterios de aceptación (cómo se comprueba que está \
 terminada), los pasos sugeridos para resolverla, los riesgos (qué podría romperse o salir mal), las \
 preguntas abiertas que habría que aclarar con quien la pidió, una estimación de complejidad y un prompt listo para pegar en un \
@@ -25,25 +25,49 @@ relevante del proyecto, los archivos o módulos probables y cómo verificar el r
 al repositorio, úsalo solo para leer y citar rutas reales; no inventes archivos.";
 
 /// El rol y las reglas para `plan_day`.
-const PLAN_ROLE: &str = "Eres un asistente que ayuda a un desarrollador a organizar su día. Responde \
-siempre en español. Con las tareas priorizadas que recibes, devuelve exclusivamente el JSON pedido, con \
+const PLAN_ROLE: &str = "Eres un asistente que ayuda a un desarrollador a organizar su día. \
+Con las tareas priorizadas que recibes, devuelve exclusivamente el JSON pedido, con \
 un plan en Markdown: en qué orden trabajar, cuánto tiempo aproximado dedicar a cada tarea y qué \
 desbloquear primero (comentarios pendientes, tareas vencidas). Sé breve y concreto.";
 
 /// El rol y las reglas para `summarize_work`.
 const WORK_ROLE: &str = "Escribes el reporte de lo que SE HIZO en una tarea de desarrollo, para el \
-equipo que la sigue en ClickUp. Responde siempre en español y devuelve exclusivamente el JSON pedido: \
+equipo que la sigue en ClickUp. Devuelve exclusivamente el JSON pedido: \
 qué se hizo (2-4 oraciones), los cambios concretos (archivos y comportamiento), cómo se verificó y qué \
 queda pendiente o qué debe mirar quien revise. Cuenta solo lo que consta en la conversación o en los \
 cambios de git: nada del plan que no se haya hecho, y ninguna verificación que no ocurrió. Usa \
-`código` para rutas y nombres.";
+`código` para rutas y nombres, y nada más de Markdown: ni títulos ni negritas.";
 
 /// El rol y las reglas para `commit_message`.
 const COMMIT_ROLE: &str = "Escribes mensajes de commit. Devuelve exclusivamente el JSON pedido: un \
 título (subject) de una línea, de 72 caracteres como máximo, y un cuerpo (body) breve solo si aporta \
 algo (qué y por qué, no cómo); si no, deja el cuerpo vacío. Sigue EXACTAMENTE la convención de los \
-commits recientes del repositorio (prefijos, idioma, mayúsculas, id de la tarea). Describe solo lo que \
+commits recientes del repositorio (prefijos, mayúsculas, id de la tarea). Describe solo lo que \
 muestra el diff.";
+
+/// Las reglas de idioma de cada llamada, al final del *system prompt*.
+pub(crate) fn summary_language(report: &str, agent: &str) -> String {
+    format!(
+        "Idioma: escribe todo en {report}, excepto `agent_prompt`, que va en {agent}. En el prompt \
+         para el agente pide que el código, los comentarios del código, los mensajes de commit y todo \
+         lo que quede en el repositorio estén en {agent}, y que hable conmigo en {report}."
+    )
+}
+
+pub(crate) fn report_language(report: &str) -> String {
+    format!("Idioma: escribe todo en {report}.")
+}
+
+pub(crate) fn commit_language(agent: &str) -> String {
+    format!(
+        "Idioma: escribe el mensaje de commit en {agent}, aunque los commits recientes estén en otro."
+    )
+}
+
+/// `system` + una línea en blanco + `rule`.
+pub(crate) fn with_rule(system: &str, rule: &str) -> String {
+    format!("{system}\n\n{rule}")
+}
 
 /// *System prompt*: el rol y, si hay, las instrucciones del contexto. Ya está hecha.
 ///
@@ -105,6 +129,13 @@ pub(crate) fn work_message(input: &WorkInput) -> String {
             input.plan.trim()
         }
     );
+    if let Some(since) = &input.since {
+        let _ = write!(
+            message,
+            "\n\n<since>\nEsta sesión continúa una anterior que terminó el {since}; lo de antes ya se \
+             publicó. Cuenta SOLO lo que se hizo después.\n</since>"
+        );
+    }
     match &input.changes {
         Some(changes) => {
             let _ = write!(
@@ -264,7 +295,23 @@ pub(crate) fn summary_message(input: &SummaryInput) -> String {
         message.push_str("</project_context>");
     }
 
-    // 6. Lo que pidió el usuario al rechazar el análisis anterior: al final, para que pese.
+    // 6. Si la tarea volvió: lo que se hizo antes. Lo nuevo está en los comentarios
+    //    posteriores a esa fecha.
+    if let Some(previous) = &input.previous {
+        let _ = write!(
+            message,
+            "\n\n<previous_session>\nEsta tarea ya se trabajó en una sesión que terminó el {}, y la \
+             devolvieron. Lee los comentarios posteriores a esa fecha: dicen qué falta o qué hay que \
+             corregir. Analiza solo eso; no repitas lo que ya está hecho.\n",
+            previous.ended
+        );
+        if let Some(report) = &previous.work_report {
+            let _ = write!(message, "\nLo que se hizo entonces:\n{}\n", report.trim());
+        }
+        message.push_str("</previous_session>");
+    }
+
+    // 7. Lo que pidió el usuario al rechazar el análisis anterior: al final, para que pese.
     if let Some(note) = &input.note {
         let _ = write!(
             message,
@@ -380,6 +427,7 @@ mod tests {
                 omitted: vec![],
             },
             note: None,
+            previous: None,
         }
     }
 
@@ -468,6 +516,7 @@ mod tests {
             }),
             agent_session: agent.then(|| "id".to_owned()),
             context: BuiltContext::default(),
+            since: None,
         }
     }
 
@@ -529,6 +578,25 @@ mod tests {
             example.as_object().unwrap().len()
         );
         assert_eq!(work.pending, ["p"]);
+    }
+
+    #[test]
+    fn summary_message_explains_a_returned_task() {
+        let mut input = input();
+        input.previous = Some(application::ports::PreviousWork {
+            ended: "2026-10-14 18:00".into(),
+            work_report: Some("Trabajo realizado: fondo azul.".into()),
+        });
+
+        let message = summary_message(&input);
+
+        assert!(message.contains("<previous_session>\nEsta tarea ya se trabajó en una sesión que terminó el 2026-10-14 18:00"), "{message}");
+        assert!(
+            message.contains(
+                "Lo que se hizo entonces:\nTrabajo realizado: fondo azul.\n</previous_session>"
+            ),
+            "{message}"
+        );
     }
 
     #[test]

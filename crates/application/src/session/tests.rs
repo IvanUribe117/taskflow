@@ -28,6 +28,8 @@ fn prefs() -> SessionPrefs {
             max_comments: 5,
             budget_chars: 5_000,
         },
+        report_language: "español".into(),
+        agent_language: "English".into(),
     }
 }
 
@@ -599,18 +601,23 @@ async fn the_agent_gets_prompt_edited_report_rules_and_task() {
     w.ctx.context =
         Arc::new(crate::testing::FakeContextRepository::default().with_global(vec![rule]));
 
-    let brief = PrepareAgent::new(&w.ctx).execute(10_000).await.unwrap();
+    let brief = PrepareAgent::new(&w.ctx).execute(&prefs()).await.unwrap();
 
     let prompt = &brief.prompt;
     assert!(
         prompt.starts_with("Corrige el redondeo en invoicing."),
         "{prompt}"
     );
-    assert!(prompt.contains("# Reporte aprobado"), "{prompt}");
+    assert!(prompt.contains("# Approved plan (in español"), "{prompt}");
+    assert!(
+        prompt.contains("code comments, commit messages")
+            && prompt.contains("Talk to me (explanations, questions, summaries) in español"),
+        "{prompt}"
+    );
     assert!(prompt.contains("criterio corregido por mí"), "{prompt}");
     assert!(prompt.contains("## Estilo\nTests primero."), "{prompt}");
     assert!(
-        prompt.trim_end().ends_with("eso lo hago yo con Taskflow."),
+        prompt.trim_end().ends_with("I do that with Taskflow."),
         "{prompt}"
     );
     assert_eq!(brief.repo_path, None, "no project");
@@ -620,7 +627,10 @@ async fn the_agent_gets_prompt_edited_report_rules_and_task() {
 async fn the_agent_waits_for_approval() {
     let w = started().await;
 
-    let error = PrepareAgent::new(&w.ctx).execute(10_000).await.unwrap_err();
+    let error = PrepareAgent::new(&w.ctx)
+        .execute(&prefs())
+        .await
+        .unwrap_err();
 
     assert!(error.to_string().contains("taskflow approve"), "{error}");
 }
@@ -652,7 +662,7 @@ async fn the_work_report_comes_from_the_agent_conversation() {
     assert!(!view.from_agent);
     assert!(
         view.markdown
-            .starts_with("## Trabajo realizado · Task 86b1"),
+            .starts_with("Trabajo realizado: Se cambió el fondo del login."),
         "{}",
         view.markdown
     );
@@ -865,4 +875,104 @@ async fn a_failing_hook_reaches_the_user() {
         .unwrap_err();
 
     assert!(error.to_string().contains("ruff failed"), "{error}");
+}
+
+/// Una sesión que se trabajó (con conversación del agente y reporte de trabajo) y se cerró.
+async fn finished_with_work() -> World {
+    let w = approved().await;
+    PrepareAgent::new(&w.ctx).new_conversation().await.unwrap();
+    w.sessions
+        .edit_work_report("86b1", "Trabajo realizado: fondo azul.");
+    HandleSession::new(&w.ctx)
+        .execute(
+            SessionCommand::Finish {
+                status: "code review".into(),
+                comment: None,
+            },
+            &prefs(),
+        )
+        .await
+        .unwrap();
+    w
+}
+
+#[tokio::test]
+async fn a_returned_task_continues_the_previous_session() {
+    let w = finished_with_work().await;
+    let previous_conversation = w.sessions.archived()[0].agent_session.clone();
+
+    let check = StartSession::new(&w.ctx).check(&id()).await.unwrap();
+    StartSession::new(&w.ctx)
+        .execute(&id(), false, &prefs())
+        .await
+        .unwrap();
+
+    let previous = check.previous.unwrap();
+    assert_eq!(previous.state, "closed");
+    assert!(previous.has_agent);
+    let session = w.sessions.current().unwrap();
+    assert_eq!(
+        session.agent_session, previous_conversation,
+        "same conversation"
+    );
+    assert!(
+        !session.agent_briefed,
+        "the new prompt still has to reach the agent"
+    );
+    let continues = session.continues.unwrap();
+    assert_eq!(
+        continues.work_report.as_deref(),
+        Some("Trabajo realizado: fondo azul.")
+    );
+    // El análisis supo qué se hizo antes.
+    let inputs = w.ai.summary_inputs();
+    let last = inputs.last().unwrap();
+    let prev = last.previous.as_ref().unwrap();
+    assert_eq!(
+        prev.work_report.as_deref(),
+        Some("Trabajo realizado: fondo azul.")
+    );
+    assert!(prev.ended.starts_with("2026-10-14"), "{}", prev.ended);
+    // El reporte viejo ya no está: no se publica por error.
+    assert_eq!(w.sessions.work_report("86b1"), None);
+    let brief = PrepareAgent::new(&w.ctx).execute(&prefs()).await;
+    assert!(brief.is_err(), "not approved yet");
+}
+
+#[tokio::test]
+async fn fresh_starts_from_scratch_but_still_drops_the_old_work_report() {
+    let w = finished_with_work().await;
+
+    StartSession::new(&w.ctx)
+        .fresh(true)
+        .execute(&id(), false, &prefs())
+        .await
+        .unwrap();
+
+    let session = w.sessions.current().unwrap();
+    assert!(session.continues.is_none());
+    assert!(session.agent_session.is_none());
+    assert!(w.ai.summary_inputs().last().unwrap().previous.is_none());
+    assert_eq!(w.sessions.work_report("86b1"), None);
+}
+
+#[tokio::test]
+async fn the_agent_brief_says_whether_the_conversation_got_this_prompt() {
+    let w = finished_with_work().await;
+    StartSession::new(&w.ctx)
+        .execute(&id(), false, &prefs())
+        .await
+        .unwrap();
+    HandleSession::new(&w.ctx)
+        .execute(SessionCommand::Approve { status: None }, &prefs())
+        .await
+        .unwrap();
+
+    let before = PrepareAgent::new(&w.ctx).execute(&prefs()).await.unwrap();
+    PrepareAgent::new(&w.ctx).mark_briefed().await.unwrap();
+    let after = PrepareAgent::new(&w.ctx).execute(&prefs()).await.unwrap();
+
+    assert!(before.agent_session.is_some());
+    assert!(!before.briefed);
+    assert!(after.briefed);
 }

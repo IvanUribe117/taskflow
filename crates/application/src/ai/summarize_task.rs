@@ -4,7 +4,7 @@ use domain::task::TaskId;
 
 use crate::ai::brief::{recent_comments, task_brief};
 use crate::dto::{TaskDetail, TaskInsight};
-use crate::ports::{ProjectBrief, SummaryInput};
+use crate::ports::{PreviousWork, ProjectBrief, SummaryInput};
 use crate::sections::{BuildContext, ContextRequest};
 use crate::{AppContext, AppError};
 
@@ -36,11 +36,11 @@ impl<'a> SummarizeTask<'a> {
     /// [`AppError::Provider`] si la tarea no existe; [`AppError::Repo`] si fallan los
     /// proyectos o las secciones; [`AppError::Ai`] si falla la IA.
     pub async fn execute(&self, id: &TaskId, limits: AiLimits) -> Result<TaskInsight, AppError> {
-        self.execute_with_note(id, limits, None).await
+        self.execute_with_note(id, limits, None, None).await
     }
 
-    /// Como [`Self::execute`], con lo que pediste al rechazar el análisis anterior. Lo usa
-    /// la sesión de trabajo (`taskflow reject`).
+    /// Como [`Self::execute`], con lo que pediste al rechazar el análisis anterior
+    /// (`taskflow reject`) y, si la tarea volvió, lo que se hizo antes. Lo usa la sesión.
     ///
     /// # Errors
     ///
@@ -50,6 +50,7 @@ impl<'a> SummarizeTask<'a> {
         id: &TaskId,
         limits: AiLimits,
         note: Option<&str>,
+        previous: Option<PreviousWork>,
     ) -> Result<TaskInsight, AppError> {
         let (me, mut task, comments) = futures::try_join!(
             self.ctx.tasks.current_user(),
@@ -80,6 +81,7 @@ impl<'a> SummarizeTask<'a> {
             }),
             context,
             note: note.map(str::to_owned),
+            previous,
         };
         let summary = self.ctx.ai.summarize_task(&input).await?;
 

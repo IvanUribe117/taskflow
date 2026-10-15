@@ -116,6 +116,9 @@ pub enum Command {
         /// Si hay un contador corriendo en otra tarea, detenerlo sin preguntar.
         #[arg(long)]
         yes: bool,
+        /// Si la tarea ya tuvo una sesión, no continuarla: empezar de cero.
+        #[arg(long)]
+        fresh: bool,
     },
     /// Aprueba el reporte y pasa la tarea a "en progreso" (o al estado que indiques).
     Approve {
@@ -555,7 +558,8 @@ mod tests {
             parse(&["start", "86b1", "--yes"]).unwrap().command,
             Command::Start {
                 task_id: Some(_),
-                yes: true
+                yes: true,
+                fresh: false
             }
         ));
         assert!(matches!(

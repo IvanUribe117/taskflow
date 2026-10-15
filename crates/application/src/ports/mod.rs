@@ -28,8 +28,8 @@ pub use repo_inspector::{ChangedFile, NoRepoInspector, RepoChanges, RepoCommitte
 pub use secret_store::{SecretError, SecretName, SecretStore};
 pub use session_store::SessionStore;
 pub use summarizer::{
-    AiError, CommitInput, CommitMessage, Complexity, PlanInput, PlanTask, ProjectBrief, Summarizer,
-    SummaryInput, TaskBrief, TaskSummary, WorkInput, WorkSummary,
+    AiError, CommitInput, CommitMessage, Complexity, PlanInput, PlanTask, PreviousWork,
+    ProjectBrief, Summarizer, SummaryInput, TaskBrief, TaskSummary, WorkInput, WorkSummary,
 };
 pub use task_provider::{ProviderError, TaskProvider, TaskQuery};
 pub use time_tracker::{LocalTimeTracker, TimeEntry, TimeTracker};

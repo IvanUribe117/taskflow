@@ -5,7 +5,7 @@ use application::ports::RecordSubject;
 use application::settings::AppSettings;
 use domain::project::ProjectSlug;
 
-use crate::{presenter, record};
+use crate::{markdown, presenter, record};
 
 /// `taskflow plan [--max N] [--project SLUG] [--save] [--json]` (UC-02).
 ///
@@ -43,13 +43,13 @@ pub async fn run(
         let path = SaveToHistory::new(ctx)
             .execute(RecordSubject::Plan, project, document)
             .await?;
-        eprintln!("Plan guardado en {}", path.display());
+        eprintln!("Plan guardado en {}", presenter::path(&path));
     }
 
     if json {
         println!("{}", presenter::json(&plan)?);
     } else {
-        println!("{}", presenter::daily_plan(&plan));
+        println!("{}", markdown::render(&presenter::daily_plan(&plan)));
     }
     Ok(())
 }

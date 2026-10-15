@@ -46,7 +46,7 @@ pub async fn run(
             };
             println!("{}", presenter::json(&latest)?);
         } else {
-            eprintln!("{}", item.path.display());
+            eprintln!("{}", presenter::path(&item.path));
             print!("{content}");
         }
         return Ok(());
@@ -58,7 +58,7 @@ pub async fn run(
     } else {
         println!("{}", presenter::history(&items, base));
         if !items.is_empty() {
-            println!("\nCarpeta: {}", base.display());
+            println!("\nCarpeta: {}", presenter::path(base));
         }
     }
     Ok(())

@@ -29,7 +29,7 @@ use domain::task::TaskId;
 
 use super::close::{StatusChoice, status_choice};
 use crate::args::{ReportSubcommand, SessionSubcommand};
-use crate::presenter;
+use crate::{markdown, presenter};
 
 /// Lo que la sesión toma de la configuración.
 #[must_use]
@@ -43,6 +43,8 @@ pub fn prefs(settings: &AppSettings) -> SessionPrefs {
             max_comments: settings.ai.max_comments,
             budget_chars: settings.context.budget_chars,
         },
+        report_language: settings.ai.report_language.clone(),
+        agent_language: settings.ai.agent_language.clone(),
     }
 }
 
@@ -97,8 +99,10 @@ pub async fn handle(
 /// 1. Sin ID, eliges la tarea de tu lista priorizada (FR-52).
 /// 2. Si ya hay una sesión: ofrece terminarla, abortarla o cancelar (FR-66).
 /// 3. Si hay un contador en otra tarea: con `--yes` se detiene; si no, se pregunta.
-/// 4. `StartSession::execute` y el reporte en pantalla (FR-57).
-/// 5. En una terminal y sin `--yes`: [`review`] (aprobar, editar, rechazar…).
+/// 4. Si la tarea ya se trabajó (te la devolvieron): continuar donde quedó o empezar de
+///    cero. Con `--yes`, continúa; con `--fresh`, empieza de cero.
+/// 5. `StartSession::execute` y el reporte en pantalla (FR-57).
+/// 6. En una terminal y sin `--yes`: [`review`] (aprobar, editar, rechazar…).
 ///
 /// # Errors
 ///
@@ -108,6 +112,7 @@ pub async fn start(
     settings: &AppSettings,
     task_id: Option<TaskId>,
     yes: bool,
+    fresh: bool,
 ) -> anyhow::Result<()> {
     let theme = ColorfulTheme::default();
     let task_id = match task_id {
@@ -161,12 +166,32 @@ pub async fn start(
         }
     }
 
+    let mut fresh = fresh;
+    if let Some(previous) = check.previous.as_ref().filter(|_| !fresh) {
+        println!(
+            "{}",
+            presenter::previous_session(previous, ctx.clock.offset())
+        );
+        if !yes && interactive() {
+            fresh = Select::with_theme(&theme)
+                .with_prompt("¿Cómo sigues?")
+                .items(&[
+                    "Continuar donde quedó (la IA ve lo hecho y lo nuevo; el agente retoma su conversación)",
+                    "Empezar de cero",
+                ])
+                .default(0)
+                .interact()?
+                == 1;
+        }
+    }
+
     eprintln!(
         "Empezando la sesión: contador ({}) y análisis con {}…",
         ctx.time.name(),
         ctx.ai.name()
     );
     let outcome = StartSession::new(ctx)
+        .fresh(fresh)
         .execute(&task_id, stop_running, &prefs(settings))
         .await?;
     print_report(ctx, &outcome).await;
@@ -262,7 +287,11 @@ async fn print_report(ctx: &AppContext, outcome: &SessionOutcome) {
     if outcome.session.report == Some("ready")
         && let Ok(report) = ShowSession::new(ctx).report().await
     {
-        println!("{}\n{}", report.trim_end(), "─".repeat(40));
+        println!(
+            "{}\n{}",
+            markdown::render(report.trim_end()),
+            "─".repeat(40)
+        );
     }
 }
 
@@ -294,10 +323,7 @@ pub async fn approve(
 /// de la sesión, y `taskflow agent` lo abre). Si algo falla aquí,
 /// la aprobación ya ocurrió: solo se avisa.
 async fn deliver_prompt(ctx: &AppContext, settings: &AppSettings) {
-    match PrepareAgent::new(ctx)
-        .execute(settings.context.budget_chars)
-        .await
-    {
+    match PrepareAgent::new(ctx).execute(&prefs(settings)).await {
         // La ruta ya sale en el estado de la sesión: aquí solo el portapapeles.
         Ok(brief) => {
             if copy_to_clipboard(&brief.prompt) {
@@ -341,9 +367,7 @@ pub async fn agent(
     settings: &AppSettings,
     print_only: bool,
 ) -> anyhow::Result<()> {
-    let brief = PrepareAgent::new(ctx)
-        .execute(settings.context.budget_chars)
-        .await?;
+    let brief = PrepareAgent::new(ctx).execute(&prefs(settings)).await?;
     if print_only {
         println!("{}", brief.prompt);
         return Ok(());
@@ -357,12 +381,21 @@ pub async fn agent(
     };
 
     let mut resume = brief.agent_session.clone();
+    let mut briefed = brief.briefed;
     loop {
         let (args, label) = if let Some(id) = &resume {
-            (
-                vec!["--resume".to_owned(), id.clone()],
-                "retomando la conversación",
-            )
+            if briefed {
+                (
+                    vec!["--resume".to_owned(), id.clone()],
+                    "retomando la conversación",
+                )
+            } else {
+                // Una tarea devuelta: la conversación de antes, con el prompt nuevo.
+                (
+                    vec!["--resume".to_owned(), id.clone(), brief.prompt.clone()],
+                    "retomando la conversación anterior con el análisis nuevo",
+                )
+            }
         } else {
             let id = PrepareAgent::new(ctx).new_conversation().await?;
             (
@@ -370,7 +403,7 @@ pub async fn agent(
                 "con el prompt de la sesión",
             )
         };
-        eprintln!("Abriendo {program} en {} {label}…", dir.display());
+        eprintln!("Abriendo {program} en {} {label}…", presenter::path(&dir));
         let started = Instant::now();
         let status = std::process::Command::new(program)
             .args(&args)
@@ -385,6 +418,11 @@ pub async fn agent(
         }
         if !status.success() {
             eprintln!("{program} terminó con {status}");
+        }
+        // El prompt nuevo ya llegó a la conversación retomada. (`briefed` se vuelve a leer
+        // de la sesión si eliges "Volver al agente".)
+        if resume.is_some() && !briefed {
+            PrepareAgent::new(ctx).mark_briefed().await?;
         }
         if !interactive() {
             eprintln!(
@@ -405,10 +443,9 @@ pub async fn agent(
                 }
                 AfterAgent::Finish => return done(ctx, settings, None, None, false).await,
                 AfterAgent::BackToAgent => {
-                    resume = PrepareAgent::new(ctx)
-                        .execute(settings.context.budget_chars)
-                        .await?
-                        .agent_session;
+                    let again = PrepareAgent::new(ctx).execute(&prefs(settings)).await?;
+                    resume = again.agent_session;
+                    briefed = again.briefed;
                     break;
                 }
                 AfterAgent::Leave => {
@@ -492,7 +529,7 @@ pub async fn commit(ctx: &AppContext, settings: &AppSettings, yes: bool) -> anyh
     }
     println!(
         "Repositorio: {}{}",
-        proposal.repo.display(),
+        presenter::path(&proposal.repo),
         proposal
             .branch
             .as_deref()
@@ -631,7 +668,11 @@ async fn publish(
     let theme = ColorfulTheme::default();
     loop {
         let report = ctx.sessions.load_work_report(&task_id).await?;
-        println!("{}\n{}", report.trim_end(), "─".repeat(40));
+        println!(
+            "{}\n{}",
+            markdown::render(report.trim_end()),
+            "─".repeat(40)
+        );
         if yes || !interactive() {
             break;
         }
@@ -644,7 +685,7 @@ async fn publish(
             0 => break,
             1 => edit_file(&path)?,
             _ => {
-                println!("No se publicó. Queda en {}", path.display());
+                println!("No se publicó. Queda en {}", presenter::path(&path));
                 return Ok(());
             }
         }
@@ -820,11 +861,17 @@ pub async fn report(
     let task_id = TaskId::new(view.task_id.clone())?;
     match command {
         ReportSubcommand::Show { work: false } => {
-            print!("{}", ShowSession::new(ctx).report().await?);
+            println!(
+                "{}",
+                markdown::render(&ShowSession::new(ctx).report().await?)
+            );
             Ok(())
         }
         ReportSubcommand::Show { work: true } => {
-            print!("{}", ctx.sessions.load_work_report(&task_id).await?);
+            println!(
+                "{}",
+                markdown::render(&ctx.sessions.load_work_report(&task_id).await?)
+            );
             Ok(())
         }
         ReportSubcommand::Edit { work } => {

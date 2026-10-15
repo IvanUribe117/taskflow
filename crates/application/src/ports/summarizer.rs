@@ -80,6 +80,8 @@ pub struct WorkInput {
     pub agent_session: Option<String>,
     /// Secciones `instruction` (tus reglas).
     pub context: BuiltContext,
+    /// Si la sesión continúa una anterior: desde cuándo contar (lo anterior ya se publicó).
+    pub since: Option<String>,
 }
 
 /// Lo que devuelve `summarize_work`.
@@ -154,6 +156,17 @@ pub struct SummaryInput {
     pub context: BuiltContext,
     /// Lo que pediste al rechazar el análisis anterior (`taskflow reject "..."`).
     pub note: Option<String>,
+    /// Si la tarea ya se trabajó y te la devolvieron: lo que se hizo y cuándo.
+    pub previous: Option<PreviousWork>,
+}
+
+/// La sesión anterior de una tarea que volvió.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviousWork {
+    /// Cuándo terminó, `AAAA-MM-DD HH:MM` en tu zona horaria.
+    pub ended: String,
+    /// El reporte de lo que se hizo, si había.
+    pub work_report: Option<String>,
 }
 
 /// Una tarea dentro del plan del día.

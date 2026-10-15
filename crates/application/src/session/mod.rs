@@ -21,7 +21,7 @@ use domain::session::{Effect, SessionCommand, Stage, StatusTarget, WorkSession};
 use domain::task::{TaskId, find_status};
 
 use crate::ai::AiLimits;
-use crate::dto::{SessionOutcome, SessionView, StartCheck, TimerView};
+use crate::dto::{PreviousView, SessionOutcome, SessionView, StartCheck, TimerView};
 use crate::tasks::unknown_status;
 use crate::{AppContext, AppError};
 
@@ -35,6 +35,10 @@ pub struct SessionPrefs {
     /// `provider.status_map.done`: estados sugeridos al terminar.
     pub done: Vec<String>,
     pub limits: AiLimits,
+    /// `ai.report_language`: lo que lees tú y la conversación con el agente.
+    pub report_language: String,
+    /// `ai.agent_language`: lo que va al repositorio.
+    pub agent_language: String,
 }
 
 /// Para qué etapa se buscan sugerencias.
@@ -111,12 +115,21 @@ pub fn duration_label(duration: Duration) -> String {
 #[derive(Debug)]
 pub struct StartSession<'a> {
     ctx: &'a AppContext,
+    /// Empezar de cero aunque la tarea tenga una sesión anterior.
+    fresh: bool,
 }
 
 impl<'a> StartSession<'a> {
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
-        Self { ctx }
+        Self { ctx, fresh: false }
+    }
+
+    /// Con `true`, no continúa la sesión anterior de la tarea aunque exista.
+    #[must_use]
+    pub fn fresh(mut self, fresh: bool) -> Self {
+        self.fresh = fresh;
+        self
     }
 
     /// ¿Hay una sesión sin terminar? ¿Hay un contador corriendo en **otra** tarea?
@@ -127,20 +140,26 @@ impl<'a> StartSession<'a> {
     pub async fn check(&self, task_id: &TaskId) -> Result<StartCheck, AppError> {
         let active = self.ctx.sessions.active().await?;
         let timer = self.ctx.time.current().await?;
+        let previous = self.ctx.sessions.last_archived(task_id).await?;
         Ok(StartCheck {
             active: active.as_ref().map(|s| runner::view(self.ctx, s)),
             running_timer: timer
                 .filter(|entry| entry.task_id.as_ref() != Some(task_id))
                 .as_ref()
                 .map(TimerView::from),
+            previous: previous.as_ref().map(PreviousView::from),
         })
     }
 
     /// 1. Si hay una sesión activa → `InvalidInput` (una sesión a la vez).
     /// 2. Si hay un contador en otra tarea y `stop_running` es `false` → `InvalidInput`;
     ///    si es `true`, se detiene primero.
-    /// 3. Cargar la tarea y su proyecto, crear la sesión y aplicar sus efectos (contador y
-    ///    análisis). La IA puede tardar: la sesión se guarda **antes** de llamarla.
+    /// 3. Cargar la tarea y su proyecto y crear la sesión.
+    /// 4. Si la tarea ya tuvo una sesión (te la devolvieron) y no se pidió `fresh`, la nueva
+    ///    la **continúa**: hereda la conversación del agente y el análisis sabe qué se hizo.
+    ///    El `work-report.md` anterior se quita siempre, para que no se publique de nuevo.
+    /// 5. Aplicar sus efectos (contador y análisis). La IA puede tardar: la sesión se
+    ///    guarda **antes** de llamarla.
     ///
     /// # Errors
     ///
@@ -170,7 +189,13 @@ impl<'a> StartSession<'a> {
         let task = self.ctx.tasks.task(task_id).await?;
         let resolver = ProjectResolver::new(self.ctx.projects.list().await?);
         let project = resolver.resolve(&task).map(|p| p.slug.clone());
-        let (session, effects) = WorkSession::start(&task, project, self.ctx.clock.now());
+        let (mut session, effects) = WorkSession::start(&task, project, self.ctx.clock.now());
+        let old_work = self.ctx.sessions.take_work_report(task_id).await?;
+        if !self.fresh
+            && let Some(previous) = self.ctx.sessions.last_archived(task_id).await?
+        {
+            session.continue_from(&previous, old_work);
+        }
         runner::run(self.ctx, prefs, session, effects).await
     }
 }

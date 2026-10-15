@@ -80,8 +80,10 @@ impl Summarizer for ClaudeCodeSummarizer {
             .project
             .as_ref()
             .and_then(|project| project.repo_path.as_deref());
+        let language =
+            prompts::summary_language(&self.config.report_language, &self.config.agent_language);
         self.call(
-            &prompts::summary_system(input),
+            &prompts::with_rule(&prompts::summary_system(input), &language),
             prompts::summary_message(input),
             &prompts::summary_schema(),
             repo,
@@ -92,7 +94,10 @@ impl Summarizer for ClaudeCodeSummarizer {
     async fn plan_day(&self, input: &PlanInput) -> Result<String, AiError> {
         let output: PlanOutput = self
             .call(
-                &prompts::plan_system(input),
+                &prompts::with_rule(
+                    &prompts::plan_system(input),
+                    &prompts::report_language(&self.config.report_language),
+                ),
                 prompts::plan_message(input),
                 &prompts::plan_schema(),
                 None,
@@ -104,7 +109,10 @@ impl Summarizer for ClaudeCodeSummarizer {
     /// Sin herramientas ni repo: el diff ya viene en el mensaje, y así es rápido.
     async fn commit_message(&self, input: &CommitInput) -> Result<CommitMessage, AiError> {
         self.call(
-            &prompts::commit_system(input),
+            &prompts::with_rule(
+                &prompts::commit_system(input),
+                &prompts::commit_language(&self.config.agent_language),
+            ),
             prompts::commit_message(input),
             &prompts::commit_schema(),
             None,
@@ -121,7 +129,10 @@ impl Summarizer for ClaudeCodeSummarizer {
             .as_ref()
             .and_then(|project| project.repo_path.as_deref());
         self.call_resuming(
-            &prompts::work_system(input),
+            &prompts::with_rule(
+                &prompts::work_system(input),
+                &prompts::report_language(&self.config.report_language),
+            ),
             prompts::work_message(input),
             &prompts::work_schema(),
             repo,

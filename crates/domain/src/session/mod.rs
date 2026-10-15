@@ -58,6 +58,22 @@ pub struct WorkSession {
     /// a abrirla y para pedirle al mismo agente el resumen de lo que hizo.
     #[serde(default)]
     pub agent_session: Option<String>,
+    /// Si el agente ya recibió el prompt de **esta** sesión. Al continuar una tarea
+    /// devuelta, la conversación es la anterior pero el prompt nuevo todavía no se le dio.
+    #[serde(default)]
+    pub agent_briefed: bool,
+    /// Si esta sesión continúa una anterior de la misma tarea (te la devolvieron).
+    #[serde(default)]
+    pub continues: Option<Continuation>,
+}
+
+/// Lo que se sabe de la sesión anterior al continuar una tarea.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Continuation {
+    /// Cuándo terminó la sesión anterior: los comentarios posteriores son lo nuevo.
+    pub ended_at: DateTime<Utc>,
+    /// Lo que se publicó (o se armó) como trabajo hecho, si había.
+    pub work_report: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -96,6 +112,8 @@ impl WorkSession {
             }],
             pending: Vec::new(),
             agent_session: None,
+            agent_briefed: false,
+            continues: None,
         };
         (
             session,
@@ -248,6 +266,27 @@ impl WorkSession {
             self.close_interval(now);
             Effect::StopTimer
         })
+    }
+
+    /// Continúa una sesión anterior de la misma tarea: hereda la conversación del agente
+    /// (sin el prompt nuevo, que se le da al abrirlo) y recuerda lo que se hizo.
+    pub fn continue_from(&mut self, previous: &WorkSession, work_report: Option<String>) {
+        self.agent_session.clone_from(&previous.agent_session);
+        self.agent_briefed = false;
+        self.continues = Some(Continuation {
+            ended_at: previous.ended_at(),
+            work_report,
+        });
+    }
+
+    /// Cuándo terminó: el final del último tramo con contador o, si no hay, el inicio.
+    #[must_use]
+    pub fn ended_at(&self) -> DateTime<Utc> {
+        self.intervals
+            .iter()
+            .filter_map(|i| i.end)
+            .max()
+            .unwrap_or(self.started_at)
     }
 
     /// Lo llama la aplicación al aplicar `Effect::MarkReportPublished`.
@@ -653,6 +692,34 @@ mod tests {
             error,
             SessionError::InvalidTransition { allowed, .. } if allowed.is_empty()
         ));
+    }
+
+    #[test]
+    fn a_new_session_can_continue_a_previous_one() {
+        let mut previous = in_state("in_progress");
+        previous.agent_session = Some("conv-1".into());
+        previous.agent_briefed = true;
+        previous
+            .handle(
+                SessionCommand::Finish {
+                    status: "Closed".into(),
+                    comment: None,
+                },
+                at("2026-10-14T18:00:00Z"),
+            )
+            .unwrap();
+        let mut next = WorkSession::start(&task("86b1"), None, at("2026-10-16T09:00:00Z")).0;
+
+        next.continue_from(&previous, Some("Trabajo realizado: x".into()));
+
+        assert_eq!(next.agent_session.as_deref(), Some("conv-1"));
+        assert!(!next.agent_briefed, "the new prompt is still pending");
+        let continues = next.continues.unwrap();
+        assert_eq!(continues.ended_at, at("2026-10-14T18:00:00Z"));
+        assert_eq!(
+            continues.work_report.as_deref(),
+            Some("Trabajo realizado: x")
+        );
     }
 
     #[test]

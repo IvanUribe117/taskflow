@@ -15,6 +15,10 @@ pub struct ClaudeCodeConfig {
     pub timeout: Duration,
     /// Si puede leer el repositorio del proyecto (con herramientas de solo lectura).
     pub read_repo: bool,
+    /// El idioma de lo que lee el usuario (`ai.report_language`).
+    pub report_language: String,
+    /// El idioma de lo que va al repositorio (`ai.agent_language`).
+    pub agent_language: String,
 }
 
 impl Default for ClaudeCodeConfig {
@@ -25,6 +29,8 @@ impl Default for ClaudeCodeConfig {
             effort: None,
             timeout: Duration::from_mins(5),
             read_repo: true,
+            report_language: "español".to_owned(),
+            agent_language: "English".to_owned(),
         }
     }
 }

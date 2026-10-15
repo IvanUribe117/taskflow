@@ -539,3 +539,88 @@ Con un repo de git falso:
 | Selector de tareas en 80 columnas | Todas las opciones miden 78 |
 
 Tests: de 444 a 452.
+
+---
+
+## Quinta parte: idiomas, tareas devueltas y la salida en la terminal
+
+### Idiomas
+
+| Qué | Idioma | Clave |
+| --- | --- | --- |
+| Análisis, plan del día, reporte de trabajo (lo que se publica), tu conversación con Taskflow y con el agente | español | `ai.report_language` |
+| El prompt del agente, el código, los comentarios del código, los mensajes de commit y todo lo que queda en el repo | English | `ai.agent_language` |
+
+- Cada llamada a la IA termina con su regla de idioma (`prompts::with_rule`). El análisis escribe todo en español, salvo `agent_prompt`, que va en inglés y pide código, comentarios y commits en inglés.
+- Lo que Taskflow le agrega al prompt del agente también va en inglés: `# Approved plan`, `# Rules for this work`, `Language: …` y `Task: …`.
+- El mensaje de commit va en inglés aunque los commits anteriores del repo estén en otro idioma.
+
+### Retomar una tarea que te devolvieron
+
+```text
+taskflow start 86bcjdn6v
+Esta tarea ya se trabajó: sesión cerrada el 2026-10-14 19:50 · reporte publicado · con conversación del agente.
+? ¿Cómo sigues?
+> Continuar donde quedó (la IA ve lo hecho y lo nuevo; el agente retoma su conversación)
+  Empezar de cero
+```
+
+Al continuar:
+
+1. **El análisis sabe qué se hizo antes.** Recibe `<previous_session>` con la fecha de cierre y el reporte de trabajo, y se le pide analizar solo lo que piden los comentarios posteriores. En la prueba, el reporte nuevo empezó con "Cerrar lo que falta del cambio…" y listó los pendientes, sin repetir lo hecho.
+2. **El agente retoma su conversación**, pero con el análisis nuevo: `claude --resume <id> "<prompt nuevo>"`. La primera vez se le da el prompt (`agent_briefed` pasa a `true`); las siguientes, solo `--resume`.
+3. **El reporte de trabajo cuenta solo lo nuevo** (`<since>`): lo de antes ya se publicó.
+4. **El `work-report.md` anterior se quita** al empezar cualquier sesión (`take_work_report`), para que nunca se vuelva a publicar por error.
+
+`start --fresh` empieza de cero; con `--yes`, continúa. Por capa:
+
+- **Dominio:** `WorkSession::continue_from`, `ended_at`, y los campos `agent_briefed` y `continues`.
+- **Puerto:** `SessionStore::last_archived` y `take_work_report`.
+- **Aplicación:** `StartSession::fresh`, `PrepareAgent::mark_briefed`, `SummaryInput::previous` y `WorkInput::since`.
+
+### Comentarios con menos Markdown
+
+El reporte que se publica ya no tiene títulos:
+
+```text
+Trabajo realizado: se cambió el fondo del login a un degradado azul…
+
+Cambios:
+- `idk/assets/sass/new_theme/_sigin.scss`: …
+
+Cómo se verificó: sin registrar.
+
+Pendiente: nada.
+
+Rama: `CU-86bcjdn6v` · 1 commit
+```
+
+A la IA también se le pide no usar títulos ni negritas en ese reporte.
+
+### Markdown en la terminal
+
+`apps/cli/src/markdown.rs` da formato a los reportes y los planes al mostrarlos: títulos en negrita y color, viñetas `•`, `código` en amarillo, negrita, cursiva y enlaces. Si la salida no es una terminal (un archivo, una tubería), queda texto limpio, sin `#` ni `**`.
+
+### Rutas entre comillas
+
+Todas las rutas que imprime Taskflow van entre comillas (`presenter::path`): `"/Users/dev/Library/Application Support/taskflow/…"`. Así el espacio de `Application Support` no corta la ruta al copiarla o al hacer clic. La excepción es `taskflow config path`, que sigue sin comillas para poder usarla en scripts (`cat "$(taskflow config path)"`).
+
+### Conceptos aplicados
+
+- **Un constructor con opciones (`StartSession::new(ctx).fresh(true)`).** Agrega una opción sin cambiar la firma de `execute`, que usan muchos tests y la interfaz.
+- **`Option::clone_from`** reutiliza la memoria del valor que ya había.
+- **`if !fresh && let Some(previous) = …`** (*let chains*): una condición y un patrón en el mismo `if`.
+- **`Style::force_styling(true)`.** `console` desactiva los colores cuando cree que no hay terminal. En los tests se fuerza para comprobar que hay códigos ANSI y que, sin ellos, el texto es el mismo.
+- **Separar idioma y rol.** Los roles de los prompts ya no dicen "en español": el idioma es configuración y se agrega al final. El mismo prompt sirve para otro idioma.
+
+### Probado (2026-10-14)
+
+| Prueba | Resultado |
+| --- | --- |
+| `agent-prompt.md` y `report.md` | El prompt, en inglés ("You are working on the IDK Django dashboard…"); el reporte, en español |
+| Cerrar la sesión y `start` de nuevo | "Esta tarea ya se trabajó…"; la nueva continúa (`continues`), con la conversación anterior y `agent_briefed: false` |
+| `agent` en la sesión continuada | `--resume <id>` con el prompt nuevo; después `agent_briefed: true` |
+| El análisis continuado | Empezó con "Cerrar lo que falta…" y listó solo los pendientes |
+| Un `start` que se quedó esperando a ClickUp (una vez) | `session retry` lo retomó y el análisis terminó |
+
+Tests: de 452 a 462.

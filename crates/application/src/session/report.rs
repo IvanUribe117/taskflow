@@ -83,57 +83,60 @@ fn bullets(report: &mut String, title: &str, items: &[String], empty: &str) {
     report.push('\n');
 }
 
-/// El reporte de **lo que se hizo**, que es lo que se publica:
+/// El reporte de **lo que se hizo**, que es lo que se publica. Sin títulos: un comentario
+/// se lee mejor con etiquetas simples y listas.
 ///
 /// ```markdown
-/// ## Trabajo realizado · Fix invoice rounding
+/// Trabajo realizado: se corrigió el redondeo por línea…
 ///
-/// Se corrigió el redondeo por línea…
-///
-/// ### Cambios
+/// Cambios:
 /// - `invoicing/totals.py`: redondeo por línea
 ///
-/// ### Cómo se verificó
-/// - `pytest invoicing` (o "Sin registrar.")
+/// Cómo se verificó:
+/// - `pytest invoicing`                     (vacío: "Cómo se verificó: sin registrar.")
 ///
-/// ### Pendiente
-/// - Revisar facturas viejas            (o "Nada.")
+/// Pendiente: nada.                         (o la lista)
 ///
-/// **Rama:** `CU-86b1-fix` · 2 commits · hay cambios sin commit
+/// Rama: `CU-86b1-fix` · 2 commits · hay cambios sin commit
 /// ```
 #[must_use]
-pub fn render_work(title: &str, work: &WorkSummary, changes: Option<&RepoChanges>) -> String {
-    let mut report = format!(
-        "## Trabajo realizado · {title}\n\n{}\n\n",
-        work.summary.trim()
-    );
-    bullets(
-        &mut report,
+pub fn render_work(work: &WorkSummary, changes: Option<&RepoChanges>) -> String {
+    let mut parts = vec![format!("Trabajo realizado: {}", work.summary.trim())];
+    parts.push(labeled(
         "Cambios",
         &work.changes,
-        "Sin cambios registrados.",
-    );
-    bullets(
-        &mut report,
+        "sin cambios registrados.",
+    ));
+    parts.push(labeled(
         "Cómo se verificó",
         &work.verification,
-        "Sin registrar.",
-    );
-    bullets(&mut report, "Pendiente", &work.pending, "Nada.");
+        "sin registrar.",
+    ));
+    parts.push(labeled("Pendiente", &work.pending, "nada."));
     if let Some(changes) = changes {
         let commits = match changes.commits.len() {
             1 => "1 commit".to_owned(),
             n => format!("{n} commits"),
         };
-        let _ = write!(report, "**Rama:** `{}` · {commits}", changes.branch);
+        let mut line = format!("Rama: `{}` · {commits}", changes.branch);
         if changes.uncommitted {
-            report.push_str(" · hay cambios sin commit");
+            line.push_str(" · hay cambios sin commit");
         }
-        report.push('\n');
+        parts.push(line);
     }
-    report.truncate(report.trim_end().len());
-    report.push('\n');
-    report
+    parts.join("\n\n") + "\n"
+}
+
+/// `Etiqueta:` y una viñeta por elemento, o `Etiqueta: <empty>` en una línea.
+fn labeled(label: &str, items: &[String], empty: &str) -> String {
+    if items.is_empty() {
+        return format!("{label}: {empty}");
+    }
+    let mut text = format!("{label}:");
+    for item in items {
+        let _ = write!(text, "\n- {item}");
+    }
+    text
 }
 
 #[cfg(test)]
@@ -192,15 +195,16 @@ mod tests {
         };
 
         assert_eq!(
-            render_work("Login", &work, Some(&changes)),
-            "## Trabajo realizado · Login\n\n\
-             Se cambió el fondo.\n\n\
-             ### Cambios\n- `login.html`\n\n\
-             ### Cómo se verificó\nSin registrar.\n\n\
-             ### Pendiente\nNada.\n\n\
-             **Rama:** `CU-1` · 1 commit · hay cambios sin commit\n"
+            render_work(&work, Some(&changes)),
+            "Trabajo realizado: Se cambió el fondo.\n\n\
+             Cambios:\n- `login.html`\n\n\
+             Cómo se verificó: sin registrar.\n\n\
+             Pendiente: nada.\n\n\
+             Rama: `CU-1` · 1 commit · hay cambios sin commit\n"
         );
-        assert!(render_work("Login", &work, None).ends_with("### Pendiente\nNada.\n"));
+        let without_git = render_work(&work, None);
+        assert!(without_git.ends_with("Pendiente: nada.\n"), "{without_git}");
+        assert!(!without_git.contains('#'), "no headings in a comment");
     }
 
     #[test]

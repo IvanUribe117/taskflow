@@ -59,7 +59,10 @@ pub async fn run_with_ai(
 
     if let Some(path) = out {
         std::fs::write(path, &insight.summary.agent_prompt)?;
-        eprintln!("Prompt para el agente guardado en {}", path.display());
+        eprintln!(
+            "Prompt para el agente guardado en {}",
+            presenter::path(path)
+        );
     }
 
     let offset = ctx.clock.offset();
@@ -74,7 +77,7 @@ pub async fn run_with_ai(
         let path = SaveToHistory::new(ctx)
             .execute(RecordSubject::Analysis(task_id.clone()), project, document)
             .await?;
-        eprintln!("Análisis guardado en {}", path.display());
+        eprintln!("Análisis guardado en {}", presenter::path(&path));
     }
 
     if json {

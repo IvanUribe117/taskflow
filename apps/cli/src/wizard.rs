@@ -37,7 +37,7 @@ pub fn config_init(store: &impl ConfigStore, secrets: &impl SecretStore) -> anyh
         let replace = Confirm::with_theme(&theme)
             .with_prompt(format!(
                 "Ya existe una configuración en {}. ¿Reemplazarla?",
-                store.path().display()
+                presenter::path(store.path())
             ))
             .default(false)
             .interact()?;
@@ -86,7 +86,10 @@ pub fn config_init(store: &impl ConfigStore, secrets: &impl SecretStore) -> anyh
     }
     store.apply(&SettingsChange::Replace(Box::new(settings)))?;
 
-    println!("✔ Configuración guardada en {}", store.path().display());
+    println!(
+        "✔ Configuración guardada en {}",
+        presenter::path(store.path())
+    );
     println!("Prueba la conexión con `taskflow config check`.");
     Ok(())
 }

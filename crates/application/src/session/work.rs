@@ -93,6 +93,10 @@ impl<'a> PrepareWorkReport<'a> {
             // La conversación del agente vive en la carpeta donde se abrió: el repo.
             agent_session: session.agent_session.clone().filter(|_| repo.is_some()),
             context,
+            since: session
+                .continues
+                .as_ref()
+                .map(|c| super::runner::local(self.ctx, c.ended_at)),
         };
         let mut warnings = Vec::new();
         let from_agent = input.agent_session.is_some();
@@ -108,7 +112,7 @@ impl<'a> PrepareWorkReport<'a> {
             Err(error) => return Err(error.into()),
         };
 
-        let markdown = render_work(&session.title, &work, changes.as_ref());
+        let markdown = render_work(&work, changes.as_ref());
         let path = self.ctx.sessions.save_work_report(id, &markdown).await?;
         Ok(WorkReportView {
             markdown,

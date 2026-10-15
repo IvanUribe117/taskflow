@@ -731,6 +731,30 @@ pub struct StartCheck {
     pub active: Option<SessionView>,
     /// Un contador corriendo **en otra tarea**: `start` lo detendría (hay que preguntar).
     pub running_timer: Option<TimerView>,
+    /// La última sesión de esta tarea, si ya se trabajó: `start` la continúa.
+    pub previous: Option<PreviousView>,
+}
+
+/// La sesión anterior de una tarea.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PreviousView {
+    pub ended_at: DateTime<Utc>,
+    /// `closed` o `aborted`.
+    pub state: &'static str,
+    pub published: bool,
+    /// Si tiene una conversación del agente para retomar.
+    pub has_agent: bool,
+}
+
+impl From<&WorkSession> for PreviousView {
+    fn from(session: &WorkSession) -> Self {
+        Self {
+            ended_at: session.ended_at(),
+            state: session.state.name(),
+            published: matches!(session.publication, Publication::Published { .. }),
+            has_agent: session.agent_session.is_some(),
+        }
+    }
 }
 
 /// Lo que recibe el agente de código (`taskflow agent`, y al aprobar).
@@ -744,6 +768,9 @@ pub struct AgentBrief {
     pub prompt_path: PathBuf,
     /// La conversación del agente, si ya se abrió antes: se retoma en vez de empezar otra.
     pub agent_session: Option<String>,
+    /// Si esa conversación ya recibió el prompt de esta sesión. Si no (una tarea devuelta),
+    /// se retoma **con** el prompt nuevo.
+    pub briefed: bool,
 }
 
 /// El reporte de lo que se hizo, listo para revisar y publicar.

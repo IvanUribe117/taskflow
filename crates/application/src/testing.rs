@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
-use domain::context::ContextSection;
+use domain::context::{ContextSection, SectionKey};
 use domain::policy::WeightedPolicy;
 use domain::project::{Project, ProjectSlug};
 use domain::session::WorkSession;
@@ -277,6 +277,33 @@ impl ProjectRepository for FakeProjectRepository {
         projects.push(project.clone());
         Ok(())
     }
+
+    async fn set_context_exclude(
+        &self,
+        slug: &ProjectSlug,
+        keys: &[SectionKey],
+    ) -> Result<(), RepoError> {
+        let mut projects = self.projects.lock().expect("lock");
+        let project = projects
+            .iter_mut()
+            .find(|p| &p.slug == slug)
+            .ok_or_else(|| RepoError::NotFound(slug.to_string()))?;
+        project.context_exclude = keys.to_vec();
+        Ok(())
+    }
+
+    async fn rename(&self, old: &ProjectSlug, new: &ProjectSlug) -> Result<(), RepoError> {
+        let mut projects = self.projects.lock().expect("lock");
+        if projects.iter().any(|p| &p.slug == new) {
+            return Err(RepoError::AlreadyExists(new.to_string()));
+        }
+        let project = projects
+            .iter_mut()
+            .find(|p| &p.slug == old)
+            .ok_or_else(|| RepoError::NotFound(old.to_string()))?;
+        project.slug = new.clone();
+        Ok(())
+    }
 }
 
 /// Arma un `AppContext` con fakes y `WeightedPolicy::default()`.
@@ -372,6 +399,28 @@ impl ContextRepository for FakeContextRepository {
     async fn project_sections(&self, slug: &ProjectSlug) -> Result<Vec<ContextSection>, RepoError> {
         Ok(self.projects.get(slug).cloned().unwrap_or_default())
     }
+
+    fn section_file(
+        &self,
+        project: Option<&ProjectSlug>,
+        key: &SectionKey,
+    ) -> (std::path::PathBuf, bool) {
+        let scope = project.map_or("global", ProjectSlug::as_str);
+        (
+            std::path::PathBuf::from(format!("mem/{scope}/{key}.md")),
+            false,
+        )
+    }
+
+    async fn remove_section(
+        &self,
+        project: Option<&ProjectSlug>,
+        key: &SectionKey,
+    ) -> Result<std::path::PathBuf, RepoError> {
+        Err(RepoError::NotFound(
+            self.section_file(project, key).0.display().to_string(),
+        ))
+    }
 }
 
 /// Historial en memoria. Las rutas son de mentira: `mem/<n>.md`.
@@ -426,6 +475,15 @@ impl HistoryRepository for FakeHistoryRepository {
             .collect();
         entries.sort_by_key(|entry| std::cmp::Reverse(entry.saved_at));
         Ok(entries)
+    }
+
+    async fn rename_project(&self, old: &ProjectSlug, new: &ProjectSlug) -> Result<(), RepoError> {
+        for (entry, _) in self.records.lock().expect("lock").iter_mut() {
+            if entry.project.as_ref() == Some(old) {
+                entry.project = Some(new.clone());
+            }
+        }
+        Ok(())
     }
 
     async fn read(&self, entry: &HistoryEntry) -> Result<String, RepoError> {

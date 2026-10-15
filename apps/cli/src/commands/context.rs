@@ -1,19 +1,29 @@
-use application::AppContext;
-use application::sections::{ListSections, PreviewContext};
-use application::settings::AppSettings;
+use std::path::Path;
 
+use application::AppContext;
+use application::sections::{ExcludeSection, ListSections, PreviewContext, SectionFile};
+use application::settings::AppSettings;
+use dialoguer::Confirm;
+use dialoguer::theme::ColorfulTheme;
+use domain::context::SectionKey;
+
+use super::edit_file;
 use crate::args::ContextCommand;
 use crate::presenter;
 
-/// `context list | preview`.
+/// `context list | preview | exclude | include | edit | remove`.
 ///
 /// - `list`: `ListSections` con el proyecto (o `None`) → `presenter::sections` (o JSON).
 /// - `preview`: `PreviewContext` con la tarea, el uso y `settings.context.budget_chars` →
 ///   `presenter::context_preview` (o JSON).
+/// - `exclude` / `include`: `ExcludeSection` → `[context] exclude` del proyecto.
+/// - `edit`: abre la sección en tu editor; si no existe, la crea con una plantilla. Al
+///   salir se valida, para que un error en el encabezado se vea en el momento.
+/// - `remove`: la borra, con confirmación (salvo `--yes`).
 ///
 /// # Errors
 ///
-/// Proyecto o tarea inexistente, o secciones inválidas.
+/// Proyecto, tarea o sección inexistente, o secciones inválidas.
 pub async fn run(
     command: ContextCommand,
     ctx: &AppContext,
@@ -42,6 +52,77 @@ pub async fn run(
                 println!("{}", presenter::context_preview(&preview));
             }
         }
+        ContextCommand::Exclude { key, project } => {
+            ExcludeSection::new(ctx)
+                .execute(&project, &key, true)
+                .await?;
+            println!(
+                "✔ `{key}` ya no aplica a {project}. Deshazlo con `taskflow context include {key} --project {project}`."
+            );
+        }
+        ContextCommand::Include { key, project } => {
+            ExcludeSection::new(ctx)
+                .execute(&project, &key, false)
+                .await?;
+            println!("✔ `{key}` vuelve a aplicar a {project}.");
+        }
+        ContextCommand::Edit { key, project } => {
+            let (path, exists) = SectionFile::new(ctx).locate(project.as_ref(), &key).await?;
+            if !exists {
+                create_from_template(&path, &key)?;
+                println!("Sección nueva: {}", presenter::path(&path));
+            }
+            edit_file(&path)?;
+            match ListSections::new(ctx).execute(project.as_ref()).await {
+                Ok(_) => println!("✔ Guardada: {}", presenter::path(&path)),
+                Err(error) => println!(
+                    "⚠ La sección tiene un error y no se usará hasta corregirlo: {error}\nVuelve a abrirla con `taskflow context edit {key}{}`.",
+                    project
+                        .map(|p| format!(" --project {p}"))
+                        .unwrap_or_default()
+                ),
+            }
+        }
+        ContextCommand::Remove { key, project, yes } => {
+            let (path, exists) = SectionFile::new(ctx).locate(project.as_ref(), &key).await?;
+            if !exists {
+                anyhow::bail!("no hay una sección `{key}` en {}", presenter::path(&path));
+            }
+            if !yes
+                && !Confirm::with_theme(&ColorfulTheme::default())
+                    .with_prompt(format!("¿Borrar {}?", presenter::path(&path)))
+                    .default(false)
+                    .interact()?
+            {
+                println!("Cancelado. No se borró nada.");
+                return Ok(());
+            }
+            let removed = SectionFile::new(ctx).remove(project.as_ref(), &key).await?;
+            println!("✔ Borrada: {}", presenter::path(&removed));
+        }
     }
+    Ok(())
+}
+
+/// Una sección nueva con su encabezado comentado, lista para completar.
+fn create_from_template(path: &Path, key: &SectionKey) -> anyhow::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(
+        path,
+        format!(
+            "+++\n\
+             title = \"{key}\"\n\
+             # knowledge (datos del proyecto) o instruction (cómo debe responder la IA)\n\
+             role = \"knowledge\"\n\
+             # summary, plan, agent_prompt, playbook\n\
+             usage = [\"summary\", \"agent_prompt\"]\n\
+             # 0-255: menor = más importante\n\
+             priority = 50\n\
+             +++\n\n\
+             Escribe aquí el contenido. Hechos concretos, viñetas cortas, 800-1.800 caracteres.\n"
+        ),
+    )?;
     Ok(())
 }

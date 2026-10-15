@@ -130,7 +130,25 @@ async fn with_context(
         } => session::abort(ctx, settings, restore_status, yes).await,
         Command::Session { command } => session::session(ctx, settings, command).await,
         Command::Report(command) => session::report(ctx, settings, command).await,
-        Command::Project(command) => project::run(command, ctx, settings).await,
+        Command::Project(command) => project::run(command, ctx, settings, config_path).await,
         Command::Context(command) => context::run(command, ctx, settings).await,
     }
+}
+
+/// Abre `path` en `$VISUAL`, `$EDITOR` o `vi`. Con `sh -c '<editor> "$1"'` para que un
+/// editor con argumentos (`code --wait`) funcione y la ruta vaya como argumento.
+pub(crate) fn edit_file(path: &Path) -> anyhow::Result<()> {
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_owned());
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} \"$1\""))
+        .arg("sh")
+        .arg(path)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("el editor terminó con {status}");
+    }
+    Ok(())
 }

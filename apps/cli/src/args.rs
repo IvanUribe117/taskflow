@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use application::settings::ConfigKey;
 use clap::{Parser, Subcommand};
 use domain::DomainError;
-use domain::context::Usage;
+use domain::context::{SectionKey, Usage};
 use domain::project::ProjectSlug;
 use domain::task::TaskId;
 
@@ -223,6 +223,36 @@ pub enum ReportSubcommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ContextCommand {
+    /// Una sección global deja de aplicar a un proyecto (por ejemplo, Rust en un proyecto de Python).
+    Exclude {
+        #[arg(value_parser = parse_section_key)]
+        key: SectionKey,
+        #[arg(long, value_name = "SLUG")]
+        project: ProjectSlug,
+    },
+    /// Deshace `exclude`: la sección global vuelve a aplicar al proyecto.
+    Include {
+        #[arg(value_parser = parse_section_key)]
+        key: SectionKey,
+        #[arg(long, value_name = "SLUG")]
+        project: ProjectSlug,
+    },
+    /// Abre una sección en tu editor (la crea si no existe). Sin --project, una global.
+    Edit {
+        #[arg(value_parser = parse_section_key)]
+        key: SectionKey,
+        #[arg(long, value_name = "SLUG")]
+        project: Option<ProjectSlug>,
+    },
+    /// Borra una sección (pide confirmación). Sin --project, una global.
+    Remove {
+        #[arg(value_parser = parse_section_key)]
+        key: SectionKey,
+        #[arg(long, value_name = "SLUG")]
+        project: Option<ProjectSlug>,
+        #[arg(long)]
+        yes: bool,
+    },
     /// Las secciones globales, o las que aplican a un proyecto.
     List {
         #[arg(long, value_name = "SLUG")]
@@ -262,6 +292,8 @@ pub enum ProjectCommand {
     },
     /// Asistente: elige espacios, carpetas o listas del proveedor y crea el proyecto.
     Add,
+    /// Cambia el slug: la carpeta, sus secciones, su historial y la sesión activa.
+    Rename { old: ProjectSlug, new: ProjectSlug },
 }
 
 #[derive(Debug, Subcommand)]
@@ -278,6 +310,15 @@ pub enum ConfigCommand {
     Set { key: ConfigKey, value: String },
     /// Valida la configuración y prueba la conexión con el proveedor.
     Check,
+}
+
+/// La clave de una sección (`negocio`, `aprendizaje-rust`).
+///
+/// # Errors
+///
+/// [`DomainError::InvalidSectionKey`] si no son minúsculas, dígitos y guiones.
+pub fn parse_section_key(raw: &str) -> Result<SectionKey, DomainError> {
+    raw.parse()
 }
 
 /// `clap` usa esta función para convertir el texto en `TaskId`.
@@ -540,6 +581,31 @@ mod tests {
             })
         ));
         assert!(parse(&["context", "preview", "1", "--usage", "agent-prompt"]).is_err());
+    }
+
+    #[test]
+    fn context_management_and_project_rename() {
+        assert!(matches!(
+            parse(&["context", "exclude", "aprendizaje-rust", "--project", "idk"])
+                .unwrap()
+                .command,
+            Command::Context(ContextCommand::Exclude { .. })
+        ));
+        assert!(
+            parse(&["context", "exclude", "x"]).is_err(),
+            "--project is required"
+        );
+        assert!(matches!(
+            parse(&["context", "edit", "negocio"]).unwrap().command,
+            Command::Context(ContextCommand::Edit { project: None, .. })
+        ));
+        assert!(parse(&["context", "remove", "Con Espacios"]).is_err());
+        assert!(matches!(
+            parse(&["project", "rename", "idk-base", "idk"])
+                .unwrap()
+                .command,
+            Command::Project(ProjectCommand::Rename { .. })
+        ));
     }
 
     #[test]

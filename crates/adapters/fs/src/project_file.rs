@@ -27,6 +27,25 @@ pub(crate) struct ProjectFile {
     /// `[statuses]`: estados sugeridos del proyecto. Opcional.
     #[serde(default, skip_serializing_if = "StatusesFile::is_empty")]
     pub statuses: StatusesFile,
+    /// `[context]`: qué secciones globales no aplican. Opcional.
+    #[serde(default, skip_serializing_if = "ContextFile::is_empty")]
+    pub context: ContextFile,
+}
+
+/// ```toml
+/// [context]
+/// exclude = ["aprendizaje-rust"]
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct ContextFile {
+    pub exclude: Vec<String>,
+}
+
+impl ContextFile {
+    fn is_empty(&self) -> bool {
+        self.exclude.is_empty()
+    }
 }
 
 /// ```toml
@@ -117,6 +136,12 @@ impl TryFrom<ProjectFile> for Project {
                 in_progress: file.statuses.in_progress,
                 done: file.statuses.done,
             },
+            context_exclude: file
+                .context
+                .exclude
+                .iter()
+                .map(|key| key.parse())
+                .collect::<Result<_, _>>()?,
         })
     }
 }
@@ -138,6 +163,13 @@ impl From<&Project> for ProjectFile {
                 ready: project.statuses.ready.clone(),
                 in_progress: project.statuses.in_progress.clone(),
                 done: project.statuses.done.clone(),
+            },
+            context: ContextFile {
+                exclude: project
+                    .context_exclude
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
             },
         }
     }
@@ -229,6 +261,22 @@ tag = "acme"
         assert_eq!(project.priority_boost, 0);
         assert!(project.rules.is_empty());
         assert!(project.statuses.is_empty());
+    }
+
+    #[test]
+    fn context_exclusions_round_trip_and_are_validated() {
+        let text = format!("{SAMPLE}\n[context]\nexclude = [\"aprendizaje-rust\"]\n");
+
+        let project = parse(&text).unwrap();
+        let written = toml::to_string(&ProjectFile::from(&project)).unwrap();
+
+        assert_eq!(project.context_exclude[0].as_str(), "aprendizaje-rust");
+        assert!(
+            written.contains("[context]\nexclude = [\"aprendizaje-rust\"]"),
+            "{written}"
+        );
+        let bad = format!("{SAMPLE}\n[context]\nexclude = [\"Con Espacios\"]\n");
+        assert!(parse(&bad).is_err());
     }
 
     #[test]

@@ -10,7 +10,6 @@
 //! FR-61); con `--yes`, o sin terminal, no se pregunta nada y cada comando hace solo lo suyo.
 
 use std::io::IsTerminal;
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use application::AppContext;
@@ -28,6 +27,7 @@ use domain::session::SessionCommand;
 use domain::task::TaskId;
 
 use super::close::{StatusChoice, status_choice};
+use super::edit_file;
 use crate::args::{ReportSubcommand, SessionSubcommand};
 use crate::{markdown, presenter};
 
@@ -888,22 +888,4 @@ pub async fn report(
             publish(ctx, settings, yes, regenerate).await
         }
     }
-}
-
-/// Abre `path` en `$VISUAL`, `$EDITOR` o `vi`. Con `sh -c '<editor> "$1"'` para que un
-/// editor con argumentos (`code --wait`) funcione y la ruta vaya como argumento.
-fn edit_file(path: &Path) -> anyhow::Result<()> {
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".to_owned());
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(format!("{editor} \"$1\""))
-        .arg("sh")
-        .arg(path)
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("el editor terminó con {status}");
-    }
-    Ok(())
 }

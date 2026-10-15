@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use application::ports::{ContextRepository, RepoError};
 use async_trait::async_trait;
-use domain::context::ContextSection;
+use domain::context::{ContextSection, SectionKey};
 use domain::project::ProjectSlug;
 
 use crate::front_matter::parse_section;
@@ -71,7 +71,52 @@ impl ContextRepository for FsContextRepository {
     }
 
     async fn project_sections(&self, slug: &ProjectSlug) -> Result<Vec<ContextSection>, RepoError> {
-        read_sections(&self.projects_dir.join(slug.as_str()).join("context"))
+        read_sections(&self.dir_of(Some(slug)))
+    }
+
+    /// Busca entre los `.md` de la carpeta el que tenga esa clave (con o sin número
+    /// delante). Si no hay, `<clave>.md` en esa carpeta.
+    fn section_file(&self, project: Option<&ProjectSlug>, key: &SectionKey) -> (PathBuf, bool) {
+        let dir = self.dir_of(project);
+        let existing = fs::read_dir(&dir).ok().and_then(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .find(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .and_then(|name| SectionKey::from_file_name(name).ok())
+                        .is_some_and(|found| &found == key)
+                })
+        });
+        match existing {
+            Some(path) => (path, true),
+            None => (dir.join(format!("{key}.md")), false),
+        }
+    }
+
+    async fn remove_section(
+        &self,
+        project: Option<&ProjectSlug>,
+        key: &SectionKey,
+    ) -> Result<PathBuf, RepoError> {
+        let (path, exists) = self.section_file(project, key);
+        if !exists {
+            return Err(RepoError::NotFound(path.display().to_string()));
+        }
+        fs::remove_file(&path)
+            .map_err(|e| RepoError::Storage(format!("{}: {e}", path.display())))?;
+        Ok(path)
+    }
+}
+
+impl FsContextRepository {
+    /// La carpeta de las secciones globales o las de un proyecto.
+    fn dir_of(&self, project: Option<&ProjectSlug>) -> PathBuf {
+        match project {
+            Some(slug) => self.projects_dir.join(slug.as_str()).join("context"),
+            None => self.global_dir.clone(),
+        }
     }
 }
 
@@ -144,6 +189,35 @@ mod tests {
 
         assert_eq!(keys(&sections), ["negocio"]);
         assert_eq!(sections[0].body, "Facturas.");
+    }
+
+    #[tokio::test]
+    async fn sections_are_found_by_key_and_removed() {
+        let tmp = TempDir::new().unwrap();
+        let repo =
+            FsContextRepository::new(tmp.path().join("context"), tmp.path().join("projects"));
+        write(
+            &tmp.path().join("context"),
+            "90-aprendizaje-rust.md",
+            "Rust",
+        );
+        let key: SectionKey = "aprendizaje-rust".parse().unwrap();
+        let other: SectionKey = "negocio".parse().unwrap();
+        let slug: ProjectSlug = "idk".parse().unwrap();
+
+        let (found, exists) = repo.section_file(None, &key);
+        let (new, missing) = repo.section_file(Some(&slug), &other);
+
+        assert!(exists);
+        assert!(found.ends_with("context/90-aprendizaje-rust.md"));
+        assert!(!missing);
+        assert!(new.ends_with("projects/idk/context/negocio.md"));
+        assert_eq!(repo.remove_section(None, &key).await.unwrap(), found);
+        assert!(!found.exists());
+        assert!(matches!(
+            repo.remove_section(None, &key).await,
+            Err(RepoError::NotFound(_))
+        ));
     }
 
     #[tokio::test]

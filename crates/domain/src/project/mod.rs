@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use crate::DomainError;
+use crate::context::SectionKey;
 use crate::task::{LocationLevel, Task};
 
 /// Identificador corto: minúsculas, dígitos y guiones, de 1 a 40 caracteres, sin guion inicial.
@@ -135,6 +136,9 @@ pub struct Project {
     /// Estados sugeridos propios del proyecto (FR-67). Una lista vacía usa la global
     /// (`provider.status_map`).
     pub statuses: StatusSuggestions,
+    /// Secciones **globales** que no aplican a este proyecto (`[context] exclude`): por
+    /// ejemplo, "aprendizaje de Rust" en un proyecto de Python.
+    pub context_exclude: Vec<SectionKey>,
 }
 
 /// Nombres de estado sugeridos por etapa, en orden de preferencia. Son **sugerencias**: cada

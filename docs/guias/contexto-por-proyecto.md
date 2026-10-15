@@ -142,7 +142,30 @@ No hace falta tenerlas todas desde el primer día. Empieza por `negocio` y `arqu
 
 ---
 
-## 6. Revisar lo que recibe la IA
+## 6. Gestionar las secciones desde la terminal
+
+```sh
+taskflow context edit negocio --project idk            # la abre en tu editor; si no existe, la crea con plantilla
+taskflow context edit idioma                           # sin --project: una sección global
+taskflow context remove glosario --project idk         # la borra (pide confirmación)
+taskflow context exclude aprendizaje-rust --project idk  # una global deja de aplicar a ese proyecto
+taskflow context include aprendizaje-rust --project idk  # vuelve a aplicar
+```
+
+- **`exclude`** sirve para las secciones globales que no tienen sentido en un proyecto. Por ejemplo, "aprendizaje de Rust" en IDK, que es Python y Django. Queda en el `project.toml`, y Taskflow toca solo esa tabla: tus comentarios y reglas desactivadas se conservan.
+
+  ```toml
+  [context]
+  exclude = ["aprendizaje-rust"]
+  ```
+
+- `context list --project idk` sigue mostrando la sección excluida, marcada como "global (excluida en el proyecto)", para que sepas que existe.
+- `edit` valida al guardar: si el encabezado tiene un error, te lo dice en el momento.
+- Para cambiar el slug de un proyecto: `taskflow project rename idk-base idk`. Mueve la carpeta (con sus secciones) y su historial, actualiza la sesión activa y `projects.default`, y conserva los comentarios del `project.toml`. Las sesiones archivadas mantienen el nombre viejo: son un registro de lo que pasó.
+
+---
+
+## 7. Revisar lo que recibe la IA
 
 ```sh
 taskflow context list --project <slug>                # qué secciones hay, su rol, uso, tamaño y origen
@@ -155,7 +178,7 @@ taskflow context preview <id-tarea> --usage agent_prompt
 
 ---
 
-## 7. Mantenerlas al día
+## 8. Mantenerlas al día
 
 El contexto envejece igual que la documentación. Revísalo cuando:
 
@@ -174,7 +197,7 @@ Con cientos de commits desde la última revisión, vale la pena regenerarlas.
 
 ---
 
-## 8. Generarlas con un agente
+## 9. Generarlas con un agente
 
 Leer un repo y resumirlo es un buen trabajo para un agente de IA. Esta es la plantilla que se usó para IDK; reemplaza los `<...>`:
 

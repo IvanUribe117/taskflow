@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 use application::ports::{ProjectRepository, RepoError};
 use async_trait::async_trait;
+use domain::context::SectionKey;
 use domain::project::{Project, ProjectSlug};
+use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 use crate::atomic;
 use crate::project_file::{ProjectFile, expand_home};
@@ -126,6 +128,77 @@ impl ProjectRepository for FsProjectRepository {
         atomic::write(&self.file(&project.slug), &text)
             .map_err(|e| RepoError::Storage(e.to_string()))
     }
+
+    /// Con `toml_edit`: cambia `[context] exclude` y nada más. Sin claves, quita `exclude`
+    /// (y la tabla `[context]` si queda vacía). Después vuelve a leer el archivo, para no
+    /// dejar nunca uno inválido.
+    async fn set_context_exclude(
+        &self,
+        slug: &ProjectSlug,
+        keys: &[SectionKey],
+    ) -> Result<(), RepoError> {
+        let file = self.file(slug);
+        let storage = |e: std::io::Error| RepoError::Storage(format!("{}: {e}", file.display()));
+        let text = match fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(RepoError::NotFound(slug.to_string()));
+            }
+            Err(e) => return Err(storage(e)),
+        };
+        let mut doc: DocumentMut = text
+            .parse()
+            .map_err(|e| RepoError::Invalid(format!("{}: {e}", file.display())))?;
+        if keys.is_empty() {
+            if let Some(context) = doc.get_mut("context").and_then(Item::as_table_mut) {
+                context.remove("exclude");
+                if context.is_empty() {
+                    doc.remove("context");
+                }
+            }
+        } else {
+            let list: Array = keys.iter().map(SectionKey::as_str).collect();
+            if !doc.contains_table("context") {
+                doc.insert("context", Item::Table(Table::new()));
+            }
+            doc["context"]["exclude"] = value(list);
+        }
+        atomic::write(&file, &doc.to_string()).map_err(storage)?;
+        self.read(&file).map(|_| ())
+    }
+
+    /// 1. `<dir>/<old>` debe existir y `<dir>/<new>` no.
+    /// 2. Renombrar la carpeta (se lleva `context/` y todo lo demás).
+    /// 3. Reescribir solo la línea `slug = "..."` de `project.toml`, para conservar el
+    ///    resto del archivo tal cual (comentarios, `~` en `repo_path`).
+    async fn rename(&self, old: &ProjectSlug, new: &ProjectSlug) -> Result<(), RepoError> {
+        let from = self.dir.join(old.as_str());
+        let to = self.dir.join(new.as_str());
+        if !self.file(old).exists() {
+            return Err(RepoError::NotFound(old.to_string()));
+        }
+        if to.exists() {
+            return Err(RepoError::AlreadyExists(new.to_string()));
+        }
+        fs::rename(&from, &to)
+            .map_err(|e| RepoError::Storage(format!("{}: {e}", from.display())))?;
+        let file = self.file(new);
+        let text = fs::read_to_string(&file)
+            .map_err(|e| RepoError::Storage(format!("{}: {e}", file.display())))?;
+        let renamed: String = text
+            .lines()
+            .map(|line| {
+                if line.trim_start().starts_with("slug") && line.contains('=') {
+                    format!("slug = \"{new}\"")
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        atomic::write(&file, &renamed).map_err(|e| RepoError::Storage(e.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -167,7 +240,66 @@ mod tests {
             repo_path: Some("/code/acme".into()),
             priority_boost: 5,
             statuses: StatusSuggestions::default(),
+            context_exclude: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn context_exclusions_keep_comments_and_home_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = FsProjectRepository::with_home(dir.path(), Some("/home/ivan".into()));
+        let folder = dir.path().join("idk");
+        std::fs::create_dir_all(&folder).unwrap();
+        let original = "slug = \"idk\"\nname = \"IDK\"\nkind = \"internal\"\nrepo_path = \"~/swapps/idk\"\n\n[[match]]\ntag = \"idk\"\n\n# [[match]]\n# tag = \"old\"\n";
+        std::fs::write(folder.join("project.toml"), original).unwrap();
+        let slug: ProjectSlug = "idk".parse().unwrap();
+        let rust: SectionKey = "aprendizaje-rust".parse().unwrap();
+
+        repo.set_context_exclude(&slug, &[rust]).await.unwrap();
+        let with = std::fs::read_to_string(folder.join("project.toml")).unwrap();
+        repo.set_context_exclude(&slug, &[]).await.unwrap();
+        let without = std::fs::read_to_string(folder.join("project.toml")).unwrap();
+
+        assert!(with.contains("repo_path = \"~/swapps/idk\""), "{with}");
+        assert!(with.contains("# [[match]]\n# tag = \"old\""), "{with}");
+        assert!(
+            with.contains("[context]\nexclude = [\"aprendizaje-rust\"]"),
+            "{with}"
+        );
+        assert_eq!(repo.get(&slug).await.unwrap().context_exclude.len(), 0);
+        assert_eq!(
+            without.trim_end(),
+            original.trim_end(),
+            "back to the original"
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_moves_the_folder_and_rewrites_only_the_slug() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = FsProjectRepository::with_home(dir.path(), None);
+        repo.create(&project("idk-base")).await.unwrap();
+        let file = dir.path().join("idk-base/project.toml");
+        let text = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(&file, format!("# mi comentario\n{text}")).unwrap();
+        std::fs::create_dir_all(dir.path().join("idk-base/context")).unwrap();
+        std::fs::write(dir.path().join("idk-base/context/negocio.md"), "x").unwrap();
+        let (old, new): (ProjectSlug, ProjectSlug) =
+            ("idk-base".parse().unwrap(), "idk".parse().unwrap());
+
+        repo.rename(&old, &new).await.unwrap();
+
+        assert_eq!(repo.get(&new).await.unwrap().slug, new);
+        assert!(matches!(repo.get(&old).await, Err(RepoError::NotFound(_))));
+        assert!(dir.path().join("idk/context/negocio.md").exists());
+        let written = std::fs::read_to_string(dir.path().join("idk/project.toml")).unwrap();
+        assert!(written.starts_with("# mi comentario\n"), "{written}");
+        repo.create(&project("otro")).await.unwrap();
+        let taken: ProjectSlug = "otro".parse().unwrap();
+        assert!(matches!(
+            repo.rename(&new, &taken).await,
+            Err(RepoError::AlreadyExists(_))
+        ));
     }
 
     #[tokio::test]

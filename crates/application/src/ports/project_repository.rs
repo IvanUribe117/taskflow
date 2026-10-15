@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use domain::context::SectionKey;
 use domain::project::{Project, ProjectSlug};
 use thiserror::Error;
 
@@ -18,6 +19,25 @@ pub trait ProjectRepository: Send + Sync {
     ///
     /// [`RepoError::AlreadyExists`] si ya hay un proyecto con ese slug.
     async fn create(&self, project: &Project) -> Result<(), RepoError>;
+
+    /// Cambia **solo** las secciones globales excluidas del proyecto (`[context] exclude`),
+    /// sin tocar el resto del archivo (comentarios, reglas desactivadas, `~` en rutas).
+    ///
+    /// # Errors
+    ///
+    /// [`RepoError::NotFound`] si el proyecto no existe.
+    async fn set_context_exclude(
+        &self,
+        slug: &ProjectSlug,
+        keys: &[SectionKey],
+    ) -> Result<(), RepoError>;
+
+    /// Cambia el slug: mueve la carpeta (con sus secciones) y reescribe `project.toml`.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` si `old` no existe; `AlreadyExists` si `new` ya existe.
+    async fn rename(&self, old: &ProjectSlug, new: &ProjectSlug) -> Result<(), RepoError>;
 }
 
 #[derive(Debug, Error)]

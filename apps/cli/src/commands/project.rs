@@ -1,6 +1,9 @@
 use application::AppContext;
-use application::projects::{ListProjects, ShowProject};
-use application::settings::AppSettings;
+use std::path::Path;
+
+use application::ports::ConfigStore;
+use application::projects::{ListProjects, RenameProject, ShowProject};
+use application::settings::{AppSettings, SettingsChange};
 use domain::project::ProjectSlug;
 
 use crate::args::ProjectCommand;
@@ -20,6 +23,7 @@ pub async fn run(
     command: ProjectCommand,
     ctx: &AppContext,
     settings: &AppSettings,
+    config_path: &Path,
 ) -> anyhow::Result<()> {
     match command {
         ProjectCommand::List { json } => {
@@ -43,6 +47,19 @@ pub async fn run(
             }
         }
         ProjectCommand::Add => wizard::project_add(ctx).await?,
+        ProjectCommand::Rename { old, new } => {
+            let project = RenameProject::new(ctx).execute(&old, &new).await?;
+            // `projects.default` vive en la configuración: lo actualiza la interfaz.
+            if settings.projects.default.as_deref() == Some(old.as_str()) {
+                bootstrap::config_store(Some(config_path))?.apply(&SettingsChange::Set {
+                    key: "projects.default".parse()?,
+                    value: new.to_string(),
+                })?;
+                println!("✔ projects.default = {new}");
+            }
+            println!("✔ {old} → {new}");
+            println!("{}", presenter::project_detail(&project));
+        }
     }
     Ok(())
 }

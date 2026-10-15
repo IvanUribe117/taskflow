@@ -28,7 +28,8 @@ impl<'a> BuildContext<'a> {
         Self { ctx }
     }
 
-    /// 1. Secciones globales (`ctx.context.global_sections`).
+    /// 1. Secciones globales (`ctx.context.global_sections`), sin las que el proyecto
+    ///    excluye.
     /// 2. Si hay proyecto, sus secciones (`project_sections`); si no, ninguna.
     /// 3. `ProjectContext::merge` y `select(usage, budget_chars)`.
     /// 4. Separar `included` por rol: `Instruction` → `instructions`,
@@ -39,9 +40,15 @@ impl<'a> BuildContext<'a> {
     ///
     /// [`AppError::Repo`] si no se pueden leer las secciones.
     pub async fn execute(&self, request: ContextRequest) -> Result<BuiltContext, AppError> {
-        let global = self.ctx.context.global_sections().await?;
+        let mut global = self.ctx.context.global_sections().await?;
         let project = match &request.project {
-            Some(slug) => self.ctx.context.project_sections(slug).await?,
+            Some(slug) => {
+                // Las globales que el proyecto excluye (`[context] exclude`) no entran.
+                if let Ok(found) = self.ctx.projects.get(slug).await {
+                    global.retain(|s| !found.context_exclude.contains(&s.key));
+                }
+                self.ctx.context.project_sections(slug).await?
+            }
             None => Vec::new(),
         };
 

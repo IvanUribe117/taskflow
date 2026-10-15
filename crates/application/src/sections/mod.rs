@@ -3,8 +3,10 @@
 
 mod build_context;
 mod list_sections;
+mod manage;
 mod preview_context;
 
 pub use build_context::{BuildContext, ContextRequest};
 pub use list_sections::ListSections;
+pub use manage::{ExcludeSection, SectionFile};
 pub use preview_context::PreviewContext;

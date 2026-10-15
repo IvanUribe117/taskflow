@@ -141,6 +141,18 @@ impl HistoryRepository for FsHistoryRepository {
         Ok(entries)
     }
 
+    async fn rename_project(&self, old: &ProjectSlug, new: &ProjectSlug) -> Result<(), RepoError> {
+        let from = self.dir.join(old.as_str());
+        let to = self.dir.join(new.as_str());
+        if !from.exists() {
+            return Ok(());
+        }
+        if to.exists() {
+            return Err(RepoError::AlreadyExists(to.display().to_string()));
+        }
+        fs::rename(&from, &to).map_err(|e| RepoError::Storage(format!("{}: {e}", from.display())))
+    }
+
     async fn read(&self, entry: &HistoryEntry) -> Result<String, RepoError> {
         fs::read_to_string(&entry.path)
             .map_err(|e| RepoError::Storage(format!("{}: {e}", entry.path.display())))

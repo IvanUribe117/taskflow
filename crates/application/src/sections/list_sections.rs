@@ -26,6 +26,8 @@ impl<'a> ListSections<'a> {
     /// 4. Cada sección con [`section_view`], calculando su origen:
     ///    - la clave está entre las del proyecto y entre las globales → `"override"`;
     ///    - solo entre las del proyecto → `"project"`;
+    ///    - global, pero el proyecto la excluye → `"excluded"` (se lista para que sepas
+    ///      que existe; no se envía);
     ///    - si no → `"global"`.
     ///
     /// # Errors
@@ -35,9 +37,10 @@ impl<'a> ListSections<'a> {
         &self,
         project: Option<&ProjectSlug>,
     ) -> Result<Vec<SectionView>, AppError> {
-        if let Some(slug) = project {
-            self.ctx.projects.get(slug).await?;
-        }
+        let exclude = match project {
+            Some(slug) => self.ctx.projects.get(slug).await?.context_exclude,
+            None => Vec::new(),
+        };
 
         let global = self.ctx.context.global_sections().await?;
         let project_sections = match project {
@@ -61,6 +64,7 @@ impl<'a> ListSections<'a> {
                 ) {
                     (true, true) => "override",
                     (true, false) => "project",
+                    (false, _) if exclude.contains(&section.key) => "excluded",
                     (false, _) => "global",
                 };
                 section_view(section, origin)

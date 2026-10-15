@@ -57,6 +57,7 @@ impl<'a> CreateProject<'a> {
             repo_path: draft.repo_path,
             priority_boost: 0,
             statuses: StatusSuggestions::default(),
+            context_exclude: Vec::new(),
         };
 
         self.ctx.projects.create(&project).await?;

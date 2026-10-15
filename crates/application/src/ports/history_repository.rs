@@ -69,6 +69,10 @@ pub trait HistoryRepository: Send + Sync {
 
     /// El contenido de un registro.
     async fn read(&self, entry: &HistoryEntry) -> Result<String, RepoError>;
+
+    /// Al renombrar un proyecto, su carpeta del historial pasa al nombre nuevo. Sin
+    /// historial, no hace nada.
+    async fn rename_project(&self, old: &ProjectSlug, new: &ProjectSlug) -> Result<(), RepoError>;
 }
 
 impl HistoryFilter {

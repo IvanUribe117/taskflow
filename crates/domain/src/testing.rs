@@ -72,5 +72,6 @@ pub fn project(slug: &str, rules: Vec<MatchRule>) -> Project {
         repo_path: None,
         priority_boost: 0,
         statuses: StatusSuggestions::default(),
+        context_exclude: Vec::new(),
     }
 }

@@ -259,6 +259,7 @@ pub fn origin_label(origin: &str) -> &str {
         "global" => "global",
         "project" => "proyecto",
         "override" => "proyecto (reemplaza global)",
+        "excluded" => "global (excluida en el proyecto)",
         other => other,
     }
 }

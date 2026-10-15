@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use application::ports::{
-    AiError, CommitInput, CommitMessage, PlanInput, Summarizer, SummaryInput, TaskSummary,
+    AiError, CommitInput, CommitMessage, PlanInput, PrInput, Summarizer, SummaryInput, TaskSummary,
     WorkInput, WorkSummary,
 };
 use async_trait::async_trait;
@@ -69,6 +69,12 @@ struct PlanOutput {
     plan: String,
 }
 
+/// La respuesta de `pr_body`.
+#[derive(Debug, Deserialize)]
+struct PrBodyOutput {
+    body: String,
+}
+
 #[async_trait]
 impl Summarizer for ClaudeCodeSummarizer {
     fn name(&self) -> &'static str {
@@ -118,6 +124,26 @@ impl Summarizer for ClaudeCodeSummarizer {
             None,
         )
         .await
+    }
+
+    /// Como `summarize_work`: con la conversación del agente se la retoma en el repo; sin
+    /// ella, con los commits y el diff, pudiendo leer el repo.
+    async fn pr_body(&self, input: &PrInput) -> Result<String, AiError> {
+        let repo = input
+            .project
+            .as_ref()
+            .and_then(|project| project.repo_path.as_deref());
+        let language = prompts::pr_language(&self.config.agent_language);
+        let output: PrBodyOutput = self
+            .call_resuming(
+                &prompts::with_rule(&prompts::pr_system(input), &language),
+                prompts::pr_message(input, &language),
+                &prompts::pr_schema(),
+                repo,
+                input.agent_session.as_deref(),
+            )
+            .await?;
+        Ok(output.body)
     }
 
     /// Con la conversación del agente, se la retoma **en la carpeta del repo** (Claude Code

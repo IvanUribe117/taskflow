@@ -1,5 +1,5 @@
-//! `start`, `approve`, `reject`, `pause`, `resume`, `done`, `abort`, `agent`, `session` y
-//! `report`.
+//! `start`, `approve`, `reject`, `pause`, `resume`, `done`, `abort`, `agent`, `commit`,
+//! `pr`, `session` y `report`.
 //!
 //! Aquí solo se pregunta y se muestra: las reglas están en el dominio (`WorkSession`) y la
 //! ejecución en `application::session`.
@@ -16,10 +16,11 @@ use application::AppContext;
 use application::ai::AiLimits;
 use application::dto::SessionOutcome;
 use application::session::{
-    CommitChanges, HandleSession, PrepareAgent, PrepareCommit, PrepareWorkReport, RetrySession,
-    SessionPrefs, ShowSession, StartSession, Suggestion, suggested_statuses,
+    CommitChanges, HandleSession, PrepareAgent, PrepareCommit, PreparePullRequest,
+    PrepareWorkReport, PublishPullRequest, RetrySession, SessionPrefs, ShowSession, StartSession,
+    Suggestion, suggested_statuses,
 };
-use application::settings::AppSettings;
+use application::settings::{AfterCommit, AppSettings};
 use application::tasks::{GetTodayTasks, PrepareClose};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Input, MultiSelect, Select};
@@ -437,6 +438,11 @@ pub async fn agent(
                 AfterAgent::Commit => {
                     commit(ctx, settings, false).await?;
                 }
+                AfterAgent::PullRequest => {
+                    if let Err(error) = pull_request(ctx, settings, false, false).await {
+                        eprintln!("⚠ {error:#}");
+                    }
+                }
                 AfterAgent::PublishAndFinish => {
                     publish(ctx, settings, false, false, false).await?;
                     return done(ctx, settings, None, None, false).await;
@@ -460,6 +466,7 @@ pub async fn agent(
 /// Lo que se puede hacer al salir del agente.
 enum AfterAgent {
     Commit,
+    PullRequest,
     PublishAndFinish,
     Finish,
     BackToAgent,
@@ -467,13 +474,27 @@ enum AfterAgent {
 }
 
 /// El menú al salir del agente. "Hacer commit" aparece primero, y solo si hay cambios.
+/// Con todo commiteado, si la rama tiene commits y aún no tiene PR, "Crear el PR".
 async fn after_agent(ctx: &AppContext) -> anyhow::Result<AfterAgent> {
     let pending = PrepareCommit::new(ctx)
         .pending_files()
         .await
         .unwrap_or_default();
     let mut options: Vec<(String, AfterAgent)> = Vec::new();
-    if !pending.is_empty() {
+    if pending.is_empty() {
+        if let Ok(status) = PreparePullRequest::new(ctx).status().await
+            && status.pr.is_none()
+        {
+            options.push((
+                format!(
+                    "Subir `{}` y crear el PR ({} commits; descripción sugerida por la IA)",
+                    status.branch,
+                    status.commits.len()
+                ),
+                AfterAgent::PullRequest,
+            ));
+        }
+    } else {
         options.push((
             format!(
                 "Hacer commit de los cambios ({} archivos; mensaje sugerido por la IA)",
@@ -512,6 +533,8 @@ async fn after_agent(ctx: &AppContext) -> anyhow::Result<AfterAgent> {
 ///    cancelar.
 /// 4. `CommitChanges`: `git add` + `git commit` de esos archivos. Los hooks del repo se
 ///    ejecutan; si uno falla, ves su salida y no se hace nada más.
+/// 5. Lo que diga `session.after_commit`: nada, preguntar, push o push + PR
+///    ([`after_commit`]).
 ///
 /// # Errors
 ///
@@ -584,6 +607,209 @@ pub async fn commit(ctx: &AppContext, settings: &AppSettings, yes: bool) -> anyh
     let hash = CommitChanges::new(ctx).execute(&files, &message).await?;
     let title = message.lines().next().unwrap_or_default();
     println!("✔ Commit {hash}: {title}");
+    // El commit ya está hecho: si subirlo falla, se avisa sin convertirlo en error.
+    if let Err(error) = after_commit(ctx, settings, yes).await {
+        eprintln!(
+            "⚠ El commit quedó hecho, pero no se pudo subir: {error:#}\n  Reinténtalo con `taskflow pr`."
+        );
+    }
+    Ok(())
+}
+
+/// Qué subir después de un commit.
+enum Upload {
+    PushAndPr,
+    Push,
+    Nothing,
+}
+
+/// Después del commit, según `session.after_commit`:
+///
+/// - `none`: nada.
+/// - `push`: `git push` (si la rama ya tiene PR, queda actualizado).
+/// - `pr`: push y, si la rama no tiene PR, [`pull_request`] (ves la descripción antes de
+///   abrirlo, salvo con `--yes`).
+/// - `ask` (por defecto): pregunta. Con `--yes` o sin terminal, no sube nada.
+///
+/// En la rama base (`master`) no se sube nada: ahí no se abre un PR.
+async fn after_commit(ctx: &AppContext, settings: &AppSettings, yes: bool) -> anyhow::Result<()> {
+    let mode = settings.session.after_commit;
+    if mode == AfterCommit::None {
+        return Ok(());
+    }
+    let status = match PreparePullRequest::new(ctx).status().await {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("(No se sube nada: {error})");
+            return Ok(());
+        }
+    };
+    let upload = match mode {
+        AfterCommit::None => Upload::Nothing,
+        AfterCommit::Push => Upload::Push,
+        AfterCommit::Pr if status.pr.is_some() => Upload::Push,
+        AfterCommit::Pr => Upload::PushAndPr,
+        AfterCommit::Ask if yes || !interactive() => Upload::Nothing,
+        AfterCommit::Ask => {
+            let mut options = Vec::new();
+            match &status.pr {
+                Some(pr) => options.push((
+                    format!("Push (actualiza el PR #{})", pr.number),
+                    Upload::Push,
+                )),
+                None => options.extend([
+                    (
+                        format!("Push de `{}` y crear el PR", status.branch),
+                        Upload::PushAndPr,
+                    ),
+                    ("Solo push".to_owned(), Upload::Push),
+                ]),
+            }
+            options.push(("Ahora no".to_owned(), Upload::Nothing));
+            let labels: Vec<&str> = options.iter().map(|(label, _)| label.as_str()).collect();
+            let index = Select::with_theme(&ColorfulTheme::default())
+                .with_prompt("¿Subir el commit?")
+                .items(&labels)
+                .default(0)
+                .interact()?;
+            options.swap_remove(index).1
+        }
+    };
+    match upload {
+        Upload::Nothing => Ok(()),
+        Upload::Push => push_only(ctx).await,
+        Upload::PushAndPr => pull_request(ctx, settings, yes, false).await,
+    }
+}
+
+/// `git push` y, si la rama tiene PR, su enlace.
+async fn push_only(ctx: &AppContext) -> anyhow::Result<()> {
+    eprintln!("Subiendo la rama…");
+    match PublishPullRequest::new(ctx).push().await? {
+        Some(pr) => println!("✔ Push hecho. PR #{} actualizado: {}", pr.number, pr.url),
+        None => println!("✔ Push hecho (la rama aún no tiene PR: `taskflow pr` para abrirlo)."),
+    }
+    Ok(())
+}
+
+/// `taskflow pr [--yes] [--draft]`: sube la rama y abre el PR. Como el commit, lo hace
+/// Taskflow (`git push` y `gh`), no el agente.
+///
+/// 1. `PreparePullRequest`: la rama, su base y si ya tiene PR. Si ya lo tiene, solo el
+///    push (que lo actualiza).
+/// 2. Si no, la IA propone el título y la descripción con la plantilla del repo, los
+///    commits y el diff (retomando la conversación del agente si hay).
+/// 3. Ves el PR: crearlo, crearlo como borrador, editar el título, editar la descripción
+///    en tu editor, solo push o cancelar. Con `--yes`, se crea tal cual.
+/// 4. `PublishPullRequest`: push y `gh pr create`. Imprime el enlace.
+///
+/// # Errors
+///
+/// No hay sesión o repo, estás en la base, la rama no tiene commits, falla la IA, git o
+/// `gh`.
+pub async fn pull_request(
+    ctx: &AppContext,
+    settings: &AppSettings,
+    yes: bool,
+    draft: bool,
+) -> anyhow::Result<()> {
+    eprintln!("Revisando la rama…");
+    let status = PreparePullRequest::new(ctx).status().await?;
+    if status.pr.is_some() {
+        return push_only(ctx).await;
+    }
+    eprintln!("Escribiendo la descripción del PR con {}…", ctx.ai.name());
+    let proposal = PreparePullRequest::new(ctx)
+        .execute(prefs(settings).limits)
+        .await?;
+    for warning in &proposal.warnings {
+        eprintln!("⚠ {warning}");
+    }
+    if proposal.from_agent {
+        eprintln!("(lo escribió el mismo agente, desde su conversación)");
+    }
+    let Some(description) = proposal.description else {
+        return push_only(ctx).await;
+    };
+    let status = proposal.status;
+    let mut title = description.title;
+    let mut body = description.body;
+    let mut draft = draft || settings.session.pr_draft;
+    if !yes && interactive() {
+        let theme = ColorfulTheme::default();
+        loop {
+            println!(
+                "\nPR de `{}` → `{}` ({} commits)\n\n{title}\n\n{}\n{}",
+                status.branch,
+                status.base,
+                status.commits.len(),
+                markdown::render(&body),
+                "─".repeat(40)
+            );
+            let create = if draft {
+                "Crear el PR (borrador)"
+            } else {
+                "Crear el PR"
+            };
+            let toggle = if draft {
+                "Crearlo listo para revisión (no borrador)"
+            } else {
+                "Crearlo como borrador"
+            };
+            let choice = Select::with_theme(&theme)
+                .with_prompt("¿Abrir este PR?")
+                .items(&[
+                    create,
+                    toggle,
+                    "Editar el título",
+                    "Editar la descripción en tu editor",
+                    "Solo push, sin PR",
+                    "Cancelar",
+                ])
+                .default(0)
+                .interact()?;
+            match choice {
+                0 => break,
+                1 => {
+                    draft = !draft;
+                    break;
+                }
+                2 => {
+                    title = Input::with_theme(&theme)
+                        .with_prompt("Título")
+                        .with_initial_text(&title)
+                        .interact_text()?;
+                }
+                3 => {
+                    let path =
+                        std::env::temp_dir().join(format!("taskflow-pr-{}.md", std::process::id()));
+                    std::fs::write(&path, &body)?;
+                    edit_file(&path)?;
+                    std::fs::read_to_string(&path)?.trim().clone_into(&mut body);
+                    let _ = std::fs::remove_file(&path);
+                }
+                4 => return push_only(ctx).await,
+                _ => {
+                    println!("Cancelado. No se subió nada.");
+                    return Ok(());
+                }
+            }
+        }
+    }
+    eprintln!("Subiendo la rama y abriendo el PR…");
+    let (pr, created) = PublishPullRequest::new(ctx)
+        .open(&title, &body, draft)
+        .await?;
+    if created {
+        println!(
+            "✔ PR #{} creado{}: {}",
+            pr.number,
+            if draft { " (borrador)" } else { "" },
+            pr.url
+        );
+    } else {
+        println!("✔ Push hecho. PR #{} actualizado: {}", pr.number, pr.url);
+    }
     Ok(())
 }
 

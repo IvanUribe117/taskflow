@@ -19,7 +19,7 @@ const MAX_DIFF_CHARS: usize = 12_000;
 const RECENT_COMMITS: usize = 10;
 
 /// La sesión activa y el repositorio de su proyecto (debe existir en disco).
-async fn session_repo(ctx: &AppContext) -> Result<(WorkSession, PathBuf), AppError> {
+pub(super) async fn session_repo(ctx: &AppContext) -> Result<(WorkSession, PathBuf), AppError> {
     let session = ctx
         .sessions
         .active()

@@ -86,11 +86,21 @@ impl ConfigStore for FsConfigStore {
         let text = match change {
             SettingsChange::Set { key, value } => {
                 let mut doc = self.document()?;
-                let value = edit::parse_value(value, edit::lookup(&doc, *key));
-                edit::set(&mut doc, *key, value)?;
-                let text = doc.to_string();
-                // Validar el documento completo antes de escribir (FR-22).
-                parse(&text)?;
+                let parsed = edit::parse_value(value, edit::lookup(&doc, *key));
+                let literal = parsed.is_str();
+                edit::set(&mut doc, *key, parsed)?;
+                let mut text = doc.to_string();
+                // Validar el documento completo antes de escribir (FR-22). Si la clave aún
+                // no estaba en el archivo, `true` o `10` se interpretan como TOML; si la
+                // clave espera texto (`session.agent_command true`), se reintenta como texto.
+                if let Err(error) = parse(&text) {
+                    if literal {
+                        return Err(error);
+                    }
+                    edit::set(&mut doc, *key, toml_edit::Value::from(value.as_str()))?;
+                    text = doc.to_string();
+                    parse(&text).map_err(|_| error)?;
+                }
                 text
             }
             SettingsChange::Replace(settings) => {
@@ -232,8 +242,15 @@ mod tests {
         )
         .unwrap();
         set(&store, "ui.group_by", "project").unwrap();
+        set(&store, "session.agent_command", "true").unwrap();
+        set(&store, "session.pr_draft", "true").unwrap();
 
         let loaded = store.load().unwrap();
+        assert_eq!(
+            loaded.session.agent_command, "true",
+            "a text key keeps text"
+        );
+        assert!(loaded.session.pr_draft);
         assert_eq!(loaded.provider.status_map.in_review, ["Code Review", "QA"]);
         assert_eq!(loaded.ui.group_by, application::tasks::GroupBy::Project);
     }

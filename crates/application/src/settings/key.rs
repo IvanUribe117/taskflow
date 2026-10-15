@@ -45,6 +45,8 @@ impl ConfigKey {
         "session.track_time",
         "session.notify",
         "session.agent_command",
+        "session.after_commit",
+        "session.pr_draft",
         "ui.group_by",
     ];
 

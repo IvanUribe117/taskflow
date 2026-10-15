@@ -13,7 +13,8 @@ use domain::task::{Comment, StatusOption, Task, UserId};
 use domain::session::{Publication, ReportOutcome, WorkSession};
 
 use crate::ports::{
-    ChangedFile, CommitMessage, HistoryEntry, PlanTask, RecordSubject, TaskSummary, TimeEntry,
+    ChangedFile, CommitMessage, HistoryEntry, PlanTask, PrDescription, PullRequest, RecordSubject,
+    TaskSummary, TimeEntry,
 };
 use serde::Serialize;
 
@@ -792,5 +793,32 @@ pub struct CommitProposal {
     pub files: Vec<ChangedFile>,
     /// El mensaje que propone la IA; lo puedes editar.
     pub message: CommitMessage,
+    pub warnings: Vec<String>,
+}
+
+/// El estado de la rama para `taskflow pr`, sin IA.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BranchStatus {
+    pub repo: PathBuf,
+    pub branch: String,
+    /// La rama a la que se integra, sin `origin/` (`master`).
+    pub base: String,
+    /// Los commits de la rama respecto de la base (`git log --oneline`).
+    pub commits: Vec<String>,
+    /// El PR abierto de la rama, si ya hay.
+    pub pr: Option<PullRequest>,
+    /// Si quedan cambios sin commit (no se suben).
+    pub uncommitted: bool,
+}
+
+/// Lo que propone `taskflow pr` para que lo revises antes de abrirlo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PrProposal {
+    pub status: BranchStatus,
+    /// El título y la descripción que propone la IA. `None` si la rama ya tiene PR (solo
+    /// hace falta el push).
+    pub description: Option<PrDescription>,
+    /// `true` si lo escribió el mismo agente (retomando su conversación).
+    pub from_agent: bool,
     pub warnings: Vec<String>,
 }

@@ -8,6 +8,7 @@ mod context_repository;
 mod history_repository;
 mod notifier;
 mod project_repository;
+mod pull_requests;
 mod repo_inspector;
 mod secret_store;
 mod session_store;
@@ -24,12 +25,14 @@ pub use history_repository::{
 };
 pub use notifier::{MultiNotifier, NoopNotifier, Notice, Notifier, NotifyError};
 pub use project_repository::{ProjectRepository, RepoError};
+pub use pull_requests::{NoPullRequests, PullRequest, PullRequestDraft, PullRequests};
 pub use repo_inspector::{ChangedFile, NoRepoInspector, RepoChanges, RepoCommitter, RepoInspector};
 pub use secret_store::{SecretError, SecretName, SecretStore};
 pub use session_store::SessionStore;
 pub use summarizer::{
-    AiError, CommitInput, CommitMessage, Complexity, PlanInput, PlanTask, PreviousWork,
-    ProjectBrief, Summarizer, SummaryInput, TaskBrief, TaskSummary, WorkInput, WorkSummary,
+    AiError, CommitInput, CommitMessage, Complexity, PlanInput, PlanTask, PrDescription, PrInput,
+    PreviousWork, ProjectBrief, Summarizer, SummaryInput, TaskBrief, TaskSummary, WorkInput,
+    WorkSummary,
 };
 pub use task_provider::{ProviderError, TaskProvider, TaskQuery};
 pub use time_tracker::{LocalTimeTracker, TimeEntry, TimeTracker};

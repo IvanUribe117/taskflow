@@ -16,10 +16,11 @@ use crate::AppContext;
 use crate::ports::{
     AiError, ChangedFile, Clock, CommitInput, CommitMessage, Complexity, ContextRepository,
     ExposeSecret, HistoryEntry, HistoryFilter, HistoryRecord, HistoryRepository, Notice, Notifier,
-    NotifyError, PlanInput, ProjectRepository, ProviderError, RepoChanges, RepoCommitter,
-    RepoError, RepoInspector, SecretError, SecretName, SecretStore, SecretString, SessionStore,
-    Summarizer, SummaryInput, TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker,
-    WorkInput, WorkSummary, markdown_title,
+    NotifyError, PlanInput, PrInput, ProjectRepository, ProviderError, PullRequest,
+    PullRequestDraft, PullRequests, RepoChanges, RepoCommitter, RepoError, RepoInspector,
+    SecretError, SecretName, SecretStore, SecretString, SessionStore, Summarizer, SummaryInput,
+    TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker, WorkInput, WorkSummary,
+    markdown_title,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
@@ -326,6 +327,7 @@ pub fn context(
         sessions: Arc::new(FakeSessionStore::default()),
         repo: Arc::new(FakeRepoInspector::default()),
         committer: Arc::new(FakeRepoCommitter::default()),
+        prs: Arc::new(FakePullRequests::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -772,6 +774,7 @@ pub struct FakeSummarizer {
     plans: Mutex<Vec<PlanInput>>,
     works: Mutex<Vec<WorkInput>>,
     commits: Mutex<Vec<CommitInput>>,
+    prs: Mutex<Vec<PrInput>>,
     resume_fails: bool,
 }
 
@@ -826,6 +829,11 @@ impl FakeSummarizer {
         self.commits.lock().expect("lock").clone()
     }
 
+    /// Las entradas recibidas por `pr_body`, en orden.
+    pub fn pr_inputs(&self) -> Vec<PrInput> {
+        self.prs.lock().expect("lock").clone()
+    }
+
     /// Las entradas recibidas por `summarize_work`, en orden.
     pub fn work_inputs(&self) -> Vec<WorkInput> {
         self.works.lock().expect("lock").clone()
@@ -875,6 +883,14 @@ impl Summarizer for FakeSummarizer {
         })
     }
 
+    async fn pr_body(&self, input: &PrInput) -> Result<String, AiError> {
+        self.prs.lock().expect("lock").push(input.clone());
+        if self.failing || (self.resume_fails && input.agent_session.is_some()) {
+            return Err(AiError::Failed("fake failure".into()));
+        }
+        Ok("## What changed\n\nBlue gradient.".into())
+    }
+
     async fn summarize_work(&self, input: &WorkInput) -> Result<WorkSummary, AiError> {
         self.works.lock().expect("lock").push(input.clone());
         if self.failing || (self.resume_fails && input.agent_session.is_some()) {
@@ -896,6 +912,7 @@ pub struct FakeRepoCommitter {
     pub files: Vec<ChangedFile>,
     pub failing: bool,
     commits: Mutex<Vec<(Vec<String>, String)>>,
+    pushes: Mutex<usize>,
 }
 
 impl FakeRepoCommitter {
@@ -911,6 +928,11 @@ impl FakeRepoCommitter {
                 .collect(),
             ..Self::default()
         }
+    }
+
+    /// Cuántas veces se hizo push.
+    pub fn pushes(&self) -> usize {
+        *self.pushes.lock().expect("lock")
     }
 
     /// Los commits hechos: archivos y mensaje.
@@ -955,6 +977,77 @@ impl RepoCommitter for FakeRepoCommitter {
             .expect("lock")
             .push((files.to_vec(), message.to_owned()));
         Ok("abc1234".into())
+    }
+
+    async fn push(&self, _repo: &std::path::Path) -> Result<(), RepoError> {
+        if self.failing {
+            return Err(RepoError::Invalid("rejected".into()));
+        }
+        *self.pushes.lock().expect("lock") += 1;
+        Ok(())
+    }
+}
+
+/// PRs en memoria: el que ya existe (si hay) y los que se abren.
+#[derive(Debug, Default)]
+pub struct FakePullRequests {
+    pub existing: Option<PullRequest>,
+    /// `find` falla, como `gh` sin sesión.
+    pub failing_find: bool,
+    pub template: Option<String>,
+    created: Mutex<Vec<PullRequestDraft>>,
+}
+
+impl FakePullRequests {
+    /// La rama ya tiene este PR abierto.
+    pub fn with_existing(pr: PullRequest) -> Self {
+        Self {
+            existing: Some(pr),
+            ..Self::default()
+        }
+    }
+
+    /// El repo tiene esta plantilla de PR.
+    pub fn with_template(template: &str) -> Self {
+        Self {
+            template: Some(template.to_owned()),
+            ..Self::default()
+        }
+    }
+
+    /// Los PRs abiertos, en orden.
+    pub fn created(&self) -> Vec<PullRequestDraft> {
+        self.created.lock().expect("lock").clone()
+    }
+}
+
+#[async_trait]
+impl PullRequests for FakePullRequests {
+    async fn find(
+        &self,
+        _repo: &std::path::Path,
+        _branch: &str,
+    ) -> Result<Option<PullRequest>, RepoError> {
+        if self.failing_find {
+            return Err(RepoError::Invalid("gh: not logged in".into()));
+        }
+        Ok(self.existing.clone())
+    }
+
+    async fn template(&self, _repo: &std::path::Path) -> Result<Option<String>, RepoError> {
+        Ok(self.template.clone())
+    }
+
+    async fn create(
+        &self,
+        _repo: &std::path::Path,
+        draft: &PullRequestDraft,
+    ) -> Result<PullRequest, RepoError> {
+        self.created.lock().expect("lock").push(draft.clone());
+        Ok(PullRequest {
+            number: 42,
+            url: "https://github.com/acme/idk/pull/42".into(),
+        })
     }
 }
 

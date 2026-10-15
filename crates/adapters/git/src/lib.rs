@@ -3,8 +3,14 @@
 //! - `RepoInspector`: lee la rama de trabajo (`rev-parse`, `merge-base`, `log`, `diff`,
 //!   `status`). Nunca cambia nada.
 //! - `RepoCommitter`: `git add` y `git commit` **solo** de los archivos que elegiste, para
-//!   `taskflow commit`.
+//!   `taskflow commit`, y `git push` para `taskflow pr`.
+//!
+//! Y `GhPullRequests` (módulo [`github`]): los PR de GitHub con `gh`.
 #![warn(clippy::pedantic)]
+
+mod github;
+
+pub use github::GhPullRequests;
 
 use std::path::Path;
 
@@ -230,6 +236,32 @@ impl RepoCommitter for GitRepoInspector {
             .await?
             .ok_or_else(|| RepoError::Invalid("git rev-parse failed".into()))
     }
+
+    /// `git push -u origin HEAD`. Sin terminal para preguntar credenciales: si hacen falta,
+    /// falla con el mensaje de git en vez de quedarse esperando.
+    async fn push(&self, repo: &Path) -> Result<(), RepoError> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["push", "-u", "origin", "HEAD"])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::null())
+            .output()
+            .await
+            .map_err(|e| RepoError::Storage(format!("git: {e}")))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        Err(RepoError::Invalid(format!(
+            "git push failed:\n{}",
+            text.trim()
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -350,6 +382,36 @@ mod tests {
         let recent = GitRepoInspector.recent_commits(path, 5).await.unwrap();
         assert_eq!(recent.len(), 3);
         assert!(recent[0].ends_with("CU-1 - feat: otro fondo"));
+    }
+
+    #[tokio::test]
+    async fn push_sets_the_upstream_of_the_branch() {
+        let dir = repo().await;
+        let remote = tempfile::tempdir().unwrap();
+        run(remote.path(), &["init", "-q", "--bare"]).await;
+        let url = remote.path().to_str().unwrap();
+        run(dir.path(), &["remote", "add", "origin", url]).await;
+
+        GitRepoInspector.push(dir.path()).await.unwrap();
+
+        let upstream = git(dir.path(), &["rev-parse", "--abbrev-ref", "@{u}"])
+            .await
+            .unwrap();
+        assert_eq!(upstream.as_deref(), Some("origin/CU-1"));
+        let pushed = git(remote.path(), &["log", "--oneline", "-1", "CU-1"])
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(pushed.ends_with("fondo del login"), "{pushed}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_push_brings_git_output() {
+        let dir = repo().await; // Sin `origin`.
+
+        let error = GitRepoInspector.push(dir.path()).await.unwrap_err();
+
+        assert!(error.to_string().contains("git push failed"), "{error}");
     }
 
     #[tokio::test]

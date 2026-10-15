@@ -28,6 +28,36 @@ pub trait Summarizer: Send + Sync {
 
     /// Un mensaje de commit para los cambios pendientes (`taskflow commit`).
     async fn commit_message(&self, input: &CommitInput) -> Result<CommitMessage, AiError>;
+
+    /// La descripción del PR en Markdown (`taskflow pr`). El título no lo escribe la IA:
+    /// sale de la tarea ([`pr_title`](crate::session::pr_title)).
+    async fn pr_body(&self, input: &PrInput) -> Result<String, AiError>;
+}
+
+/// Todo lo que recibe `pr_body`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrInput {
+    pub task: TaskBrief,
+    pub project: Option<ProjectBrief>,
+    /// La rama, la base, los commits y el diff contra la base.
+    pub changes: RepoChanges,
+    /// La plantilla de PR del repo, si tiene: la descripción debe seguirla.
+    pub template: Option<String>,
+    /// La conversación del agente: si se puede retomar, el PR lo escribe él, que sabe qué
+    /// hizo y cómo lo verificó.
+    pub agent_session: Option<String>,
+    /// Secciones `instruction` (tus reglas).
+    pub context: BuiltContext,
+}
+
+/// El PR que se propone. A diferencia del comentario de entrega (para QA), lo lee quien
+/// revisa el código: puede ser técnico.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrDescription {
+    /// `CU-<id> - <título de la tarea>`, sin IA.
+    pub title: String,
+    /// Markdown, siguiendo la plantilla si hay.
+    pub body: String,
 }
 
 /// Todo lo que recibe `commit_message`.

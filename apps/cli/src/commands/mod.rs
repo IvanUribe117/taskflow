@@ -113,6 +113,7 @@ async fn with_context(
         } => session::start(ctx, settings, task_id, yes, fresh).await,
         Command::Agent { print } => session::agent(ctx, settings, print).await,
         Command::Commit { yes } => session::commit(ctx, settings, yes).await,
+        Command::Pr { yes, draft } => session::pull_request(ctx, settings, yes, draft).await,
         Command::Approve { status } => session::approve(ctx, settings, status).await,
         Command::Reject { note } => {
             session::handle(ctx, settings, SessionCommand::Reject { note }).await

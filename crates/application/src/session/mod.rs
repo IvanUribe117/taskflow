@@ -6,12 +6,14 @@
 
 mod agent;
 mod commit;
+mod pr;
 mod report;
 mod runner;
 mod work;
 
 pub use agent::PrepareAgent;
 pub use commit::{CommitChanges, PrepareCommit};
+pub use pr::{PreparePullRequest, PublishPullRequest, pr_title};
 pub use report::render as render_report;
 pub use work::PrepareWorkReport;
 

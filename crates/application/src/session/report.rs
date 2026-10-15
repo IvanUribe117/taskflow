@@ -4,7 +4,7 @@
 use std::fmt::Write;
 
 use crate::dto::TaskInsight;
-use crate::ports::{Complexity, RepoChanges, WorkSummary};
+use crate::ports::{Complexity, PullRequest, RepoChanges, WorkSummary};
 
 /// ```markdown
 /// ## Reporte de trabajo · Fix invoice rounding
@@ -100,7 +100,11 @@ fn bullets(report: &mut String, title: &str, items: &[String], empty: &str) {
 /// Rama: `CU-86b1-fondo-login`
 /// ```
 #[must_use]
-pub fn render_work(work: &WorkSummary, changes: Option<&RepoChanges>) -> String {
+pub fn render_work(
+    work: &WorkSummary,
+    changes: Option<&RepoChanges>,
+    pr: Option<&PullRequest>,
+) -> String {
     let mut parts = vec![work.summary.trim().to_owned()];
     if !work.how_to_test.is_empty() {
         let mut steps = "Cómo probarlo:".to_owned();
@@ -112,8 +116,13 @@ pub fn render_work(work: &WorkSummary, changes: Option<&RepoChanges>) -> String 
     if !work.notes.is_empty() {
         parts.push(labeled("A tener en cuenta", &work.notes, ""));
     }
-    if let Some(changes) = changes {
-        parts.push(format!("Rama: `{}`", changes.branch));
+    match (changes, pr) {
+        (Some(changes), Some(pr)) => {
+            parts.push(format!("Rama: `{}` · PR: {}", changes.branch, pr.url));
+        }
+        (Some(changes), None) => parts.push(format!("Rama: `{}`", changes.branch)),
+        (None, Some(pr)) => parts.push(format!("PR: {}", pr.url)),
+        (None, None) => {}
     }
     parts.join("\n\n") + "\n"
 }
@@ -188,7 +197,7 @@ mod tests {
         };
 
         assert_eq!(
-            render_work(&work, Some(&changes)),
+            render_work(&work, Some(&changes), None),
             "Cambié el fondo del login por un degradado azul.\n\n\
              Cómo probarlo:\n1. Entrar a /accounts/login/.\n2. Ver el degradado.\n\n\
              Rama: `CU-1`\n"
@@ -197,13 +206,21 @@ mod tests {
         with_notes.notes = vec!["Falta la página de contraseña.".into()];
         with_notes.how_to_test.clear();
         assert_eq!(
-            render_work(&with_notes, None),
+            render_work(&with_notes, None, None),
             "Cambié el fondo del login por un degradado azul.\n\n\
              A tener en cuenta:\n- Falta la página de contraseña.\n"
         );
         assert!(
-            !render_work(&work, None).contains('#'),
+            !render_work(&work, None, None).contains('#'),
             "no headings in a comment"
+        );
+        let pr = PullRequest {
+            number: 7,
+            url: "https://github.com/acme/idk/pull/7".into(),
+        };
+        assert!(
+            render_work(&work, Some(&changes), Some(&pr))
+                .ends_with("Rama: `CU-1` · PR: https://github.com/acme/idk/pull/7\n")
         );
     }
 

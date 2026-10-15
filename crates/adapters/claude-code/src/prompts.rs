@@ -11,7 +11,7 @@
 use std::fmt::Write;
 
 use application::dto::ContextBlock;
-use application::ports::{CommitInput, PlanInput, SummaryInput, WorkInput};
+use application::ports::{CommitInput, PlanInput, PrInput, SummaryInput, WorkInput};
 use serde_json::{Value, json};
 
 /// El rol y las reglas para `summarize_task`.
@@ -54,6 +54,17 @@ algo (qué y por qué, no cómo); si no, deja el cuerpo vacío. Sigue EXACTAMENT
 commits recientes del repositorio (prefijos, mayúsculas, id de la tarea). Describe solo lo que \
 muestra el diff.";
 
+/// El rol y las reglas para `pr_body`.
+const PR_ROLE: &str = "Escribes la descripción de un pull request (el título ya está decidido). Lo lee \
+quien hace el code review: puede ser técnica, pero concisa y concreta. Devuelve exclusivamente el JSON \
+pedido. body: Markdown. Si hay plantilla \
+(<template>), síguela: los mismos títulos en el mismo orden, cada comentario <!-- --> reemplazado por \
+el contenido que pide y sus reglas respetadas (por ejemplo, escribir \"None\" en una sección \
+obligatoria que no aplica). Sin plantilla: qué cambió y por qué, cómo se verificó y notas para quien \
+revisa. Basa la descripción en los commits y el diff (y en la conversación, si la retomas); no \
+inventes verificaciones que no ocurrieron. Lo que no tiene commit no entra en el PR: no lo describas \
+como parte de él. Enlaza la tarea con su url. Sin firmas ni relleno.";
+
 /// Las reglas de idioma de cada llamada, al final del *system prompt*.
 pub(crate) fn summary_language(report: &str, agent: &str) -> String {
     format!(
@@ -71,6 +82,10 @@ pub(crate) fn commit_language(agent: &str) -> String {
     format!(
         "Idioma: escribe el mensaje de commit en {agent}, aunque los commits recientes estén en otro."
     )
+}
+
+pub(crate) fn pr_language(agent: &str) -> String {
+    format!("Idioma: escribe la descripción del PR en {agent}.")
 }
 
 /// `system` + una línea en blanco + `rule`.
@@ -197,6 +212,64 @@ pub(crate) fn commit_message(input: &CommitInput) -> String {
         input.diff.trim()
     );
     message
+}
+
+pub(crate) fn pr_system(input: &PrInput) -> String {
+    system_prompt(PR_ROLE, &input.context.instructions)
+}
+
+/// El mensaje de `pr_body`:
+///
+/// - Si se retoma la conversación del agente, se lo pide **a él**.
+/// - `<rules>` con el rol y el idioma (al retomar, el *system prompt* que manda es el de la
+///   conversación).
+/// - `<task>`, `<branch>` (rama, base, commits y `--stat`), `<template>` si hay y `<diff>`.
+pub(crate) fn pr_message(input: &PrInput, language: &str) -> String {
+    let task = &input.task;
+    let changes = &input.changes;
+    let mut message = if input.agent_session.is_some() {
+        "Taskflow: voy a abrir el pull request de lo que hiciste en esta conversación. Escribe su \
+         descripción.\n\n"
+            .to_owned()
+    } else {
+        "Escribe la descripción del pull request de esta rama.\n\n".to_owned()
+    };
+    let _ = write!(
+        message,
+        "<rules>\n{PR_ROLE}\n{language}\n</rules>\n\n\
+         <task>\nid: {}\ntítulo: {}\nurl: {}\n</task>\n\n\
+         <branch>\nrama: {}\nbase: {}\ncommits:\n",
+        task.id,
+        task.title,
+        task.url,
+        changes.branch,
+        changes.base.as_deref().unwrap_or("(desconocida)")
+    );
+    for commit in &changes.commits {
+        let _ = writeln!(message, "- {commit}");
+    }
+    let _ = write!(message, "\n{}\n</branch>", changes.stat.trim());
+    if let Some(template) = &input.template {
+        let _ = write!(message, "\n\n<template>\n{}\n</template>", template.trim());
+    }
+    let _ = write!(
+        message,
+        "\n\n<diff>\n```diff\n{}\n```\n</diff>",
+        changes.diff.trim()
+    );
+    message
+}
+
+/// El JSON que debe devolver `pr_body`.
+pub(crate) fn pr_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "body": { "type": "string" }
+        },
+        "required": ["body"],
+        "additionalProperties": false
+    })
 }
 
 /// El JSON que debe devolver `commit_message`.
@@ -577,6 +650,42 @@ mod tests {
             serde_json::from_value(serde_json::json!({"subject": "s", "body": ""})).unwrap();
         assert_eq!(parsed.full(), "s");
         assert_eq!(commit_schema()["required"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn pr_message_has_the_rules_branch_template_and_diff() {
+        let work = work_input(false);
+        let input = PrInput {
+            task: work.task,
+            project: None,
+            changes: work.changes.unwrap(),
+            template: Some("## What changed\n<!-- what -->".into()),
+            agent_session: None,
+            context: BuiltContext::default(),
+        };
+        let language = pr_language("English");
+
+        let fresh = pr_message(&input, &language);
+        let resumed = pr_message(
+            &PrInput {
+                agent_session: Some("id".into()),
+                ..input.clone()
+            },
+            &language,
+        );
+
+        assert!(fresh.starts_with("Escribe la descripción del pull request"));
+        assert!(resumed.starts_with("Taskflow: voy a abrir el pull request"));
+        for part in [
+            "Idioma: escribe la descripción del PR en English.\n</rules>",
+            "url: https://app.clickup.com/t/86b2x1abc\n</task>",
+            "<branch>\nrama: CU-1\nbase: origin/master\ncommits:\n- abc fix login\n\nlogin.html | 2 +-\n</branch>",
+            "<template>\n## What changed\n<!-- what -->\n</template>",
+            "<diff>\n```diff\n-old\n+new\n```\n</diff>",
+        ] {
+            assert!(fresh.contains(part), "missing {part:?} in {fresh}");
+        }
+        assert_eq!(pr_schema()["required"], serde_json::json!(["body"]));
     }
 
     #[test]

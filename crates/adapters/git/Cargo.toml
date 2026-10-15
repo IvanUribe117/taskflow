@@ -1,6 +1,6 @@
 [package]
 name = "adapter-git"
-description = "Read-only git inspection: branch, commits and diff of the work branch."
+description = "git (branch, diff, commit, push) and GitHub pull requests with gh."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 application.workspace = true
 async-trait.workspace = true
-tokio = { workspace = true, features = ["process", "io-util"] }
+tokio = { workspace = true, features = ["process", "io-util", "fs"] }
 
 [dev-dependencies]
 tempfile.workspace = true

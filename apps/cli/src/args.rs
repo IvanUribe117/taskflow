@@ -46,8 +46,10 @@ pub enum Command {
     },
     /// Detalle de una tarea con sus comentarios.
     Show {
+        /// El ID de la tarea (por ejemplo, `86bcjdn6v`).
         #[arg(value_parser = parse_task_id)]
         task_id: TaskId,
+        /// Salida en JSON (para scripts).
         #[arg(long)]
         json: bool,
         /// Agrega el análisis de la IA: resumen, pasos, preguntas y prompt para el agente.
@@ -68,6 +70,7 @@ pub enum Command {
         /// Solo un proyecto; también suma su contexto.
         #[arg(long, value_name = "SLUG")]
         project: Option<ProjectSlug>,
+        /// Salida en JSON (para scripts).
         #[arg(long)]
         json: bool,
         /// Guarda el plan en el historial (ver `taskflow history`).
@@ -91,11 +94,13 @@ pub enum Command {
         /// Muestra el contenido del más reciente en vez de la lista.
         #[arg(long)]
         last: bool,
+        /// Salida en JSON (para scripts).
         #[arg(long)]
         json: bool,
     },
     /// Cierra una tarea: estado final y comentario opcional, con confirmación.
     Close {
+        /// El ID de la tarea (por ejemplo, `86bcjdn6v`).
         #[arg(value_parser = parse_task_id)]
         task_id: TaskId,
         /// Estado final (sin distinguir mayúsculas). Sin él, se elige de una lista.
@@ -140,6 +145,7 @@ pub enum Command {
         /// Estado final (sin distinguir mayúsculas). Sin él, se elige de una lista.
         #[arg(long)]
         status: Option<String>,
+        /// Comentario de cierre.
         #[arg(long)]
         comment: Option<String>,
         /// No preguntar: usa el estado sugerido si no se indica --status.
@@ -151,6 +157,7 @@ pub enum Command {
         /// Devuelve la tarea al estado que tenía al empezar.
         #[arg(long)]
         restore_status: bool,
+        /// Sin confirmación.
         #[arg(long)]
         yes: bool,
     },
@@ -166,6 +173,16 @@ pub enum Command {
         /// Sin preguntar: los archivos que git ya conoce y el mensaje propuesto.
         #[arg(long)]
         yes: bool,
+    },
+    /// Sube la rama (`git push`) y abre el PR: título `CU-<id> - <tarea>` y descripción de
+    /// la IA. Si la rama ya tiene PR, solo hace el push (que lo actualiza).
+    Pr {
+        /// Sin preguntar: abre el PR con la descripción propuesta.
+        #[arg(long)]
+        yes: bool,
+        /// Abrirlo como borrador (también `session.pr_draft = true`).
+        #[arg(long)]
+        draft: bool,
     },
     /// La sesión activa: ver, cambiar el estado de la tarea o reintentar.
     Session {
@@ -190,11 +207,15 @@ pub enum Command {
 pub enum SessionSubcommand {
     /// Estado, tiempo, reporte y lo pendiente (es lo que hace `taskflow session` solo).
     Show {
+        /// Salida en JSON (para scripts).
         #[arg(long)]
         json: bool,
     },
     /// Cambia el estado de la tarea sin cambiar la sesión (por ejemplo, `blocked`).
-    Status { name: String },
+    Status {
+        /// El nombre del estado en el proveedor (sin distinguir mayúsculas).
+        name: String,
+    },
     /// Reintenta lo que quedó pendiente tras un error (o el análisis, si se cortó).
     Retry,
 }
@@ -203,16 +224,19 @@ pub enum SessionSubcommand {
 pub enum ReportSubcommand {
     /// El plan (`report.md`) tal como está en disco; con --work, lo que se hizo.
     Show {
+        /// Lo que se hizo (`work-report.md`) en vez del plan.
         #[arg(long)]
         work: bool,
     },
     /// Lo abre en tu editor (`$VISUAL`, `$EDITOR` o `vi`); con --work, lo que se hizo.
     Edit {
+        /// Lo que se hizo (`work-report.md`) en vez del plan.
         #[arg(long)]
         work: bool,
     },
     /// Publica lo que se hizo como comentario (lo arma la IA si no existe; pide confirmación).
     Publish {
+        /// Sin preguntar: publica tal cual.
         #[arg(long)]
         yes: bool,
         /// Vuelve a armarlo aunque ya exista.
@@ -228,43 +252,55 @@ pub enum ReportSubcommand {
 pub enum ContextCommand {
     /// Una sección global deja de aplicar a un proyecto (por ejemplo, Rust en un proyecto de Python).
     Exclude {
+        /// La clave de la sección: el nombre del archivo, sin `.md` (`negocio`).
         #[arg(value_parser = parse_section_key)]
         key: SectionKey,
+        /// El proyecto.
         #[arg(long, value_name = "SLUG")]
         project: ProjectSlug,
     },
     /// Deshace `exclude`: la sección global vuelve a aplicar al proyecto.
     Include {
+        /// La clave de la sección: el nombre del archivo, sin `.md` (`negocio`).
         #[arg(value_parser = parse_section_key)]
         key: SectionKey,
+        /// El proyecto.
         #[arg(long, value_name = "SLUG")]
         project: ProjectSlug,
     },
     /// Abre una sección en tu editor (la crea si no existe). Sin --project, una global.
     Edit {
+        /// La clave de la sección: el nombre del archivo, sin `.md` (`negocio`).
         #[arg(value_parser = parse_section_key)]
         key: SectionKey,
+        /// Una sección del proyecto (sin él, una global).
         #[arg(long, value_name = "SLUG")]
         project: Option<ProjectSlug>,
     },
     /// Borra una sección (pide confirmación). Sin --project, una global.
     Remove {
+        /// La clave de la sección: el nombre del archivo, sin `.md` (`negocio`).
         #[arg(value_parser = parse_section_key)]
         key: SectionKey,
+        /// Una sección del proyecto (sin él, una global).
         #[arg(long, value_name = "SLUG")]
         project: Option<ProjectSlug>,
+        /// Sin confirmación.
         #[arg(long)]
         yes: bool,
     },
     /// Las secciones globales, o las que aplican a un proyecto.
     List {
+        /// Solo las que aplican a este proyecto.
         #[arg(long, value_name = "SLUG")]
         project: Option<ProjectSlug>,
+        /// Salida en JSON (para scripts).
         #[arg(long)]
         json: bool,
     },
     /// Exactamente lo que recibiría la IA para una tarea, sin llamarla.
     Preview {
+        /// El ID de la tarea (por ejemplo, `86bcjdn6v`).
         #[arg(value_parser = parse_task_id)]
         task_id: TaskId,
         // `help` en vez de un comentario `///`: clippy pediría comillas invertidas en
@@ -275,6 +311,7 @@ pub enum ContextCommand {
             help = "Uso: summary, plan, agent_prompt o playbook"
         )]
         usage: Usage,
+        /// Salida en JSON (para scripts).
         #[arg(long)]
         json: bool,
     },
@@ -284,19 +321,27 @@ pub enum ContextCommand {
 pub enum ProjectCommand {
     /// Todos los proyectos con sus reglas.
     List {
+        /// Salida en JSON (para scripts).
         #[arg(long)]
         json: bool,
     },
     /// Un proyecto. Sin SLUG, usa `projects.default`.
     Show {
+        /// El slug del proyecto.
         slug: Option<ProjectSlug>,
+        /// Salida en JSON (para scripts).
         #[arg(long)]
         json: bool,
     },
     /// Asistente: elige espacios, carpetas o listas del proveedor y crea el proyecto.
     Add,
     /// Cambia el slug: la carpeta, sus secciones, su historial y la sesión activa.
-    Rename { old: ProjectSlug, new: ProjectSlug },
+    Rename {
+        /// El slug actual.
+        old: ProjectSlug,
+        /// El slug nuevo.
+        new: ProjectSlug,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -308,9 +353,17 @@ pub enum ConfigCommand {
     /// Todas las claves con su valor.
     Show,
     /// El valor de una clave, por ejemplo `policy.overdue_bonus`.
-    Get { key: ConfigKey },
+    Get {
+        /// La clave (ver `taskflow config show`).
+        key: ConfigKey,
+    },
     /// Cambia una clave conservando los comentarios del archivo.
-    Set { key: ConfigKey, value: String },
+    Set {
+        /// La clave (ver `taskflow config show`).
+        key: ConfigKey,
+        /// El valor nuevo: texto, número, `true`/`false` o una lista (`["a", "b"]`).
+        value: String,
+    },
     /// Valida la configuración y prueba la conexión con el proveedor.
     Check,
 }
@@ -642,6 +695,13 @@ mod tests {
         assert!(matches!(
             parse(&["commit"]).unwrap().command,
             Command::Commit { yes: false }
+        ));
+        assert!(matches!(
+            parse(&["pr", "--draft"]).unwrap().command,
+            Command::Pr {
+                yes: false,
+                draft: true
+            }
         ));
         assert!(matches!(
             parse(&["report", "edit", "--work"]).unwrap().command,

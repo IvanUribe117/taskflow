@@ -121,7 +121,18 @@ impl<'a> PrepareWorkReport<'a> {
             Err(error) => return Err(error.into()),
         };
 
-        let markdown = render_work(&work, changes.as_ref());
+        // Si la rama ya tiene PR, el comentario lo enlaza (para quien hace el code review).
+        let pr = match (&repo, &changes) {
+            (Some(path), Some(changes)) => self
+                .ctx
+                .prs
+                .find(path, &changes.branch)
+                .await
+                .ok()
+                .flatten(),
+            _ => None,
+        };
+        let markdown = render_work(&work, changes.as_ref(), pr.as_ref());
         let path = self.ctx.sessions.save_work_report(id, &markdown).await?;
         Ok(WorkReportView {
             markdown,

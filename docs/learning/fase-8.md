@@ -658,3 +658,104 @@ Rama: `CU-86bcjdn6v`
 - **Al retomar una conversación (`claude -p --resume`), el *system prompt* que manda es el de esa conversación.** Las reglas que pasábamos con `--system-prompt` se ignoraban, y el resultado fue una auditoría técnica con 8 notas y comandos de git. Ahora las reglas también van en el mensaje (`<rules>`), y el resultado sale como se pidió.
 - **"Cuenta solo lo que consta" sin más guía vuelve a la IA desconfiada.** Pedirle que escriba como quien hizo el trabajo, y qué **no** incluir, cambió el tono por completo.
 - **Un indicador que dependía de otra cosa.** `from_agent` se calculaba como "no hubo avisos", y el aviso de cambios sin commit lo apagaba. Ahora es una variable propia, que solo cambia si falla retomar la conversación.
+
+---
+
+## Séptima parte: push y PR al terminar el commit
+
+Pediste que, al hacer el commit (sobre todo el último), Taskflow suba la rama y abra el PR solo. Como con el commit, **lo hace Taskflow, no el agente**: `git push` y la CLI de GitHub (`gh`, con tu sesión de `gh auth login`). El título sale de la tarea, sin IA (`CU-<id> - <título de la tarea>`); la IA solo escribe la descripción, y tú ves las dos cosas antes de abrirlo.
+
+```text
+taskflow commit
+  ✔ Commit 5363acb: CU-86bcjdn6v - feat: blue gradient background on sign-in page
+  Revisando la rama…
+  Escribiendo la descripción del PR con claude_code…
+  PR de `CU-86bcjdn6v` → `master` (2 commits)
+
+  CU-86bcjdn6v - Cambiar el fondo del login
+
+  What changed / Brand and visual changes / How it was verified / Notes   ← la plantilla de IDK
+  ────────────────────────────────────────
+  ? ¿Abrir este PR?  > Crear el PR · Crearlo como borrador · Editar el título ·
+                       Editar la descripción en tu editor · Solo push, sin PR · Cancelar
+  ✔ PR #4033 creado: https://github.com/swappsco/idk/pull/4033
+
+taskflow commit            ← un commit más, con el PR ya abierto
+  ✔ Commit 9a1b2c3: CU-86bcjdn6v - fix: …
+  ✔ Push hecho. PR #4033 actualizado: https://github.com/swappsco/idk/pull/4033
+```
+
+### Cómo funciona
+
+- **`session.after_commit`** decide qué pasa después de cada `taskflow commit`, también desde el menú al salir del agente:
+
+  | Valor | Qué hace |
+  | --- | --- |
+  | `none` | Nada: subes tú |
+  | `ask` (por defecto) | Pregunta: "Push y crear el PR", "Solo push" o "Ahora no". Si el PR ya existe: "Push (actualiza el PR #N)" |
+  | `push` | Solo `git push -u origin HEAD` |
+  | `pr` | Push y, si la rama no tiene PR, lo propone y lo abre. Si ya lo tiene, solo el push (que lo actualiza) |
+
+  En tu configuración quedó `after_commit = "pr"`. Para cambiarlo: `taskflow config set session.after_commit ask`.
+- **`taskflow pr [--yes] [--draft]`** hace lo mismo como comando suelto. Además, al salir del agente con todo commiteado y sin PR, el menú ofrece "Subir `<rama>` y crear el PR".
+- **La descripción sigue la plantilla del repo** (`.github/pull_request_template.md`; en IDK: *What changed*, *Brand and visual changes*, *How it was verified*, *Notes*) y se escribe en el idioma del agente (`ai.agent_language`, inglés).
+- **El título no lo escribe la IA:** es `CU-<id> - <título de la tarea>` (`pr_title`), como los pones tú (`CU-86baqt7cp - docs: evaluacion post-upgrade LKE a k8s 1.36`). Si cambias el título en el menú, se usa el tuyo.
+- **Si hay conversación del agente, el PR lo escribe él**, igual que el comentario de entrega: sabe qué hizo y cómo lo verificó. Si no se puede retomar, sale de los commits y el diff, con un aviso.
+- **La descripción siempre enlaza la tarea.** Si la IA no puso la URL, se agrega al final (`ClickUp: <url>`).
+- **El comentario de entrega enlaza el PR**: "Rama: `CU-…` · PR: <url>". Así quien hace el code review llega desde la tarea.
+- **Lo que no se sube:** desde la rama base (`master`) no se abre PR; sin commits nuevos tampoco. Los cambios sin commit no entran en el push, y se avisa.
+- **Si `gh` no está o no tiene sesión,** el push funciona igual; el error aparece al abrir el PR y dice qué instalar o ejecutar.
+- **Si el push o el PR fallan después del commit,** el commit queda hecho y se avisa ("Reinténtalo con `taskflow pr`"); no se trata como un error del commit.
+
+Por capa:
+
+| Capa | Qué |
+| --- | --- |
+| Puertos | `RepoCommitter::push`. Nuevo `PullRequests`: `find` (el PR abierto de la rama), `template` y `create(&PullRequestDraft)`. `NoPullRequests` como objeto nulo |
+| IA | `Summarizer::pr_body(&PrInput) -> String`: solo la descripción (el JSON pedido es `{ body }`). `PrInput` lleva la tarea, `RepoChanges`, la plantilla, la conversación del agente y tus reglas |
+| Casos de uso | `PreparePullRequest` (`status` sin IA; `execute` con la descripción) y `PublishPullRequest` (`push`; `open`: push y PR, sin abrir uno segundo) |
+| Adaptadores | `GitRepoInspector::push` (`git push -u origin HEAD`, sin preguntar credenciales). `GhPullRequests` en `adapter-git/src/github.rs`: `gh pr list --head`, `gh pr create --body-file -` |
+| Configuración | `session.after_commit` (`AfterCommit`: `none`, `ask`, `push`, `pr`) y `session.pr_draft` |
+| CLI | `taskflow pr`, el paso después de `commit` y la opción en el menú del agente |
+
+### Conceptos aplicados
+
+- **Envolver una CLI en vez de una API.** `gh` ya resuelve la autenticación, el repo de GitHub (lo deduce del `origin` de la carpeta) y los errores. Taskflow no guarda ningún token de GitHub: usa tu sesión de `gh`. El puerto `PullRequests` permite cambiarlo por la API de GitHub o por GitLab sin tocar los casos de uso.
+- **`--jq` para no parsear JSON en Rust.** `gh pr list --json number,url --jq '.[] | "\(.number) \(.url)"'` devuelve una línea `42 https://…`. Basta con `split_once(' ')`, sin `serde_json` en el adaptador.
+- **Variables de entorno para que nada se quede esperando:** `GIT_TERMINAL_PROMPT=0` (git no pide usuario y contraseña) y `GH_PROMPT_DISABLED=1`, con `stdin` en `Stdio::null()`. Si falta algo, falla con un mensaje en vez de colgarse.
+- **Un error que no tumba lo anterior.** El commit ya está hecho cuando se sube. `if let Err(error) = after_commit(..)` avisa y devuelve `Ok`: el resultado del commit no depende del de la red.
+- **Errores tolerados donde no importan.** `find` puede fallar sin `gh`; en `branch_status` se usa `.ok().flatten()` y se sigue "sin PR". El push no necesita a `gh`.
+- **Idempotencia.** `open` vuelve a mirar si la rama ya tiene PR justo antes de crearlo. Si lo tiene, devuelve ese con `created = false`: ejecutar `taskflow pr` dos veces no abre dos PR.
+- **`config set` con claves de texto.** `config set session.agent_command true` guardaba un booleano (TOML interpreta `true`) cuando la clave aún no estaba en el archivo, y la validación fallaba. Ahora, si el valor interpretado no pasa la validación, se reintenta como texto.
+
+### Probado (2026-10-15)
+
+Sin tocar IDK: un repo temporal con un remoto local (`git init --bare`), un `gh` falso que guarda lo que recibe y una sesión armada a mano, así que nada llegó a GitHub ni a ClickUp. La IA y git fueron los reales.
+
+| Prueba | Resultado |
+| --- | --- |
+| `config set session.after_commit siempre` | Rechazado: `expected one of none, ask, push, pr` |
+| `pr --yes` con un commit sin subir | Push con upstream (`origin/CU-86bcjdn6v`), `gh pr create --base master --head CU-86bcjdn6v`, descripción con la plantilla en inglés y la tarea enlazada |
+| `commit --yes` con el PR ya abierto (`after_commit = "pr"`) | Commit, push y "PR #4099 actualizado"; ningún `pr create` más |
+| `after_commit = "ask"` con `--yes` | Commit sin subir nada (rama `ahead 1`) |
+| `after_commit = "push"` sin `gh` en el PATH | Push hecho: "la rama aún no tiene PR" |
+| `pr --yes` sin `gh` | Push hecho; el error dice "install the GitHub CLI … and run `gh auth login`" |
+| Terminal simulada: commit → "Push y crear el PR" → "Editar el título" → "Crear el PR" | `gh pr create` recibió el título editado |
+| Terminal simulada: salir del agente sin cambios pendientes | Primera opción: "Subir `CU-86bcjdn6v` y crear el PR (7 commits…)" |
+| `report publish --regenerate --dry-run` con PR abierto | Última línea: "Rama: `CU-86bcjdn6v` · PR: https://…/pull/4099" |
+
+Lo que se ajustó al probar:
+
+- **La IA describía un archivo sin commit como parte del PR** (lo leyó del repo). El prompt ahora dice que lo que no tiene commit no entra en el PR.
+- **Si `gh` fallaba al buscar el PR, no se hacía ni el push.** Ahora se sigue sin PR.
+- **El error de `gh` salía vacío** cuando escribía en `stdout` y no en `stderr`. Ahora trae lo que haya dicho, el subcomando y el código de salida.
+
+- **El título lo generaba la IA.** Lo pediste fijo y sin gastar en eso: ahora es `CU-<id> - <título de la tarea>`, y la IA solo devuelve `body`.
+
+Tests: de 472 a 487.
+
+### A tener en cuenta
+
+- **La rama `CU-86bcjdn6v` de IDK tiene 2 commits de la tarea de prueba sin subir.** Con `after_commit = "pr"`, el próximo `taskflow commit` en esa sesión los subiría y abriría un PR real en `swappsco/idk`. Si no quieres eso, bórrala o cambia de rama antes.
+- `gh` usa la cuenta con la que iniciaste sesión (`gh auth status`).
+

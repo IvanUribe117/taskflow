@@ -976,3 +976,197 @@ async fn the_agent_brief_says_whether_the_conversation_got_this_prompt() {
     assert!(!before.briefed);
     assert!(after.briefed);
 }
+
+/// Una sesión aprobada con repo, en la rama `branch` con `commits` y los PRs dados.
+async fn on_branch(
+    branch: &str,
+    commits: &[&str],
+    prs: crate::testing::FakePullRequests,
+    ai: FakeSummarizer,
+) -> (
+    AppContext,
+    Arc<crate::testing::FakeRepoCommitter>,
+    Arc<crate::testing::FakePullRequests>,
+    Arc<FakeSummarizer>,
+) {
+    let (mut ctx, committer, _) = with_repo(crate::testing::FakeRepoCommitter::default()).await;
+    ctx.repo = Arc::new(crate::testing::FakeRepoInspector {
+        changes: Some(crate::ports::RepoChanges {
+            branch: branch.into(),
+            base: Some("origin/master".into()),
+            commits: commits.iter().map(|c| (*c).to_owned()).collect(),
+            stat: " login.html | 2 +-".into(),
+            diff: "+bg".into(),
+            uncommitted: false,
+        }),
+    });
+    let prs = Arc::new(prs);
+    let ai = Arc::new(ai);
+    ctx.prs = prs.clone();
+    ctx.ai = ai.clone();
+    (ctx, committer, prs, ai)
+}
+
+#[tokio::test]
+async fn the_pr_proposal_follows_the_template_and_links_the_task() {
+    let prs = crate::testing::FakePullRequests::with_template("## What changed\n\n## Notes");
+    let (ctx, _, _, ai) = on_branch(
+        "CU-86b1",
+        &["def CU-86b1 - fix: y", "abc CU-86b1 - feat: x"],
+        prs,
+        FakeSummarizer::default(),
+    )
+    .await;
+
+    let proposal = PreparePullRequest::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+
+    assert_eq!(proposal.status.base, "master", "without origin/");
+    assert_eq!(proposal.status.branch, "CU-86b1");
+    let description = proposal.description.unwrap();
+    assert_eq!(
+        description.title, "CU-86b1 - Task 86b1",
+        "no AI for the title"
+    );
+    assert!(
+        description
+            .body
+            .ends_with("ClickUp: https://example.test/t/86b1"),
+        "{}",
+        description.body
+    );
+    let input = &ai.pr_inputs()[0];
+    assert_eq!(
+        input.template.as_deref(),
+        Some("## What changed\n\n## Notes")
+    );
+    assert_eq!(input.changes.commits.len(), 2);
+}
+
+#[tokio::test]
+async fn a_branch_with_a_pr_only_needs_the_push() {
+    let existing = crate::ports::PullRequest {
+        number: 7,
+        url: "https://github.com/acme/idk/pull/7".into(),
+    };
+    let prs = crate::testing::FakePullRequests::with_existing(existing.clone());
+    let (ctx, committer, prs, ai) =
+        on_branch("CU-86b1", &["abc x"], prs, FakeSummarizer::default()).await;
+
+    let proposal = PreparePullRequest::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+    let (pr, created) = PublishPullRequest::new(&ctx)
+        .open("CU-86b1 - x", "body", false)
+        .await
+        .unwrap();
+
+    assert!(proposal.description.is_none());
+    assert!(ai.pr_inputs().is_empty(), "no AI call");
+    assert_eq!((pr, created), (existing, false));
+    assert_eq!(committer.pushes(), 1);
+    assert!(prs.created().is_empty(), "no second PR");
+}
+
+#[tokio::test]
+async fn opening_a_pr_pushes_first_and_targets_the_base() {
+    let (ctx, committer, prs, _) = on_branch(
+        "CU-86b1",
+        &["abc x"],
+        crate::testing::FakePullRequests::default(),
+        FakeSummarizer::default(),
+    )
+    .await;
+
+    let (pr, created) = PublishPullRequest::new(&ctx)
+        .open(" CU-86b1 - x ", "Body", true)
+        .await
+        .unwrap();
+    let empty = PublishPullRequest::new(&ctx).open(" ", "Body", true).await;
+
+    assert!(created);
+    assert_eq!(pr.number, 42);
+    assert_eq!(committer.pushes(), 1);
+    let draft = &prs.created()[0];
+    assert_eq!(
+        (
+            draft.base.as_str(),
+            draft.head.as_str(),
+            draft.title.as_str()
+        ),
+        ("master", "CU-86b1", "CU-86b1 - x")
+    );
+    assert!(draft.draft);
+    assert!(empty.is_err());
+}
+
+#[tokio::test]
+async fn no_pr_from_the_base_branch_or_without_commits() {
+    let (on_base, ..) = on_branch(
+        "master",
+        &["abc x"],
+        crate::testing::FakePullRequests::default(),
+        FakeSummarizer::default(),
+    )
+    .await;
+    let (no_commits, committer, ..) = on_branch(
+        "CU-86b1",
+        &[],
+        crate::testing::FakePullRequests::default(),
+        FakeSummarizer::default(),
+    )
+    .await;
+
+    let base = PreparePullRequest::new(&on_base)
+        .status()
+        .await
+        .unwrap_err();
+    let empty = PublishPullRequest::new(&no_commits)
+        .push()
+        .await
+        .unwrap_err();
+
+    assert!(base.to_string().contains("`master`"), "{base}");
+    assert!(empty.to_string().contains("no commits"), "{empty}");
+    assert_eq!(committer.pushes(), 0);
+}
+
+#[tokio::test]
+async fn the_pr_falls_back_when_the_agent_conversation_is_gone() {
+    let (ctx, _, _, ai) = on_branch(
+        "CU-86b1",
+        &["abc x"],
+        crate::testing::FakePullRequests::default(),
+        FakeSummarizer::default().failing_resume(),
+    )
+    .await;
+    PrepareAgent::new(&ctx).new_conversation().await.unwrap();
+
+    let proposal = PreparePullRequest::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+
+    assert!(!proposal.from_agent);
+    assert!(proposal.description.is_some());
+    assert_eq!(proposal.warnings.len(), 1);
+    let inputs = ai.pr_inputs();
+    assert!(inputs[0].agent_session.is_some());
+    assert!(inputs[1].agent_session.is_none());
+}
+
+#[tokio::test]
+async fn without_gh_the_push_still_works() {
+    let mut prs = crate::testing::FakePullRequests::default();
+    prs.failing_find = true;
+    let (ctx, committer, ..) =
+        on_branch("CU-86b1", &["abc x"], prs, FakeSummarizer::default()).await;
+
+    let pr = PublishPullRequest::new(&ctx).push().await.unwrap();
+
+    assert!(pr.is_none());
+    assert_eq!(committer.pushes(), 1);
+}

@@ -83,6 +83,14 @@ pub trait RepoCommitter: Send + Sync {
         files: &[String],
         message: &str,
     ) -> Result<String, RepoError>;
+
+    /// `git push -u origin HEAD`: sube la rama actual (y la deja con upstream). Los hooks
+    /// de pre-push se ejecutan como siempre.
+    ///
+    /// # Errors
+    ///
+    /// [`RepoError::Invalid`] con la salida de git si el push falla.
+    async fn push(&self, repo: &Path) -> Result<(), RepoError>;
 }
 
 #[async_trait]
@@ -105,6 +113,10 @@ impl RepoCommitter for NoRepoInspector {
         _files: &[String],
         _message: &str,
     ) -> Result<String, RepoError> {
+        Err(RepoError::Invalid("not a git repository".into()))
+    }
+
+    async fn push(&self, _repo: &Path) -> Result<(), RepoError> {
         Err(RepoError::Invalid("not a git repository".into()))
     }
 }

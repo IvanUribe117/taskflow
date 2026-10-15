@@ -1378,6 +1378,7 @@ El diseño de arriba se implementó con estos ajustes (detalle en `docs/learning
 | FR-67 sugerencias por proyecto | `[statuses]` en `project.toml` | Una etapa vacía usa la global |
 | FR-71 "publicar el reporte de trabajo" | Se publica `work-report.md`, **lo que se hizo**, solo con la sesión aprobada. Lo escribe el mismo agente retomando su conversación (`--resume`), con el diff de git (`RepoInspector`) como respaldo | Publicar el plan no le sirve al equipo; lo que importa es lo hecho |
 | Comentarios como texto | `add_comment` convierte Markdown al formato de tramos de ClickUp | `comment_text` mostraba los `##` tal cual |
+| — | `taskflow commit` y `taskflow pr`: el commit, el push y el PR los hace **Taskflow** (`git` y `gh`), no el agente; la IA solo propone el mensaje del commit y la descripción del PR (con la plantilla del repo); el título del PR es `CU-<id> - <título de la tarea>`, sin IA. Puertos `RepoCommitter` (con `push`) y `PullRequests` (`GhPullRequests`). `session.after_commit = "pr"` encadena push + PR tras cada commit | Lo pidió el uso real: cerrar la tarea sin salir de Taskflow, y que lo que sale al repo pase por tu revisión |
 
 ## 10. Puertos (traits)
 
@@ -2533,6 +2534,9 @@ dir = "history"                   # relativo al directorio de configuración, o 
 dir = "sessions"                  # sesión activa, reportes y archivo
 track_time = true                 # contador del proveedor; false = solo en la sesión
 notify = true                     # notificaciones de escritorio
+agent_command = "claude"          # lo que abre `taskflow agent`
+after_commit = "ask"              # tras `taskflow commit`: none | ask | push | pr (push + abrir el PR)
+pr_draft = false                  # abrir los PR como borrador
 
 [playbooks]
 shell = "auto"                    # auto | sh | bash | zsh | pwsh | cmd
@@ -3199,14 +3203,14 @@ Releases con versionado semántico y `CHANGELOG.md`. Más adelante, `cargo-dist`
 - [X] Verificar en la API de ClickUp los campos exactos de comentarios asignados y resueltos (fase 3, ver §16).
 - [X] Verificar los filtros soportados por `GET /team/{team_id}/task` (fase 3, ver §16).
 - [ ] Definir los estados reales del espacio de trabajo para `status_map`.
-- [ ] Elegir entrega del prompt al agente: portapapeles (`arboard`), archivo o ambos.
+- [X] Elegir entrega del prompt al agente: los dos, y más (fase 8). `approve` lo copia al portapapeles (`pbcopy`), queda en `agent-prompt.md` y `taskflow agent` abre Claude Code con él.
 - [ ] Decidir si la caché usa SQLite (`sqlx`) o archivos JSON.
-- [ ] Decidir si el resumen de la IA responde siempre en español o según el idioma de la tarea.
+- [X] Decidir el idioma de la IA (fase 8): configurable. `ai.report_language` (español) para lo que lee el usuario y `ai.agent_language` (English) para el código, los commits y el prompt del agente.
 - [ ] Decidir si el contexto del proyecto puede vivir también dentro del repositorio (`<repo>/.taskflow/context/`) para compartirlo con el equipo.
 - [ ] Decidir si se permiten Playbooks globales (no ligados a un proyecto).
 - [ ] Evaluar un lenguaje embebido (`rhai`) o plugins WASM para Playbooks avanzados después de v1.
 - [ ] Definir la política de `select_tasks`: solo tareas propias o todas las del proyecto por defecto.
-- [ ] Decidir si el tiempo se registra con el contador en vivo de ClickUp o como una entrada con duración al cerrar.
+- [X] Decidir cómo se registra el tiempo (fase 8): con el contador en vivo de ClickUp (`TimeTracker`), con `LocalTimeTracker` como alternativa (`session.track_time = false`).
 - [ ] **Importante — límite de peticiones de ClickUp (encontrado el 2026-10-14).** Los planes Free, Unlimited y Business permiten 100 peticiones por minuto por token. `project add` hacía `1 + 2·espacios + carpetas` peticiones y falló con `RateLimited` en un workspace real.
   - [X] **Corto plazo (2026-10-14):** `project add` pide primero los espacios (1 petición) y después solo el árbol del espacio elegido (`root_locations` + `location_children`). Ante un 429, el cliente espera lo que indica `X-RateLimit-Reset` (acotado a 60 s; acepta segundos o milisegundos) y avisa por `tracing`.
   - [ ] **Mediano plazo:** un backend o caché local que sincronice con ClickUp y evite consultar la API en cada comando (relacionado con la fase 12, caché local).

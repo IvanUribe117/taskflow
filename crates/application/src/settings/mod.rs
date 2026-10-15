@@ -244,6 +244,25 @@ pub struct SessionSettings {
     pub notify: bool,
     /// El programa que abre `taskflow agent`, con el prompt como argumento.
     pub agent_command: String,
+    /// Qué hacer después de `taskflow commit`: nada, preguntar, push o push + PR.
+    pub after_commit: AfterCommit,
+    /// Abrir los PR como borrador.
+    pub pr_draft: bool,
+}
+
+/// `session.after_commit`. En `config.toml`: `"none"`, `"ask"`, `"push"` o `"pr"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AfterCommit {
+    /// No subir nada: lo haces tú.
+    None,
+    /// Preguntar: push y PR, solo push o nada.
+    #[default]
+    Ask,
+    /// Solo `git push` (actualiza el PR si ya hay uno).
+    Push,
+    /// `git push` y, si la rama no tiene PR, abrirlo (con la descripción que propone la IA).
+    Pr,
 }
 
 impl Default for SessionSettings {
@@ -253,6 +272,8 @@ impl Default for SessionSettings {
             track_time: true,
             notify: true,
             agent_command: "claude".to_owned(),
+            after_commit: AfterCommit::Ask,
+            pr_draft: false,
         }
     }
 }

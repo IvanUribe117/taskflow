@@ -5,11 +5,15 @@
 //! ([`runner`]) y se guarda o se archiva.
 
 mod agent;
+mod commit;
 mod report;
 mod runner;
+mod work;
 
 pub use agent::PrepareAgent;
+pub use commit::{CommitChanges, PrepareCommit};
 pub use report::render as render_report;
+pub use work::PrepareWorkReport;
 
 use chrono::Duration;
 use domain::project::{ProjectResolver, ProjectSlug, StatusSuggestions};
@@ -209,6 +213,18 @@ impl<'a> HandleSession<'a> {
         // ClickUp). No es una transición; solo hay que volver a iniciarlo.
         if command == SessionCommand::Resume && session.timer_running() {
             return runner::run(self.ctx, prefs, session, vec![Effect::StartTimer]).await;
+        }
+        if command == SessionCommand::PublishReport
+            && self
+                .ctx
+                .sessions
+                .load_work_report(&session.task_id)
+                .await
+                .is_err()
+        {
+            return Err(AppError::InvalidInput(
+                "there is no work report yet; generate it with `taskflow report publish`".into(),
+            ));
         }
         let command = self.exact_statuses(&session.task_id, command).await?;
         let effects = session.handle(command, self.ctx.clock.now())?;

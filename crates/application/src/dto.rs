@@ -12,7 +12,9 @@ use domain::task::{Comment, StatusOption, Task, UserId};
 
 use domain::session::{Publication, ReportOutcome, WorkSession};
 
-use crate::ports::{HistoryEntry, PlanTask, RecordSubject, TaskSummary, TimeEntry};
+use crate::ports::{
+    ChangedFile, CommitMessage, HistoryEntry, PlanTask, RecordSubject, TaskSummary, TimeEntry,
+};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -740,4 +742,28 @@ pub struct AgentBrief {
     pub repo_path: Option<PathBuf>,
     /// `agent-prompt.md`, solo el prompt de la IA.
     pub prompt_path: PathBuf,
+    /// La conversación del agente, si ya se abrió antes: se retoma en vez de empezar otra.
+    pub agent_session: Option<String>,
+}
+
+/// El reporte de lo que se hizo, listo para revisar y publicar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkReportView {
+    pub markdown: String,
+    /// `work-report.md`: se puede editar antes de publicar.
+    pub path: PathBuf,
+    /// `true` si lo escribió el mismo agente (retomando su conversación).
+    pub from_agent: bool,
+    pub warnings: Vec<String>,
+}
+
+/// Lo que propone `taskflow commit`, para que elijas y confirmes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CommitProposal {
+    pub repo: PathBuf,
+    pub branch: Option<String>,
+    pub files: Vec<ChangedFile>,
+    /// El mensaje que propone la IA; lo puedes editar.
+    pub message: CommitMessage,
+    pub warnings: Vec<String>,
 }

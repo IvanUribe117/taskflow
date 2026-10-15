@@ -5,6 +5,7 @@ use adapter_desktop::MacNotifier;
 use adapter_fs::{
     FsConfigStore, FsContextRepository, FsHistoryRepository, FsProjectRepository, FsSessionStore,
 };
+use adapter_git::GitRepoInspector;
 use adapter_keyring::{EnvSecretStore, KeyringSecretStore, LayeredSecretStore};
 use application::AppContext;
 use application::ports::{
@@ -71,6 +72,7 @@ pub fn secret_store() -> LayeredSecretStore {
 /// - `notifier`: un `MultiNotifier` con los canales activos (hoy, el escritorio en macOS
 ///   si `session.notify`).
 /// - `sessions`: `FsSessionStore` en [`session_dir`].
+/// - `repo`: `GitRepoInspector` (lee la rama de trabajo para el reporte de lo hecho).
 /// - `policy`: `WeightedPolicy` con los pesos de `settings.policy`.
 /// - `clock`: `SystemClock`.
 ///
@@ -96,6 +98,8 @@ pub fn build(
         time: time_tracker(settings, secrets, descriptor.build_time)?,
         notifier: Arc::new(notifier(settings)),
         sessions: Arc::new(FsSessionStore::new(session_dir(settings, config_path))),
+        repo: Arc::new(GitRepoInspector),
+        committer: Arc::new(GitRepoInspector),
         context: Arc::new(FsContextRepository::new(
             context_dir(settings, config_path),
             projects_dir(settings, config_path),

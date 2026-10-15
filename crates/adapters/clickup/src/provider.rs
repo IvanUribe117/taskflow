@@ -193,12 +193,14 @@ impl TaskProvider for ClickUpProvider {
 
     /// `POST /task/{id}/comment` con `{"comment_text": "<body>", "notify_all": false}`.
     /// La respuesta (`{"id", "hist_id", "date"}`) también se ignora con `IgnoredAny`.
+    /// El cuerpo se escribe en Markdown y se manda como `comment` (tramos con formato), para
+    /// que `ClickUp` lo muestre con títulos, listas y negritas. Ver `markdown.rs`.
     async fn add_comment(&self, id: &TaskId, body: &str) -> Result<(), ProviderError> {
         let _: IgnoredAny = self
             .client
             .post(
                 &format!("/task/{}/comment", id.as_str()),
-                &json!({ "comment_text": body, "notify_all": false }),
+                &json!({ "comment": crate::markdown::to_comment(body), "notify_all": false }),
             )
             .await?;
         Ok(())

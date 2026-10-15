@@ -711,7 +711,7 @@ const TITLE_WIDTH: usize = 50;
 /// Cuenta **caracteres** (`chars`), no bytes: "Revisión" tiene 8 caracteres pero 9 bytes,
 /// porque la `ó` ocupa dos en UTF-8. Cortar por bytes (`&text[..max]`) puede caer en
 /// medio de una letra, y Rust hace panic en ese caso.
-fn truncate(text: &str, max: usize) -> String {
+pub fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_owned();
     }

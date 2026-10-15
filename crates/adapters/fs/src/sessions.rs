@@ -13,6 +13,7 @@ use crate::history::safe_name;
 const ACTIVE: &str = "active.json";
 const REPORT: &str = "report.md";
 const AGENT_PROMPT: &str = "agent-prompt.md";
+const WORK_REPORT: &str = "work-report.md";
 const ARCHIVE: &str = "archive";
 
 /// `SessionStore` sobre archivos (§8.5):
@@ -42,6 +43,17 @@ impl FsSessionStore {
 
 fn storage(path: &Path) -> impl Fn(io::Error) -> RepoError + '_ {
     move |e| RepoError::Storage(format!("{}: {e}", path.display()))
+}
+
+/// Lee un archivo de la sesión: si no existe, `NotFound` con su ruta.
+fn read(path: &Path) -> Result<String, RepoError> {
+    match fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            Err(RepoError::NotFound(path.display().to_string()))
+        }
+        Err(e) => Err(storage(path)(e)),
+    }
 }
 
 fn to_json(session: &WorkSession) -> Result<String, RepoError> {
@@ -91,25 +103,25 @@ impl SessionStore for FsSessionStore {
     }
 
     async fn load_report(&self, task: &TaskId) -> Result<String, RepoError> {
-        let path = self.report_path(task);
-        match fs::read_to_string(&path) {
-            Ok(text) => Ok(text),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Err(RepoError::NotFound(path.display().to_string()))
-            }
-            Err(e) => Err(storage(&path)(e)),
-        }
+        read(&self.report_path(task))
     }
 
     async fn load_agent_prompt(&self, task: &TaskId) -> Result<String, RepoError> {
-        let path = self.agent_prompt_path(task);
-        match fs::read_to_string(&path) {
-            Ok(text) => Ok(text),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Err(RepoError::NotFound(path.display().to_string()))
-            }
-            Err(e) => Err(storage(&path)(e)),
-        }
+        read(&self.agent_prompt_path(task))
+    }
+
+    async fn save_work_report(&self, task: &TaskId, markdown: &str) -> Result<PathBuf, RepoError> {
+        let path = self.work_report_path(task);
+        atomic::write(&path, markdown).map_err(storage(&path))?;
+        Ok(path)
+    }
+
+    async fn load_work_report(&self, task: &TaskId) -> Result<String, RepoError> {
+        read(&self.work_report_path(task))
+    }
+
+    fn work_report_path(&self, task: &TaskId) -> PathBuf {
+        self.task_dir(task).join(WORK_REPORT)
     }
 
     /// Primero escribe el archivo y **después** borra `active.json`: si algo falla en
@@ -201,6 +213,10 @@ mod tests {
             "prompt"
         );
         assert_eq!(store.load_agent_prompt(&id).await.unwrap(), "prompt");
+        assert!(store.load_work_report(&id).await.is_err());
+        let work = store.save_work_report(&id, "## Hecho").await.unwrap();
+        assert_eq!(work, dir.path().join("86b1/work-report.md"));
+        assert_eq!(store.load_work_report(&id).await.unwrap(), "## Hecho");
         let missing = TaskId::new("otra").unwrap();
         assert!(matches!(
             store.load_report(&missing).await,

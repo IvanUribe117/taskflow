@@ -54,6 +54,10 @@ pub struct WorkSession {
     /// los vuelve a intentar en orden.
     #[serde(default)]
     pub pending: Vec<Effect>,
+    /// El id de la conversación del agente de código (`taskflow agent`). Sirve para volver
+    /// a abrirla y para pedirle al mismo agente el resumen de lo que hizo.
+    #[serde(default)]
+    pub agent_session: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -64,8 +68,6 @@ pub enum SessionError {
         command: &'static str,
         allowed: Vec<&'static str>,
     },
-    #[error("there is no work report to publish")]
-    NoReport,
     #[error("the work report was already published")]
     ReportAlreadyPublished,
 }
@@ -93,6 +95,7 @@ impl WorkSession {
                 end: None,
             }],
             pending: Vec::new(),
+            agent_session: None,
         };
         (
             session,
@@ -171,7 +174,9 @@ impl WorkSession {
                     target: StatusTarget::Explicit(status),
                 }],
             ),
-            (state, C::PublishReport) if !state.is_terminal() => (state.clone(), self.publish()?),
+            (state @ (S::InProgress | S::Paused { .. }), C::PublishReport) => {
+                (state.clone(), self.publish()?)
+            }
             (S::InProgress | S::Paused { .. }, C::Finish { status, comment }) => {
                 (S::Closed, self.finish(status, comment, now))
             }
@@ -197,19 +202,16 @@ impl WorkSession {
         Ok(effects)
     }
 
-    /// Publicar: solo un reporte listo y todavía en borrador.
+    /// Publicar lo que se hizo: una sola vez.
     fn publish(&self) -> Result<Vec<Effect>, SessionError> {
-        match (&self.report, &self.publication) {
-            (Some(ReportOutcome::Ready), Publication::Draft) => Ok(vec![
+        match self.publication {
+            Publication::Draft => Ok(vec![
                 Effect::PostComment {
-                    comment: CommentKind::Report,
+                    comment: CommentKind::WorkReport,
                 },
                 Effect::MarkReportPublished,
             ]),
-            (Some(ReportOutcome::Ready), Publication::Published { .. }) => {
-                Err(SessionError::ReportAlreadyPublished)
-            }
-            _ => Err(SessionError::NoReport),
+            Publication::Published { .. } => Err(SessionError::ReportAlreadyPublished),
         }
     }
 
@@ -556,13 +558,16 @@ mod tests {
     }
 
     #[test]
-    fn publish_needs_a_ready_report_and_only_once() {
-        let mut analyzing = in_state("analyzing");
-        let mut session = in_state("awaiting");
+    fn publish_is_for_the_work_done_and_only_once() {
+        let mut awaiting = in_state("awaiting");
+        let mut session = in_state("paused");
 
-        assert_eq!(
-            analyzing.handle(SessionCommand::PublishReport, at(T0)),
-            Err(SessionError::NoReport)
+        assert!(
+            matches!(
+                awaiting.handle(SessionCommand::PublishReport, at(T0)),
+                Err(SessionError::InvalidTransition { .. })
+            ),
+            "nothing done yet: nothing to publish"
         );
         let effects = session
             .handle(SessionCommand::PublishReport, at(T0))
@@ -571,7 +576,7 @@ mod tests {
             effects,
             [
                 Effect::PostComment {
-                    comment: CommentKind::Report
+                    comment: CommentKind::WorkReport
                 },
                 Effect::MarkReportPublished
             ]
@@ -626,7 +631,7 @@ mod tests {
         assert_eq!(session, before);
         assert_eq!(
             error.to_string(),
-            "cannot `done` while the session is `awaiting_approval`; allowed: approve, reject, status, publish, abort"
+            "cannot `done` while the session is `awaiting_approval`; allowed: approve, reject, status, abort"
         );
     }
 

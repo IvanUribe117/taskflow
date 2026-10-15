@@ -156,7 +156,11 @@ async fn apply(
         Effect::SetStatus { target } => set_status(ctx, prefs, session, target).await,
         Effect::PostComment { comment } => {
             let body = match comment {
-                CommentKind::Report => ctx.sessions.load_report(&id).await.map_err(|e| text(&e))?,
+                CommentKind::WorkReport => ctx
+                    .sessions
+                    .load_work_report(&id)
+                    .await
+                    .map_err(|e| text(&e))?,
                 CommentKind::Closing(body) => body.clone(),
             };
             ctx.tasks

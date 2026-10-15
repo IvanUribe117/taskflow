@@ -388,3 +388,154 @@ Con la configuración de prueba (`track_time = false`, `agent_command = echo`), 
 
 - **Tu sección `90-aprendizaje-rust` llega al agente de IDK**, porque tiene el uso `agent_prompt`. IDK es Python y Django; si no quieres que el agente de IDK la reciba, quítale `agent_prompt` del `usage`.
 - **`close` (fase 7) todavía usa solo los estados globales.** La sugerencia por proyecto la usan la sesión y `done`.
+
+---
+
+## Tercera parte: tu prueba real y sus mejoras (2026-10-14)
+
+Hiciste el flujo completo con IDK ("cambiar el fondo del login"). Pediste cuatro mejoras:
+
+### 1. Publicar lo que **se hizo**, no el plan
+
+Antes, `report publish` publicaba `report.md`: el plan, lo que *se iba* a hacer. Ahora publica `work-report.md`, **lo que se hizo**:
+
+```text
+taskflow agent      → abre Claude Code con un id de conversación conocido (--session-id <uuid>)
+                      y lo guarda en la sesión (agent_session)
+taskflow report publish
+  → PrepareWorkReport: retoma ESA conversación (claude -p --resume <uuid>) y le pide al mismo
+    agente el reporte de lo que hizo, con los cambios de git de la rama como respaldo
+  → work-report.md: qué se hizo, cambios, cómo se verificó, pendiente, rama y commits
+  → lo ves; publicar, editarlo antes o no publicar
+```
+
+- **Si no se puede retomar la conversación** (no abriste el agente, o se abrió en otra carpeta), el reporte sale del plan aprobado y del diff de git, y se avisa. En la prueba, este camino escribió con honestidad "no consta ninguna verificación".
+- **Solo se publica con la sesión aprobada** (`in_progress` o `paused`). Antes no hay nada hecho que contar: el dominio lo rechaza.
+- `report show --work` y `report edit --work` para verlo o corregirlo; `report publish --regenerate` para volver a armarlo.
+- **Nuevo puerto `RepoInspector`** con `GitRepoInspector` (crate `adapter-git`, solo lectura). Detecta la rama, la base (`origin/HEAD`, o `main`/`master`), los commits desde el punto de partida y el diff, incluidos los cambios sin commit. El diff se recorta a 20.000 caracteres.
+
+### 2. Markdown en los comentarios de ClickUp
+
+`comment_text` se publica tal cual: los `##` se veían como texto. Ahora `add_comment` manda `comment`, la lista de tramos con formato. `adapters/clickup/src/markdown.rs` convierte, línea por línea: títulos, viñetas (anidadas), listas numeradas, casillas `[x]`, citas, bloques de código, **negrita**, *cursiva*, `código` y enlaces.
+
+Lo verifiqué contra la API: un comentario de prueba con todos los formatos se guardó con sus atributos, incluidos los títulos (`{"header": 2}`), que la documentación no menciona.
+
+### 3. Claude Code en segundo plano (no prioritario): diseño
+
+No está hecho. Así encajaría:
+
+```text
+taskflow agent --background
+  → claude -p --session-id <uuid> --permission-mode acceptEdits --allowedTools "<lista>" \
+       --output-format stream-json  (en el repo, sin terminal) > sessions/<id>/agent.log
+  → al terminar, el agente responde con un JSON: {"status": "done" | "needs_input", "questions": [...]}
+  → notificación: "El agente terminó" o "El agente tiene preguntas"
+taskflow agent --reply "usa el degradado azul"   → claude -p --resume <uuid> "…" (otra vez en segundo plano)
+taskflow agent --log                             → lo que está haciendo
+```
+
+- **Lo difícil son los permisos.** Sin terminal nadie puede aprobar un `Edit` o un `Bash`, así que hay que dar una lista cerrada (`Edit`, `Write`, `Bash(git status)`, `Bash(pytest *)`…) y nunca `bypassPermissions`.
+- Las piezas ya existen: el id de conversación, `--resume`, `MultiNotifier` y la sesión en disco.
+
+### 4. Un flujo de corrido, sin escribir comandos
+
+En una terminal interactiva, cada paso ofrece el siguiente:
+
+```text
+taskflow start
+  ¿Qué hacemos con el reporte?    > Aprobar y abrir el agente · Aprobar sin agente · Editar · Rechazar con nota · Decidir después
+  … trabajas con el agente; al salir:
+  Saliste del agente. ¿Y ahora?   > Publicar lo hecho y terminar · Terminar sin publicar · Volver al agente · Dejar abierta
+  ¿Publicar este reporte?         > Publicar · Editarlo antes · No publicar
+  Estado final / comentario / ¿Terminar la sesión?
+```
+
+- Cada decisión sigue siendo tuya (FR-59, FR-61). Con `--yes`, o sin terminal (un script), no se pregunta nada.
+- `taskflow approve` también ofrece abrir el agente.
+- `taskflow agent` retoma la misma conversación si vuelves a abrirlo (`--resume`). Si falla al instante, empieza una nueva.
+
+### Conceptos aplicados
+
+- **Retomar la conversación en vez de adivinar.** Quien mejor sabe qué se hizo es el agente que lo hizo. Con un id que elegimos nosotros (`--session-id`), Taskflow puede volver a esa conversación (`--resume`) sin capturar la salida de un programa interactivo. `--no-session-persistence` hace que esa consulta no se agregue a la conversación.
+- **Degradar con respaldo y avisar.** Si retomar falla, el resumen sale de los datos objetivos (plan y git), y el aviso dice por qué. Es el mismo patrón que `PlanMyDay` cuando falla la IA.
+- **Convertir formatos en el adaptador.** El dominio y la aplicación hablan Markdown; solo el adaptador de ClickUp sabe que ClickUp quiere tramos. Otro proveedor (GitHub, que entiende Markdown) lo mandaría tal cual.
+- **Mover en vez de copiar (`needless_pass_by_value`).** `json!` serializa por referencia y no aprovecha que el `Map` ya es nuestro. Armar el objeto con `Map::insert` mueve los valores sin copiarlos.
+- **Romper ciclos entre funciones `async`.** `approve` → `agent` → `done` → `handle` no puede volver a `approve`: una función `async` recursiva necesita `Box::pin`. Por eso hay un núcleo (`apply`) que solo ejecuta y muestra, y las funciones que ofrecen el paso siguiente están por encima de él, nunca por debajo.
+- **`IsTerminal`.** `std::io::stdin().is_terminal()` distingue una persona de un script: las preguntas solo aparecen cuando alguien puede responderlas.
+- **`git -C <repo>`**, y que un comando que falla sea un dato (`Ok(None)`), no un error: "no es un repositorio" o "no hay `origin/HEAD`" son respuestas válidas.
+
+### Probado (2026-10-14)
+
+Con un repo de git falso y la tarea de prueba:
+
+| Prueba | Resultado |
+| --- | --- |
+| Comentario con todos los formatos (API directa) | Guardado con sus atributos; revisa que se vea bien en la tarea |
+| `report publish` sin conversación del agente | Reporte desde el plan y el diff (rama, commit, archivo), publicado con formato; el aviso dice por qué |
+| `agent` → conversación nueva con id; `report publish --regenerate` | "lo escribió el mismo agente": incluye lo que solo él sabía (revisado en el navegador, contraste pendiente) más lo que confirma git |
+| `agent` con un id que no existe | Aviso y conversación nueva |
+| `start` en una terminal → "Decidir después" | La sesión queda esperando tu aprobación |
+
+Tests: de 427 a 444.
+
+---
+
+## Cuarta parte: el commit lo hace Taskflow, y el selector ya no se desordena
+
+### El selector de tareas se desordenaba
+
+Con títulos más largos que la terminal, cada opción ocupaba dos líneas. `dialoguer` borra **una línea por opción** al redibujar, así que al moverte quedaban copias en pantalla. Ahora cada opción se recorta al ancho de la terminal (`dialoguer::console::Term::size()`, menos el margen del cursor). Probado en 80 columnas: todas las opciones miden 78.
+
+### `taskflow commit`
+
+Al salir del agente, si hay cambios, la primera opción del menú es **"Hacer commit de los cambios"**. También existe como comando suelto:
+
+```text
+taskflow commit
+  Repositorio: ~/swapps/idk · rama `CU-86bcjdn6v`
+  ? Archivos del commit (espacio para marcar, Enter para seguir)
+    ✔  M idk/templates/account/login.html
+    ✔  M idk/assets/sass/new_theme/_sigin.scss
+       ?? artifacts/CU-86bc1994z-propuestas-mejora.md (nuevo)   ← sin marcar: no es de la tarea
+  Mensaje del commit:
+  CU-86bcjdn6v - feat: fondo degradado en el login
+  ? ¿Hacer el commit de 2 archivos?  > Hacer el commit · Editar el título · Editar todo en tu editor · Cancelar
+  ✔ Commit 2aef913: CU-86bcjdn6v - feat: fondo degradado en el login
+```
+
+- **El mensaje lo propone la IA** a partir del diff y de los **últimos 10 commits del repo**, para que siga la convención (`CU-<id> - feat: …`). Le llegan también tus reglas (secciones `instruction`).
+- **El commit lo hace Taskflow** con `git`: `git add -A -- <archivos>` y `git commit -F - -- <archivos>`. Solo entran los archivos que elegiste, aunque hubiera otros preparados.
+- **Los archivos nuevos vienen sin marcar.** Pueden ser tuyos y no de la tarea, como tu `artifacts/…md` de IDK. Con `--yes` o sin terminal, entran solo los que git ya conoce.
+- **Los hooks del repo se ejecutan** (los de pre-commit de IDK). Si uno falla, ves su salida y no se hace el commit.
+- **Si estás en la rama base** (`master`/`main`), avisa: conviene crear la rama de la tarea primero.
+
+Por capa:
+
+| Capa | Qué |
+| --- | --- |
+| Puerto | `RepoCommitter`: `changed_files`, `pending_diff`, `recent_commits`, `commit`. Separado de `RepoInspector` (que solo lee) |
+| IA | `Summarizer::commit_message(&CommitInput) -> CommitMessage { subject, body }`. Claude Code lo resuelve sin herramientas: el diff ya va en el mensaje |
+| Casos de uso | `PrepareCommit` (archivos + mensaje propuesto + avisos; `pending_files` sin IA, para el menú) y `CommitChanges` |
+| Adaptador | `GitRepoInspector` implementa los dos puertos. `git status --porcelain=v1 -z -uall` |
+| CLI | `taskflow commit [--yes]` y la opción en el menú al salir del agente |
+
+### Conceptos aplicados
+
+- **`-z` en la salida de git.** Sin él, git pone comillas en rutas con espacios o tildes, y un renombre se escribe `viejo -> nuevo`. Con `-z` cada campo termina en NUL, y un renombre trae la ruta original en el campo siguiente: se parsea sin ambigüedad.
+- **`git commit -- <rutas>`** confirma solo esas rutas, aunque haya otras en el índice. Así nunca entra algo que no elegiste.
+- **El mensaje por la entrada estándar (`-F -`)**, con `tokio::process` y `AsyncWriteExt::write_all`. No hay que escapar comillas ni saltos de línea en un argumento.
+- **Un menú como datos: `Vec<(String, AfterAgent)>`.** Las opciones cambian (el commit solo aparece si hay cambios). Cada etiqueta va con su acción en un `enum`, y `swap_remove(index).1` devuelve la elegida sin comparar textos.
+- **`let ... else`** en vez de un `match` con dos brazos donde uno sale de la función (`clippy::single_match_else`).
+- **`clone_into`** reutiliza la memoria del `String` existente en vez de crear otro y soltar el viejo (`clippy::assigning_clones`).
+
+### Probado (2026-10-14)
+
+Con un repo de git falso:
+
+| Prueba | Resultado |
+| --- | --- |
+| `commit --yes` con un archivo modificado y uno nuevo tuyo | Commit `CU-86bcjdn6v - feat: aplicar clase login--gradient al body del login`; tu archivo nuevo quedó fuera |
+| Salir del agente (terminal simulada) → "Hacer commit" → Enter → "Hacer el commit" | Mensaje propuesto, commit hecho, y de vuelta al menú |
+| Selector de tareas en 80 columnas | Todas las opciones miden 78 |
+
+Tests: de 444 a 452.

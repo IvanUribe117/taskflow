@@ -11,7 +11,7 @@
 use std::fmt::Write;
 
 use application::dto::ContextBlock;
-use application::ports::{PlanInput, SummaryInput};
+use application::ports::{CommitInput, PlanInput, SummaryInput, WorkInput};
 use serde_json::{Value, json};
 
 /// El rol y las reglas para `summarize_task`.
@@ -29,6 +29,21 @@ const PLAN_ROLE: &str = "Eres un asistente que ayuda a un desarrollador a organi
 siempre en español. Con las tareas priorizadas que recibes, devuelve exclusivamente el JSON pedido, con \
 un plan en Markdown: en qué orden trabajar, cuánto tiempo aproximado dedicar a cada tarea y qué \
 desbloquear primero (comentarios pendientes, tareas vencidas). Sé breve y concreto.";
+
+/// El rol y las reglas para `summarize_work`.
+const WORK_ROLE: &str = "Escribes el reporte de lo que SE HIZO en una tarea de desarrollo, para el \
+equipo que la sigue en ClickUp. Responde siempre en español y devuelve exclusivamente el JSON pedido: \
+qué se hizo (2-4 oraciones), los cambios concretos (archivos y comportamiento), cómo se verificó y qué \
+queda pendiente o qué debe mirar quien revise. Cuenta solo lo que consta en la conversación o en los \
+cambios de git: nada del plan que no se haya hecho, y ninguna verificación que no ocurrió. Usa \
+`código` para rutas y nombres.";
+
+/// El rol y las reglas para `commit_message`.
+const COMMIT_ROLE: &str = "Escribes mensajes de commit. Devuelve exclusivamente el JSON pedido: un \
+título (subject) de una línea, de 72 caracteres como máximo, y un cuerpo (body) breve solo si aporta \
+algo (qué y por qué, no cómo); si no, deja el cuerpo vacío. Sigue EXACTAMENTE la convención de los \
+commits recientes del repositorio (prefijos, idioma, mayúsculas, id de la tarea). Describe solo lo que \
+muestra el diff.";
 
 /// *System prompt*: el rol y, si hay, las instrucciones del contexto. Ya está hecha.
 ///
@@ -56,6 +71,118 @@ pub(crate) fn summary_system(input: &SummaryInput) -> String {
 
 pub(crate) fn plan_system(input: &PlanInput) -> String {
     system_prompt(PLAN_ROLE, &input.context.instructions)
+}
+
+pub(crate) fn work_system(input: &WorkInput) -> String {
+    system_prompt(WORK_ROLE, &input.context.instructions)
+}
+
+/// El mensaje de `summarize_work`:
+///
+/// - Si se retoma la conversación del agente, empieza pidiéndole **a él** el reporte.
+/// - `<task>`, `<approved_plan>` y, si hay, `<changes>` con la rama, los commits, el
+///   `--stat` y el diff.
+pub(crate) fn work_message(input: &WorkInput) -> String {
+    let task = &input.task;
+    let mut message = if input.agent_session.is_some() {
+        "Taskflow: terminaste de trabajar en esta tarea. Escribe ahora el reporte de lo que hiciste en \
+         esta conversación, con los cambios de git de abajo como respaldo.\n\n"
+            .to_owned()
+    } else {
+        "Escribe el reporte de lo que se hizo en esta tarea a partir del plan aprobado y de los \
+         cambios de git.\n\n"
+            .to_owned()
+    };
+    let _ = write!(
+        message,
+        "<task>\nid: {}\ntítulo: {}\nurl: {}\n</task>\n\n<approved_plan>\n{}\n</approved_plan>",
+        task.id,
+        task.title,
+        task.url,
+        if input.plan.trim().is_empty() {
+            "(sin plan)"
+        } else {
+            input.plan.trim()
+        }
+    );
+    match &input.changes {
+        Some(changes) => {
+            let _ = write!(
+                message,
+                "\n\n<changes>\nrama: {}\nbase: {}\ncambios sin commit: {}\ncommits:\n",
+                changes.branch,
+                changes.base.as_deref().unwrap_or("(desconocida)"),
+                if changes.uncommitted { "sí" } else { "no" }
+            );
+            for commit in &changes.commits {
+                let _ = writeln!(message, "- {commit}");
+            }
+            let _ = write!(
+                message,
+                "\n{}\n\n```diff\n{}\n```\n</changes>",
+                changes.stat.trim(),
+                changes.diff.trim()
+            );
+        }
+        None => message.push_str("\n\n<changes>\n(sin repositorio de git)\n</changes>"),
+    }
+    message
+}
+
+pub(crate) fn commit_system(input: &CommitInput) -> String {
+    system_prompt(COMMIT_ROLE, &input.context.instructions)
+}
+
+/// El mensaje de `commit_message`: la tarea, los commits recientes (la convención), los
+/// archivos y el diff.
+pub(crate) fn commit_message(input: &CommitInput) -> String {
+    let task = &input.task;
+    let mut message = format!(
+        "<task>\nid: {}\ntítulo: {}\n</task>\n\n<recent_commits>\n",
+        task.id, task.title
+    );
+    for commit in &input.recent_commits {
+        let _ = writeln!(message, "{commit}");
+    }
+    message.push_str("</recent_commits>\n\n<files>\n");
+    for file in &input.files {
+        let _ = writeln!(message, "{file}");
+    }
+    let _ = write!(
+        message,
+        "</files>\n\n<diff>\n{}\n</diff>",
+        input.diff.trim()
+    );
+    message
+}
+
+/// El JSON que debe devolver `commit_message`.
+pub(crate) fn commit_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "subject": { "type": "string" },
+            "body": { "type": "string" }
+        },
+        "required": ["subject", "body"],
+        "additionalProperties": false
+    })
+}
+
+/// El JSON que debe devolver `summarize_work`: los campos de `WorkSummary`.
+pub(crate) fn work_schema() -> Value {
+    let list = json!({ "type": "array", "items": { "type": "string" } });
+    json!({
+        "type": "object",
+        "properties": {
+            "summary": { "type": "string" },
+            "changes": list,
+            "verification": list,
+            "pending": list
+        },
+        "required": ["summary", "changes", "verification", "pending"],
+        "additionalProperties": false
+    })
 }
 
 /// Cada bloque como `## <título> (<clave>)` y su cuerpo, separados por una línea en blanco.
@@ -324,6 +451,84 @@ mod tests {
             ),
             "{message}"
         );
+    }
+
+    fn work_input(agent: bool) -> WorkInput {
+        WorkInput {
+            task: input().task,
+            project: None,
+            plan: "## Plan\n1. Cambiar".into(),
+            changes: Some(application::ports::RepoChanges {
+                branch: "CU-1".into(),
+                base: Some("origin/master".into()),
+                commits: vec!["abc fix login".into()],
+                stat: " login.html | 2 +-".into(),
+                diff: "-old\n+new".into(),
+                uncommitted: false,
+            }),
+            agent_session: agent.then(|| "id".to_owned()),
+            context: BuiltContext::default(),
+        }
+    }
+
+    #[test]
+    fn work_message_asks_the_agent_itself_when_resuming() {
+        let resumed = work_message(&work_input(true));
+        let fresh = work_message(&work_input(false));
+
+        assert!(
+            resumed.starts_with("Taskflow: terminaste de trabajar"),
+            "{resumed}"
+        );
+        assert!(
+            fresh.starts_with("Escribe el reporte de lo que se hizo"),
+            "{fresh}"
+        );
+        for part in [
+            "<approved_plan>\n## Plan\n1. Cambiar\n</approved_plan>",
+            "rama: CU-1\nbase: origin/master\ncambios sin commit: no\ncommits:\n- abc fix login\n",
+            "```diff\n-old\n+new\n```\n</changes>",
+        ] {
+            assert!(fresh.contains(part), "missing {part:?} in {fresh}");
+        }
+    }
+
+    #[test]
+    fn commit_message_shows_the_convention_files_and_diff() {
+        let input = CommitInput {
+            task: input().task,
+            files: vec!["login.html".into()],
+            diff: "+bg".into(),
+            recent_commits: vec!["abc CU-9 - fix: algo".into()],
+            context: BuiltContext::default(),
+        };
+
+        assert_eq!(
+            commit_message(&input),
+            "<task>\nid: 86b2x1abc\ntítulo: Fix invoice rounding\n</task>\n\n\
+             <recent_commits>\nabc CU-9 - fix: algo\n</recent_commits>\n\n\
+             <files>\nlogin.html\n</files>\n\n<diff>\n+bg\n</diff>"
+        );
+        let parsed: application::ports::CommitMessage =
+            serde_json::from_value(serde_json::json!({"subject": "s", "body": ""})).unwrap();
+        assert_eq!(parsed.full(), "s");
+        assert_eq!(commit_schema()["required"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn work_schema_matches_work_summary() {
+        let example = serde_json::json!({
+            "summary": "s", "changes": ["c"], "verification": [], "pending": ["p"]
+        });
+
+        let work: application::ports::WorkSummary =
+            serde_json::from_value(example.clone()).unwrap();
+
+        assert_eq!(
+            work_schema()["required"].as_array().unwrap().len(),
+            example.as_object().unwrap().len()
+        );
+        assert_eq!(work.pending, ["p"]);
     }
 
     #[test]

@@ -434,13 +434,17 @@ async fn set_status_sends_a_put_with_the_status() {
 }
 
 #[tokio::test]
-async fn add_comment_posts_the_text_without_notifying_everyone() {
+async fn add_comment_posts_formatted_markdown_without_notifying_everyone() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/task/86b2x1abc/comment"))
         .and(header("Authorization", TOKEN))
         .and(body_json(serde_json::json!({
-            "comment_text": "Listo, con test de regresión.",
+            "comment": [
+                {"text": "Listo", "attributes": {"bold": true}},
+                {"text": ", con test de regresión.", "attributes": {}},
+                {"text": "\n", "attributes": {}}
+            ],
             "notify_all": false
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -453,7 +457,7 @@ async fn add_comment_posts_the_text_without_notifying_everyone() {
         .await;
 
     provider(&server)
-        .add_comment(&task_id(), "Listo, con test de regresión.")
+        .add_comment(&task_id(), "**Listo**, con test de regresión.")
         .await
         .unwrap();
 }

@@ -27,8 +27,8 @@ pub enum StatusTarget {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "text", rename_all = "snake_case")]
 pub enum CommentKind {
-    /// El contenido de `report.md`, tal como quedó (con tus ediciones).
-    Report,
+    /// El contenido de `work-report.md`: lo que **se hizo**, tal como quedó.
+    WorkReport,
     /// El comentario de cierre de `done`.
     Closing(String),
 }
@@ -57,7 +57,7 @@ pub enum Effect {
     PostComment {
         comment: CommentKind,
     },
-    /// Va siempre **después** de `PostComment(Report)`: si el comentario falla, la cadena
+    /// Va siempre **después** de `PostComment(WorkReport)`: si el comentario falla, la cadena
     /// se detiene y el reporte no queda marcado como publicado.
     MarkReportPublished,
     Notify {

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use domain::policy::PrioritizationPolicy;
 
 use crate::ports::{
-    Clock, ContextRepository, HistoryRepository, Notifier, ProjectRepository, SessionStore,
-    Summarizer, TaskProvider, TimeTracker,
+    Clock, ContextRepository, HistoryRepository, Notifier, ProjectRepository, RepoCommitter,
+    RepoInspector, SessionStore, Summarizer, TaskProvider, TimeTracker,
 };
 
 /// Todas las dependencias que necesitan los casos de uso (§11.1).
@@ -22,6 +22,8 @@ pub struct AppContext {
     pub time: Arc<dyn TimeTracker>,
     pub notifier: Arc<dyn Notifier>,
     pub sessions: Arc<dyn SessionStore>,
+    pub repo: Arc<dyn RepoInspector>,
+    pub committer: Arc<dyn RepoCommitter>,
     pub policy: Arc<dyn PrioritizationPolicy>,
     pub clock: Arc<dyn Clock>,
 }

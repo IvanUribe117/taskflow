@@ -14,7 +14,7 @@
 >
 > **Cambios en 0.8:** historial de análisis y planes (`--save` y `taskflow history`), guardado por proyecto (§14.4). Cumple FR-16.
 >
-> **Cambios en 0.9:** sesión de trabajo implementada (fase 8). Ajustes respecto del diseño en §9.6, "Cómo quedó implementada": el reporte vive en `report.md` (no dentro del enum), `pending` en lugar del diario completo, sin `SaveReport` ni `RunHook` por ahora, `Task::status_name` para restaurar el estado original, y la sección `[session]` en la configuración.
+> **Cambios en 0.9:** sesión de trabajo implementada (fase 8), con `taskflow agent`, reporte de lo hecho (`work-report.md`) y comentarios con formato en ClickUp. Ajustes respecto del diseño en §9.6, "Cómo quedó implementada": el reporte vive en `report.md` (no dentro del enum), `pending` en lugar del diario completo, sin `SaveReport` ni `RunHook` por ahora, `Task::status_name` para restaurar el estado original, y la sección `[session]` en la configuración.
 
 ## 1. Propósito del documento
 
@@ -1376,6 +1376,8 @@ El diseño de arriba se implementó con estos ajustes (detalle en `docs/learning
 | FR-66 "ofrecer pausar o terminar la actual" | Ofrece terminarla o abortarla | Hay una sola sesión a la vez: pausarla no libera el lugar |
 | No objetivo: "ejecución automática del agente" | `taskflow agent` lo **abre** en el repo con el prompt completo (prompt + reporte editado + reglas); el usuario lo dirige | No es automático: lo lanza el usuario, y el agente no puede cerrar la tarea (FR-61) |
 | FR-67 sugerencias por proyecto | `[statuses]` en `project.toml` | Una etapa vacía usa la global |
+| FR-71 "publicar el reporte de trabajo" | Se publica `work-report.md`, **lo que se hizo**, solo con la sesión aprobada. Lo escribe el mismo agente retomando su conversación (`--resume`), con el diff de git (`RepoInspector`) como respaldo | Publicar el plan no le sirve al equipo; lo que importa es lo hecho |
+| Comentarios como texto | `add_comment` convierte Markdown al formato de tramos de ClickUp | `comment_text` mostraba los `##` tal cual |
 
 ## 10. Puertos (traits)
 

@@ -157,6 +157,13 @@ pub enum Command {
         #[arg(long)]
         print: bool,
     },
+    /// Commit de los cambios del repo del proyecto: la IA propone el mensaje, tú eliges los
+    /// archivos y confirmas; el commit lo hace Taskflow.
+    Commit {
+        /// Sin preguntar: los archivos que git ya conoce y el mensaje propuesto.
+        #[arg(long)]
+        yes: bool,
+    },
     /// La sesión activa: ver, cambiar el estado de la tarea o reintentar.
     Session {
         #[command(subcommand)]
@@ -191,14 +198,23 @@ pub enum SessionSubcommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ReportSubcommand {
-    /// El reporte tal como está en disco, con tus ediciones.
-    Show,
-    /// Lo abre en tu editor (`$VISUAL`, `$EDITOR` o `vi`).
-    Edit,
-    /// Lo publica como comentario en la tarea (pide confirmación).
+    /// El plan (`report.md`) tal como está en disco; con --work, lo que se hizo.
+    Show {
+        #[arg(long)]
+        work: bool,
+    },
+    /// Lo abre en tu editor (`$VISUAL`, `$EDITOR` o `vi`); con --work, lo que se hizo.
+    Edit {
+        #[arg(long)]
+        work: bool,
+    },
+    /// Publica lo que se hizo como comentario (lo arma la IA si no existe; pide confirmación).
     Publish {
         #[arg(long)]
         yes: bool,
+        /// Vuelve a armarlo aunque ya exista.
+        #[arg(long)]
+        regenerate: bool,
     },
 }
 
@@ -551,8 +567,12 @@ mod tests {
             Command::Agent { print: true }
         ));
         assert!(matches!(
-            parse(&["report", "edit"]).unwrap().command,
-            Command::Report(ReportSubcommand::Edit)
+            parse(&["commit"]).unwrap().command,
+            Command::Commit { yes: false }
+        ));
+        assert!(matches!(
+            parse(&["report", "edit", "--work"]).unwrap().command,
+            Command::Report(ReportSubcommand::Edit { work: true })
         ));
         assert!(matches!(
             parse(&["approve", "--status", "code review"])
@@ -573,7 +593,10 @@ mod tests {
         ));
         assert!(matches!(
             parse(&["report", "publish"]).unwrap().command,
-            Command::Report(ReportSubcommand::Publish { yes: false })
+            Command::Report(ReportSubcommand::Publish {
+                yes: false,
+                regenerate: false
+            })
         ));
         assert!(matches!(
             parse(&["abort", "--restore-status"]).unwrap().command,

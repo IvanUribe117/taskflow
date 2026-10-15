@@ -4,6 +4,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+
+use crate::ports::RepoChanges;
 use thiserror::Error;
 
 use crate::dto::BuiltContext;
@@ -20,6 +22,79 @@ pub trait Summarizer: Send + Sync {
 
     /// Plan del día en Markdown a partir de las tareas priorizadas (UC-02).
     async fn plan_day(&self, input: &PlanInput) -> Result<String, AiError>;
+
+    /// Qué se hizo en la sesión: para el reporte que se publica (`report publish`).
+    async fn summarize_work(&self, input: &WorkInput) -> Result<WorkSummary, AiError>;
+
+    /// Un mensaje de commit para los cambios pendientes (`taskflow commit`).
+    async fn commit_message(&self, input: &CommitInput) -> Result<CommitMessage, AiError>;
+}
+
+/// Todo lo que recibe `commit_message`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitInput {
+    pub task: TaskBrief,
+    /// Los archivos que entran en el commit.
+    pub files: Vec<String>,
+    /// `git diff HEAD`, recortado.
+    pub diff: String,
+    /// Los últimos commits: la convención del repo (`CU-123 - feat: ...`).
+    pub recent_commits: Vec<String>,
+    /// Secciones `instruction` (tus reglas; pueden decir cómo se escriben los commits).
+    pub context: BuiltContext,
+}
+
+/// Lo que devuelve `commit_message`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitMessage {
+    /// La primera línea.
+    pub subject: String,
+    /// El cuerpo, opcional (vacío si no hace falta).
+    #[serde(default)]
+    pub body: String,
+}
+
+impl CommitMessage {
+    /// El mensaje completo: título, línea en blanco y cuerpo (si hay).
+    #[must_use]
+    pub fn full(&self) -> String {
+        if self.body.trim().is_empty() {
+            self.subject.trim().to_owned()
+        } else {
+            format!("{}\n\n{}", self.subject.trim(), self.body.trim())
+        }
+    }
+}
+
+/// Todo lo que recibe `summarize_work`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkInput {
+    pub task: TaskBrief,
+    pub project: Option<ProjectBrief>,
+    /// `report.md`: lo que se planeó y aprobó (con tus ediciones).
+    pub plan: String,
+    /// Los cambios en el repositorio, si hay repo y es de git.
+    pub changes: Option<RepoChanges>,
+    /// La conversación del agente (`taskflow agent`). Si el proveedor puede retomarla, el
+    /// resumen lo escribe **el mismo agente**, que sabe qué hizo y por qué.
+    pub agent_session: Option<String>,
+    /// Secciones `instruction` (tus reglas).
+    pub context: BuiltContext,
+}
+
+/// Lo que devuelve `summarize_work`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkSummary {
+    /// Qué se hizo, en 2-4 oraciones.
+    pub summary: String,
+    /// Los cambios concretos (archivos, comportamiento).
+    pub changes: Vec<String>,
+    /// Cómo se verificó (tests, revisión manual).
+    #[serde(default)]
+    pub verification: Vec<String>,
+    /// Qué queda pendiente o para quien revise.
+    #[serde(default)]
+    pub pending: Vec<String>,
 }
 
 #[derive(Debug, Error)]

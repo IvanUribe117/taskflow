@@ -90,6 +90,27 @@ impl<'a> PrepareAgent<'a> {
             prompt: full,
             repo_path,
             prompt_path: self.ctx.sessions.agent_prompt_path(id),
+            agent_session: session.agent_session.clone(),
         })
+    }
+
+    /// Una conversación nueva para el agente: genera su id (UUID v4), lo guarda en la
+    /// sesión y lo devuelve. La interfaz abre el agente con ese id (`--session-id`), y así
+    /// después se puede retomar (`--resume`) o pedirle el resumen de lo que hizo.
+    ///
+    /// # Errors
+    ///
+    /// No hay sesión activa o no se puede guardar.
+    pub async fn new_conversation(&self) -> Result<String, AppError> {
+        let mut session = self
+            .ctx
+            .sessions
+            .active()
+            .await?
+            .ok_or_else(|| AppError::InvalidInput("there is no active session".into()))?;
+        let id = uuid::Uuid::new_v4().to_string();
+        session.agent_session = Some(id.clone());
+        self.ctx.sessions.save(&session).await?;
+        Ok(id)
     }
 }

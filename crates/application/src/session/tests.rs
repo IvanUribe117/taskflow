@@ -378,9 +378,10 @@ async fn a_timer_started_by_hand_on_another_task_is_not_stopped() {
 }
 
 #[tokio::test]
-async fn publish_posts_the_report_as_edited() {
+async fn publish_posts_the_work_report_as_edited() {
     let w = approved().await;
-    w.sessions.edit_report("86b1", "## Mi reporte, editado");
+    w.sessions
+        .edit_work_report("86b1", "## Mi reporte, editado");
 
     let outcome = HandleSession::new(&w.ctx)
         .execute(SessionCommand::PublishReport, &prefs())
@@ -622,4 +623,246 @@ async fn the_agent_waits_for_approval() {
     let error = PrepareAgent::new(&w.ctx).execute(10_000).await.unwrap_err();
 
     assert!(error.to_string().contains("taskflow approve"), "{error}");
+}
+
+#[tokio::test]
+async fn publish_needs_a_work_report_first() {
+    let w = approved().await;
+
+    let error = HandleSession::new(&w.ctx)
+        .execute(SessionCommand::PublishReport, &prefs())
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("no work report"), "{error}");
+    assert!(comments_written(&w).is_empty());
+}
+
+#[tokio::test]
+async fn the_work_report_comes_from_the_agent_conversation() {
+    let w = approved().await;
+    let conversation = PrepareAgent::new(&w.ctx).new_conversation().await.unwrap();
+
+    let view = PrepareWorkReport::new(&w.ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+
+    // Sin repo en disco no se retoma la conversación (vive en la carpeta del repo).
+    assert!(!view.from_agent);
+    assert!(
+        view.markdown
+            .starts_with("## Trabajo realizado · Task 86b1"),
+        "{}",
+        view.markdown
+    );
+    assert_eq!(
+        w.sessions.work_report("86b1").as_deref(),
+        Some(view.markdown.as_str())
+    );
+    let input = &w.ai.work_inputs()[0];
+    assert_eq!(input.agent_session, None);
+    assert!(
+        input.plan.contains("Reporte de trabajo"),
+        "the approved plan goes too"
+    );
+    assert_eq!(
+        uuid::Uuid::parse_str(&conversation)
+            .unwrap()
+            .get_version_num(),
+        4
+    );
+    assert_eq!(
+        w.sessions.current().unwrap().agent_session,
+        Some(conversation)
+    );
+}
+
+#[tokio::test]
+async fn the_agent_conversation_is_used_with_a_repo_and_falls_back_if_it_fails() {
+    use domain::project::MatchRule;
+    use domain::testing::project;
+
+    let repo = tempfile_dir();
+    let mut idk = project("idk", vec![MatchRule::Tag("idk".into())]);
+    idk.repo_path = Some(repo.clone());
+    let mut task = task("86b1");
+    task.status_name = "Open".into();
+    task.tags = vec!["idk".into()];
+    let provider = FakeTaskProvider::new(user("me"))
+        .with_tasks(vec![task])
+        .with_statuses(vec![StatusOption::new("in progress", StatusKind::Custom)]);
+    let (mut ctx, _) = context(provider, vec![idk], FixedClock::at(NOW));
+    let ai = Arc::new(FakeSummarizer::default().failing_resume());
+    ctx.ai = ai.clone();
+    ctx.sessions = Arc::new(FakeSessionStore::default());
+    ctx.time = Arc::new(FakeTimeTracker::default());
+    ctx.notifier = Arc::new(FakeNotifier::default());
+    StartSession::new(&ctx)
+        .execute(&id(), false, &prefs())
+        .await
+        .unwrap();
+    HandleSession::new(&ctx)
+        .execute(SessionCommand::Approve { status: None }, &prefs())
+        .await
+        .unwrap();
+    let conversation = PrepareAgent::new(&ctx).new_conversation().await.unwrap();
+
+    let view = PrepareWorkReport::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+
+    let inputs = ai.work_inputs();
+    assert_eq!(inputs.len(), 2, "first with the conversation, then without");
+    assert_eq!(
+        inputs[0].agent_session.as_deref(),
+        Some(conversation.as_str())
+    );
+    assert_eq!(inputs[1].agent_session, None);
+    assert!(!view.from_agent);
+    assert!(view.warnings[0].contains("no se pudo retomar la conversación del agente"));
+    let _ = std::fs::remove_dir(repo);
+}
+
+#[tokio::test]
+async fn no_work_report_before_approval() {
+    let w = started().await;
+
+    let error = PrepareWorkReport::new(&w.ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap_err();
+
+    assert!(
+        error.to_string().contains("no work to report yet"),
+        "{error}"
+    );
+}
+
+/// Una carpeta que existe, para `repo_path`.
+fn tempfile_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("taskflow-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Una sesión aprobada en un proyecto con repo en disco y el `committer` dado.
+async fn with_repo(
+    committer: crate::testing::FakeRepoCommitter,
+) -> (
+    AppContext,
+    Arc<crate::testing::FakeRepoCommitter>,
+    Arc<FakeSummarizer>,
+) {
+    use domain::project::MatchRule;
+    use domain::testing::project;
+
+    let mut idk = project("idk", vec![MatchRule::Tag("idk".into())]);
+    idk.repo_path = Some(tempfile_dir());
+    let mut task = task("86b1");
+    task.tags = vec!["idk".into()];
+    let provider = FakeTaskProvider::new(user("me"))
+        .with_tasks(vec![task])
+        .with_statuses(vec![StatusOption::new("in progress", StatusKind::Custom)]);
+    let (mut ctx, _) = context(provider, vec![idk], FixedClock::at(NOW));
+    let committer = Arc::new(committer);
+    let ai = Arc::new(FakeSummarizer::default());
+    ctx.committer = committer.clone();
+    ctx.ai = ai.clone();
+    ctx.sessions = Arc::new(FakeSessionStore::default());
+    ctx.time = Arc::new(FakeTimeTracker::default());
+    ctx.notifier = Arc::new(FakeNotifier::default());
+    StartSession::new(&ctx)
+        .execute(&id(), false, &prefs())
+        .await
+        .unwrap();
+    HandleSession::new(&ctx)
+        .execute(SessionCommand::Approve { status: None }, &prefs())
+        .await
+        .unwrap();
+    (ctx, committer, ai)
+}
+
+#[tokio::test]
+async fn the_commit_proposal_has_files_and_an_ai_message_following_the_repo() {
+    let (ctx, _, ai) = with_repo(crate::testing::FakeRepoCommitter::with_files(&[
+        (" M", "idk/templates/account/login.html"),
+        ("??", "artifacts/notas.md"),
+    ]))
+    .await;
+
+    let proposal = PrepareCommit::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+
+    assert_eq!(proposal.files.len(), 2);
+    assert!(proposal.files[1].untracked);
+    assert_eq!(proposal.message.subject, "CU-86b1 - feat: fondo del login");
+    assert_eq!(
+        proposal.message.full(),
+        "CU-86b1 - feat: fondo del login\n\nDegradado azul en la página de login."
+    );
+    let input = &ai.commit_inputs()[0];
+    assert_eq!(input.recent_commits, ["abc CU-1 - fix: algo"]);
+    assert_eq!(input.diff, "+fondo");
+    assert_eq!(input.files.len(), 2);
+}
+
+#[tokio::test]
+async fn nothing_to_commit_and_no_repo_are_clear_errors() {
+    let (clean, _, _) = with_repo(crate::testing::FakeRepoCommitter::default()).await;
+    let no_repo = approved().await;
+
+    let a = PrepareCommit::new(&clean)
+        .execute(prefs().limits)
+        .await
+        .unwrap_err();
+    let b = PrepareCommit::new(&no_repo.ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap_err();
+
+    assert!(a.to_string().contains("nothing to commit"), "{a}");
+    assert!(b.to_string().contains("repo_path"), "{b}");
+}
+
+#[tokio::test]
+async fn the_commit_uses_only_the_chosen_files_and_the_confirmed_message() {
+    let (ctx, committer, _) = with_repo(crate::testing::FakeRepoCommitter::with_files(&[(
+        " M", "a.html",
+    )]))
+    .await;
+
+    let hash = CommitChanges::new(&ctx)
+        .execute(&["a.html".into()], "  CU-86b1 - feat: x  ")
+        .await
+        .unwrap();
+    let none = CommitChanges::new(&ctx).execute(&[], "msg").await;
+    let empty = CommitChanges::new(&ctx)
+        .execute(&["a.html".into()], "  ")
+        .await;
+
+    assert_eq!(hash, "abc1234");
+    assert_eq!(
+        committer.commits(),
+        [(vec!["a.html".to_owned()], "CU-86b1 - feat: x".to_owned())]
+    );
+    assert!(none.is_err());
+    assert!(empty.is_err());
+}
+
+#[tokio::test]
+async fn a_failing_hook_reaches_the_user() {
+    let mut committer = crate::testing::FakeRepoCommitter::with_files(&[(" M", "a.html")]);
+    committer.failing = true;
+    let (ctx, _, _) = with_repo(committer).await;
+
+    let error = CommitChanges::new(&ctx)
+        .execute(&["a.html".into()], "msg")
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("ruff failed"), "{error}");
 }

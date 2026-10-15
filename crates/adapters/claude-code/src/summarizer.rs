@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use application::ports::{AiError, PlanInput, Summarizer, SummaryInput, TaskSummary};
+use application::ports::{
+    AiError, CommitInput, CommitMessage, PlanInput, Summarizer, SummaryInput, TaskSummary,
+    WorkInput, WorkSummary,
+};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -33,9 +36,28 @@ impl ClaudeCodeSummarizer {
         schema: &Value,
         repo: Option<&Path>,
     ) -> Result<T, AiError> {
+        self.call_resuming(system, message, schema, repo, None)
+            .await
+    }
+
+    /// Como [`Self::call`], retomando una conversación (`--resume <id>`). Solo lee la
+    /// conversación: con `--no-session-persistence` no se le agrega nada.
+    async fn call_resuming<T: DeserializeOwned>(
+        &self,
+        system: &str,
+        message: String,
+        schema: &Value,
+        repo: Option<&Path>,
+        resume: Option<&str>,
+    ) -> Result<T, AiError> {
         // Solo se usa el repositorio si la carpeta existe: un `repo_path` viejo no rompe nada.
         let repo = repo.filter(|path| path.is_dir());
-        let invocation = invocation(&self.config, system, message, schema, repo);
+        let mut invocation = invocation(&self.config, system, message, schema, repo);
+        if let Some(id) = resume {
+            invocation
+                .args
+                .extend(["--resume".to_owned(), id.to_owned()]);
+        }
         let stdout = run(&self.config.program, &invocation, self.config.timeout).await?;
         parse(&stdout)
     }
@@ -77,5 +99,34 @@ impl Summarizer for ClaudeCodeSummarizer {
             )
             .await?;
         Ok(output.plan)
+    }
+
+    /// Sin herramientas ni repo: el diff ya viene en el mensaje, y así es rápido.
+    async fn commit_message(&self, input: &CommitInput) -> Result<CommitMessage, AiError> {
+        self.call(
+            &prompts::commit_system(input),
+            prompts::commit_message(input),
+            &prompts::commit_schema(),
+            None,
+        )
+        .await
+    }
+
+    /// Con la conversación del agente, se la retoma **en la carpeta del repo** (Claude Code
+    /// guarda las conversaciones por carpeta). Sin ella, es un análisis nuevo con el plan y
+    /// los cambios, leyendo el repo como `summarize_task`.
+    async fn summarize_work(&self, input: &WorkInput) -> Result<WorkSummary, AiError> {
+        let repo = input
+            .project
+            .as_ref()
+            .and_then(|project| project.repo_path.as_deref());
+        self.call_resuming(
+            &prompts::work_system(input),
+            prompts::work_message(input),
+            &prompts::work_schema(),
+            repo,
+            input.agent_session.as_deref(),
+        )
+        .await
     }
 }

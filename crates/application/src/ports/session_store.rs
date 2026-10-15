@@ -11,6 +11,7 @@ use crate::ports::RepoError;
 /// - `sessions/active.json`: la sesión activa (hay una como máximo).
 /// - `sessions/<tarea>/report.md`: el reporte, que puedes editar antes de publicarlo.
 /// - `sessions/<tarea>/agent-prompt.md`: el prompt para el agente de código (no se publica).
+/// - `sessions/<tarea>/work-report.md`: lo que se hizo; es lo que se publica.
 /// - `sessions/archive/<fecha>_<tarea>.json`: las sesiones cerradas o abortadas.
 #[async_trait]
 pub trait SessionStore: Send + Sync {
@@ -39,6 +40,14 @@ pub trait SessionStore: Send + Sync {
 
     /// Lee `agent-prompt.md`.
     async fn load_agent_prompt(&self, task: &TaskId) -> Result<String, RepoError>;
+
+    /// Guarda `work-report.md` (reemplaza el anterior) y devuelve su ruta.
+    async fn save_work_report(&self, task: &TaskId, markdown: &str) -> Result<PathBuf, RepoError>;
+
+    /// Lee `work-report.md` tal como quedó, con tus ediciones.
+    async fn load_work_report(&self, task: &TaskId) -> Result<String, RepoError>;
+
+    fn work_report_path(&self, task: &TaskId) -> PathBuf;
 
     /// Guarda la sesión terminada en el archivo y deja de haber sesión activa.
     ///

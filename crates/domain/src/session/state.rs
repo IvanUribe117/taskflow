@@ -42,18 +42,19 @@ impl SessionState {
     }
 
     /// Los comandos que acepta, para el mensaje de error de una transición inválida.
-    /// `status`, `publish` y `abort` valen en cualquier estado no terminal.
+    /// `status` y `abort` valen en cualquier estado no terminal; `publish`, solo con la
+    /// sesión aprobada (se publica lo que **se hizo**).
     #[must_use]
     pub fn allowed_commands(&self) -> Vec<&'static str> {
         let own: &[&'static str] = match self {
             Self::Analyzing { .. } => &["analysis_ready", "analysis_failed"],
             Self::AwaitingApproval => &["approve", "reject"],
-            Self::InProgress => &["pause", "done"],
-            Self::Paused { .. } => &["resume", "done"],
+            Self::InProgress => &["pause", "publish", "done"],
+            Self::Paused { .. } => &["resume", "publish", "done"],
             Self::Closed | Self::Aborted => return Vec::new(),
         };
         let mut allowed = own.to_vec();
-        allowed.extend(["status", "publish", "abort"]);
+        allowed.extend(["status", "abort"]);
         allowed
     }
 }

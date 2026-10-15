@@ -4,7 +4,7 @@
 use std::fmt::Write;
 
 use crate::dto::TaskInsight;
-use crate::ports::Complexity;
+use crate::ports::{Complexity, RepoChanges, WorkSummary};
 
 /// ```markdown
 /// ## Reporte de trabajo · Fix invoice rounding
@@ -83,6 +83,59 @@ fn bullets(report: &mut String, title: &str, items: &[String], empty: &str) {
     report.push('\n');
 }
 
+/// El reporte de **lo que se hizo**, que es lo que se publica:
+///
+/// ```markdown
+/// ## Trabajo realizado · Fix invoice rounding
+///
+/// Se corrigió el redondeo por línea…
+///
+/// ### Cambios
+/// - `invoicing/totals.py`: redondeo por línea
+///
+/// ### Cómo se verificó
+/// - `pytest invoicing` (o "Sin registrar.")
+///
+/// ### Pendiente
+/// - Revisar facturas viejas            (o "Nada.")
+///
+/// **Rama:** `CU-86b1-fix` · 2 commits · hay cambios sin commit
+/// ```
+#[must_use]
+pub fn render_work(title: &str, work: &WorkSummary, changes: Option<&RepoChanges>) -> String {
+    let mut report = format!(
+        "## Trabajo realizado · {title}\n\n{}\n\n",
+        work.summary.trim()
+    );
+    bullets(
+        &mut report,
+        "Cambios",
+        &work.changes,
+        "Sin cambios registrados.",
+    );
+    bullets(
+        &mut report,
+        "Cómo se verificó",
+        &work.verification,
+        "Sin registrar.",
+    );
+    bullets(&mut report, "Pendiente", &work.pending, "Nada.");
+    if let Some(changes) = changes {
+        let commits = match changes.commits.len() {
+            1 => "1 commit".to_owned(),
+            n => format!("{n} commits"),
+        };
+        let _ = write!(report, "**Rama:** `{}` · {commits}", changes.branch);
+        if changes.uncommitted {
+            report.push_str(" · hay cambios sin commit");
+        }
+        report.push('\n');
+    }
+    report.truncate(report.trim_end().len());
+    report.push('\n');
+    report
+}
+
 #[cfg(test)]
 mod tests {
     use domain::testing::{at, task, user};
@@ -119,6 +172,35 @@ mod tests {
              ### Preguntas abiertas\n- ¿Por línea?\n"
         );
         assert!(!report.contains("SECRETO"));
+    }
+
+    #[test]
+    fn work_report_with_branch_and_empty_sections() {
+        let work = WorkSummary {
+            summary: "Se cambió el fondo.".into(),
+            changes: vec!["`login.html`".into()],
+            verification: vec![],
+            pending: vec![],
+        };
+        let changes = RepoChanges {
+            branch: "CU-1".into(),
+            base: Some("origin/master".into()),
+            commits: vec!["abc fix".into()],
+            stat: String::new(),
+            diff: String::new(),
+            uncommitted: true,
+        };
+
+        assert_eq!(
+            render_work("Login", &work, Some(&changes)),
+            "## Trabajo realizado · Login\n\n\
+             Se cambió el fondo.\n\n\
+             ### Cambios\n- `login.html`\n\n\
+             ### Cómo se verificó\nSin registrar.\n\n\
+             ### Pendiente\nNada.\n\n\
+             **Rama:** `CU-1` · 1 commit · hay cambios sin commit\n"
+        );
+        assert!(render_work("Login", &work, None).ends_with("### Pendiente\nNada.\n"));
     }
 
     #[test]

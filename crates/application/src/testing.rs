@@ -14,11 +14,12 @@ use domain::task::{Comment, LocationNode, LocationSegment, StatusOption, Task, T
 
 use crate::AppContext;
 use crate::ports::{
-    AiError, Clock, Complexity, ContextRepository, ExposeSecret, HistoryEntry, HistoryFilter,
-    HistoryRecord, HistoryRepository, Notice, Notifier, NotifyError, PlanInput, ProjectRepository,
-    ProviderError, RepoError, SecretError, SecretName, SecretStore, SecretString, SessionStore,
+    AiError, ChangedFile, Clock, CommitInput, CommitMessage, Complexity, ContextRepository,
+    ExposeSecret, HistoryEntry, HistoryFilter, HistoryRecord, HistoryRepository, Notice, Notifier,
+    NotifyError, PlanInput, ProjectRepository, ProviderError, RepoChanges, RepoCommitter,
+    RepoError, RepoInspector, SecretError, SecretName, SecretStore, SecretString, SessionStore,
     Summarizer, SummaryInput, TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker,
-    markdown_title,
+    WorkInput, WorkSummary, markdown_title,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
@@ -296,6 +297,8 @@ pub fn context(
         time: Arc::new(FakeTimeTracker::default()),
         notifier: Arc::new(FakeNotifier::default()),
         sessions: Arc::new(FakeSessionStore::default()),
+        repo: Arc::new(FakeRepoInspector::default()),
+        committer: Arc::new(FakeRepoCommitter::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -552,6 +555,7 @@ pub struct FakeSessionStore {
     active: Mutex<Option<WorkSession>>,
     reports: Mutex<HashMap<TaskId, String>>,
     prompts: Mutex<HashMap<TaskId, String>>,
+    work_reports: Mutex<HashMap<TaskId, String>>,
     archived: Mutex<Vec<WorkSession>>,
 }
 
@@ -574,6 +578,20 @@ impl FakeSessionStore {
     pub fn report(&self, task: &str) -> Option<String> {
         let id = TaskId::new(task).expect("valid id");
         self.reports.lock().expect("lock").get(&id).cloned()
+    }
+
+    pub fn work_report(&self, task: &str) -> Option<String> {
+        let id = TaskId::new(task).expect("valid id");
+        self.work_reports.lock().expect("lock").get(&id).cloned()
+    }
+
+    /// Como si editaras `work-report.md` a mano.
+    pub fn edit_work_report(&self, task: &str, markdown: &str) {
+        let id = TaskId::new(task).expect("valid id");
+        self.work_reports
+            .lock()
+            .expect("lock")
+            .insert(id, markdown.to_owned());
     }
 
     /// Como si editaras `report.md` a mano.
@@ -640,6 +658,31 @@ impl SessionStore for FakeSessionStore {
             .ok_or_else(|| RepoError::NotFound(format!("agent prompt of {}", task.as_str())))
     }
 
+    async fn save_work_report(
+        &self,
+        task: &TaskId,
+        markdown: &str,
+    ) -> Result<std::path::PathBuf, RepoError> {
+        self.work_reports
+            .lock()
+            .expect("lock")
+            .insert(task.clone(), markdown.to_owned());
+        Ok(self.work_report_path(task))
+    }
+
+    async fn load_work_report(&self, task: &TaskId) -> Result<String, RepoError> {
+        self.work_reports
+            .lock()
+            .expect("lock")
+            .get(task)
+            .cloned()
+            .ok_or_else(|| RepoError::NotFound(format!("work report of {}", task.as_str())))
+    }
+
+    fn work_report_path(&self, task: &TaskId) -> std::path::PathBuf {
+        std::path::PathBuf::from(format!("mem/{}/work-report.md", task.as_str()))
+    }
+
     async fn archive(&self, session: WorkSession) -> Result<std::path::PathBuf, RepoError> {
         *self.active.lock().expect("lock") = None;
         self.archived.lock().expect("lock").push(session);
@@ -654,6 +697,9 @@ pub struct FakeSummarizer {
     plan: String,
     summaries: Mutex<Vec<SummaryInput>>,
     plans: Mutex<Vec<PlanInput>>,
+    works: Mutex<Vec<WorkInput>>,
+    commits: Mutex<Vec<CommitInput>>,
+    resume_fails: bool,
 }
 
 impl FakeSummarizer {
@@ -684,6 +730,33 @@ impl FakeSummarizer {
             estimated_complexity: Complexity::Medium,
             agent_prompt: "Corrige el redondeo en invoicing.".into(),
         }
+    }
+
+    /// El resumen de trabajo fijo que devuelve `summarize_work`.
+    pub fn work() -> WorkSummary {
+        WorkSummary {
+            summary: "Se cambió el fondo del login.".into(),
+            changes: vec!["`login.html`: nueva clase".into()],
+            verification: vec!["Revisado en el navegador".into()],
+            pending: vec![],
+        }
+    }
+
+    /// `summarize_work` falla si se le pide retomar la conversación del agente.
+    #[must_use]
+    pub fn failing_resume(mut self) -> Self {
+        self.resume_fails = true;
+        self
+    }
+
+    /// Las entradas recibidas por `commit_message`, en orden.
+    pub fn commit_inputs(&self) -> Vec<CommitInput> {
+        self.commits.lock().expect("lock").clone()
+    }
+
+    /// Las entradas recibidas por `summarize_work`, en orden.
+    pub fn work_inputs(&self) -> Vec<WorkInput> {
+        self.works.lock().expect("lock").clone()
     }
 
     /// Las entradas recibidas por `summarize_task`, en orden.
@@ -717,5 +790,109 @@ impl Summarizer for FakeSummarizer {
             return Err(AiError::Failed("fake failure".into()));
         }
         Ok(self.plan.clone())
+    }
+
+    async fn commit_message(&self, input: &CommitInput) -> Result<CommitMessage, AiError> {
+        self.commits.lock().expect("lock").push(input.clone());
+        if self.failing {
+            return Err(AiError::Failed("fake failure".into()));
+        }
+        Ok(CommitMessage {
+            subject: "CU-86b1 - feat: fondo del login".into(),
+            body: "Degradado azul en la página de login.".into(),
+        })
+    }
+
+    async fn summarize_work(&self, input: &WorkInput) -> Result<WorkSummary, AiError> {
+        self.works.lock().expect("lock").push(input.clone());
+        if self.failing || (self.resume_fails && input.agent_session.is_some()) {
+            return Err(AiError::Failed("fake failure".into()));
+        }
+        Ok(Self::work())
+    }
+}
+
+/// Cambios de git en memoria.
+#[derive(Debug, Default)]
+pub struct FakeRepoInspector {
+    pub changes: Option<RepoChanges>,
+}
+
+/// Un repo en memoria para `taskflow commit`: archivos con cambios y los commits hechos.
+#[derive(Debug, Default)]
+pub struct FakeRepoCommitter {
+    pub files: Vec<ChangedFile>,
+    pub failing: bool,
+    commits: Mutex<Vec<(Vec<String>, String)>>,
+}
+
+impl FakeRepoCommitter {
+    pub fn with_files(files: &[(&str, &str)]) -> Self {
+        Self {
+            files: files
+                .iter()
+                .map(|(status, path)| ChangedFile {
+                    path: (*path).to_owned(),
+                    status: (*status).to_owned(),
+                    untracked: *status == "??",
+                })
+                .collect(),
+            ..Self::default()
+        }
+    }
+
+    /// Los commits hechos: archivos y mensaje.
+    pub fn commits(&self) -> Vec<(Vec<String>, String)> {
+        self.commits.lock().expect("lock").clone()
+    }
+}
+
+#[async_trait]
+impl RepoCommitter for FakeRepoCommitter {
+    async fn changed_files(&self, _repo: &std::path::Path) -> Result<Vec<ChangedFile>, RepoError> {
+        Ok(self.files.clone())
+    }
+
+    async fn pending_diff(
+        &self,
+        _repo: &std::path::Path,
+        _max: usize,
+    ) -> Result<String, RepoError> {
+        Ok("+fondo".into())
+    }
+
+    async fn recent_commits(
+        &self,
+        _repo: &std::path::Path,
+        _n: usize,
+    ) -> Result<Vec<String>, RepoError> {
+        Ok(vec!["abc CU-1 - fix: algo".into()])
+    }
+
+    async fn commit(
+        &self,
+        _repo: &std::path::Path,
+        files: &[String],
+        message: &str,
+    ) -> Result<String, RepoError> {
+        if self.failing {
+            return Err(RepoError::Invalid("ruff failed".into()));
+        }
+        self.commits
+            .lock()
+            .expect("lock")
+            .push((files.to_vec(), message.to_owned()));
+        Ok("abc1234".into())
+    }
+}
+
+#[async_trait]
+impl RepoInspector for FakeRepoInspector {
+    async fn changes(
+        &self,
+        _repo: &std::path::Path,
+        _max_diff_chars: usize,
+    ) -> Result<Option<RepoChanges>, RepoError> {
+        Ok(self.changes.clone())
     }
 }

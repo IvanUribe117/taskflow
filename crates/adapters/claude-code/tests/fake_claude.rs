@@ -177,3 +177,34 @@ async fn a_missing_program_is_unavailable() {
 
     assert!(matches!(error, AiError::Unavailable(_)));
 }
+
+#[tokio::test]
+async fn summarize_work_resumes_the_agent_conversation_inside_the_repo() {
+    const WORK: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"summary":"Hecho","changes":["login.html"],"verification":[],"pending":[]}}"#;
+    let (dir, program) = fake_claude(&format!("echo '{WORK}'"));
+    let repo = tempfile::tempdir().unwrap();
+    let base = input(Some(repo.path().to_path_buf()));
+    let work_input = application::ports::WorkInput {
+        task: base.task,
+        project: base.project,
+        plan: "## Plan".into(),
+        changes: None,
+        agent_session: Some("1b4e28ba-2fa1-41d2-883f-0016d3cca427".into()),
+        context: BuiltContext::default(),
+    };
+
+    let work = summarizer(&program, Duration::from_secs(10))
+        .summarize_work(&work_input)
+        .await
+        .unwrap();
+
+    assert_eq!(work.summary, "Hecho");
+    let args = read(&dir, "args.txt");
+    assert!(
+        args.contains("--resume\n1b4e28ba-2fa1-41d2-883f-0016d3cca427\n"),
+        "{args}"
+    );
+    assert!(read(&dir, "stdin.txt").starts_with("Taskflow: terminaste de trabajar"));
+    let cwd = PathBuf::from(read(&dir, "cwd.txt").trim());
+    assert_eq!(cwd, repo.path().canonicalize().unwrap());
+}

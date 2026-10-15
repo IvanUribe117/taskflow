@@ -12,6 +12,7 @@ mod api_types;
 mod client;
 mod config;
 mod mapper;
+mod markdown;
 mod provider;
 mod query;
 mod status_map;

@@ -1,0 +1,19 @@
+[package]
+name = "adapter-git"
+description = "Read-only git inspection: branch, commits and diff of the work branch."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+application.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

@@ -27,8 +27,8 @@ impl<'a> PrepareWorkReport<'a> {
     }
 
     /// 1. La sesión activa y **aprobada** (`in_progress` o `paused`).
-    /// 2. Lo que se planeó (`report.md`), los cambios de git del repo del proyecto y tus
-    ///    reglas.
+    /// 2. Lo que se planeó (`report.md`), los cambios de git de la carpeta de trabajo (el
+    ///    worktree de la tarea o el repo del proyecto) y tus reglas.
     /// 3. `summarize_work`: si hay conversación del agente, se la retoma para que **él**
     ///    cuente lo que hizo. Si eso falla (no se llegó a abrir, se borró…), se intenta
     ///    sin ella, solo con el plan y los cambios, y se avisa.
@@ -60,10 +60,8 @@ impl<'a> PrepareWorkReport<'a> {
             Some(slug) => self.ctx.projects.get(slug).await.ok(),
             None => None,
         };
-        let repo = project
-            .as_ref()
-            .and_then(|p| p.repo_path.clone())
-            .filter(|path| path.is_dir());
+        // Donde se trabajó: el worktree de la tarea o el repo del proyecto.
+        let repo = super::workdir::resolve(self.ctx, &session).await;
         let changes = match &repo {
             Some(path) => self
                 .ctx
@@ -90,7 +88,7 @@ impl<'a> PrepareWorkReport<'a> {
             }),
             plan,
             changes: changes.clone(),
-            // La conversación del agente vive en la carpeta donde se abrió: el repo.
+            // La conversación del agente vive en la carpeta donde se abrió.
             agent_session: session.agent_session.clone().filter(|_| repo.is_some()),
             context,
             since: session

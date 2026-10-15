@@ -759,3 +759,58 @@ Tests: de 472 a 487.
 - **La rama `CU-86bcjdn6v` de IDK tiene 2 commits de la tarea de prueba sin subir.** Con `after_commit = "pr"`, el próximo `taskflow commit` en esa sesión los subiría y abriría un PR real en `swappsco/idk`. Si no quieres eso, bórrala o cambia de rama antes.
 - `gh` usa la cuenta con la que iniciaste sesión (`gh auth status`).
 
+
+## Octava parte: un worktree por tarea
+
+Preguntaste si Taskflow sabía en qué worktree trabajó el agente para hacer el commit. No lo sabía: todo pasaba en el `repo_path` del proyecto, y si el agente creaba un worktree por su cuenta, `commit` no veía los cambios. Pediste las tres mejoras, sobre todo que **Taskflow cree el worktree** para que el agente no tenga que hacerlo.
+
+```text
+taskflow agent
+  Abriendo claude en "…/idk-worktrees/CU-86b1" (worktree de la tarea, rama `CU-86b1`, recién creado) con el prompt de la sesión…
+  El agente dejó cambios en otro worktree:                         ← solo si creó uno por su cuenta
+    · "…/idk/.claude/worktrees/otter" (rama `worktree-otter`: 1 archivos sin commit, 0 commits)
+  ? ¿Dónde hago el commit, el PR y el reporte?  > Usar "…/otter" · Seguir en "…/CU-86b1"
+
+taskflow done
+  ? ¿Quitar el worktree "…/idk-worktrees/CU-86b1"? La rama se queda con sus commits.
+```
+
+### Cómo funciona
+
+| Momento | Qué hace Taskflow |
+| --- | --- |
+| `start` (o el agente, si en `start` falló) | `workdir::ensure`: usa la carpeta guardada en la sesión; si no, un worktree que ya tenga la rama de la tarea (`CU-<id>` o `CU-<id>-…`, incluido el repo principal); si no, crea `<repo>-worktrees/CU-<id>` con `git fetch` + `git worktree add` desde la base. La guarda en `WorkSession::work_dir` |
+| `agent` | Abre el agente ahí. El prompt agrega "Workspace": trabaja solo en esa carpeta, no crea worktrees, no cambia de rama y no hace commit |
+| Al salir del agente | `SessionWorkDir::others`: otros worktrees con cambios en `.claude/worktrees/` o en la rama de la tarea → pregunta cuál usar (`switch_to`) |
+| `commit`, `pr`, `report publish` | `workdir::resolve` (sin crear nada): la carpeta de la sesión, el worktree de la rama o el repo |
+| `done`, `abort` | `removable`: si no es el repo principal y no tiene cambios sin commit, pregunta si quitarlo (`git worktree remove`, sin forzar; la rama se queda) |
+
+- **Capas.** Puerto nuevo `Worktrees` (`list`, `add`, `remove`) en `application::ports`, implementado por `GitRepoInspector`; `FakeWorktrees` en los tests. La lógica vive en `application::session::workdir`; la CLI solo pregunta.
+- **Configuración.** `session.worktrees` (`true`) y `session.worktree_dir` (vacía = `<repo>-worktrees`, junto al repo). Llegan al caso de uso por `SessionPrefs`.
+- **Compatibilidad.** Una sesión vieja no tiene `work_dir` (`#[serde(default)]`). Si su rama está en el repo principal, `ensure` encuentra ese worktree y sigue ahí: nada cambia a mitad de una tarea.
+- **Sin romper la sesión.** Si git no puede crear el worktree, `start` y `agent` avisan y siguen en el repo del proyecto.
+
+### Conceptos aplicados
+
+- **`git worktree`.** Varias carpetas de trabajo sobre el mismo repositorio, cada una con su rama. Git no deja tener la misma rama en dos worktrees: por eso, antes de crear uno, se busca si la rama ya está en alguno. `git worktree list --porcelain` da un formato estable para leerlo (bloques `worktree`/`branch`).
+- **`--no-track`.** Una rama creada desde `origin/master` quedaría siguiéndola; con `--no-track` no tiene upstream hasta el primer `git push -u`, que la deja en `origin/CU-<id>`.
+- **Resolver frente a asegurar.** `resolve` solo lee (lo usan `commit`, `pr` y el reporte); `ensure` puede crear (solo `start` y `agent`). Así un `taskflow commit` nunca crea carpetas por sorpresa.
+- **Comparar rutas.** En macOS `/tmp` es un enlace a `/private/tmp`: `same_dir` compara con `canonicalize`, con respaldo a la ruta tal cual si no existe.
+- **Borrar sin perder nada.** `git worktree remove` sin `--force` se niega si hay cambios sin commit, y la rama no se borra. Con `--yes` no se quita nada: borrar algo siempre lo decides tú.
+- **`Path::join` con una ruta absoluta** la devuelve tal cual: por eso `worktree_dir` puede ser absoluta o relativa al repo con una sola línea.
+
+### Probado (2026-10-15)
+
+En el sandbox (repo temporal, remoto local y `gh` falso; nada en IDK), con un agente falso que anota su carpeta y su rama:
+
+- Una sesión vieja con la rama en el repo principal: sigue ahí y el prompt no cambia.
+- Repo en `master`, sin la rama: `agent` creó `repo-worktrees/CU-86bcjdn6v` desde `origin/master`, sin upstream; el agente se abrió ahí con la instrucción "Workspace"; el repo principal siguió en `master`.
+- `commit --yes` y `pr --yes` desde el worktree: commit, `git push -u` a `origin/CU-86bcjdn6v` y PR creado.
+- Un worktree hecho "por el agente" en `.claude/worktrees/otter` con cambios: al salir se mostró, se eligió y la sesión pasó a trabajar ahí.
+- `abort`: preguntó y quitó el worktree; la rama quedó.
+- Tests: de 487 a 501.
+
+### A tener en cuenta
+
+- **Lo ignorado por git no está en el worktree**: `.env`, `node_modules`, entornos virtuales. Si el agente necesita correr el proyecto, cópialos o instálalos ahí.
+- En IDK, la rama `CU-86bcjdn6v` sigue en el repo principal: esa sesión sigue trabajando ahí. Las tareas nuevas tendrán su worktree en `/Users/dev/swapps/idk-worktrees/CU-<id>`.

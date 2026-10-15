@@ -47,6 +47,8 @@ impl ConfigKey {
         "session.agent_command",
         "session.after_commit",
         "session.pr_draft",
+        "session.worktrees",
+        "session.worktree_dir",
         "ui.group_by",
     ];
 

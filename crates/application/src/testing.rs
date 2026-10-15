@@ -19,8 +19,8 @@ use crate::ports::{
     NotifyError, PlanInput, PrInput, ProjectRepository, ProviderError, PullRequest,
     PullRequestDraft, PullRequests, RepoChanges, RepoCommitter, RepoError, RepoInspector,
     SecretError, SecretName, SecretStore, SecretString, SessionStore, Summarizer, SummaryInput,
-    TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker, WorkInput, WorkSummary,
-    markdown_title,
+    TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker, WorkInput, WorkSummary, Worktree,
+    Worktrees, markdown_title,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
@@ -328,6 +328,7 @@ pub fn context(
         repo: Arc::new(FakeRepoInspector::default()),
         committer: Arc::new(FakeRepoCommitter::default()),
         prs: Arc::new(FakePullRequests::default()),
+        worktrees: Arc::new(FakeWorktrees::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -897,6 +898,88 @@ impl Summarizer for FakeSummarizer {
             return Err(AiError::Failed("fake failure".into()));
         }
         Ok(Self::work())
+    }
+}
+
+/// Worktrees en memoria. `add` crea la carpeta (para que exista en disco) y la agrega a
+/// la lista; `remove` la quita de la lista.
+#[derive(Debug, Default)]
+pub struct FakeWorktrees {
+    list: Mutex<Vec<Worktree>>,
+    pub failing_add: bool,
+    added: Mutex<Vec<(std::path::PathBuf, String)>>,
+    removed: Mutex<Vec<std::path::PathBuf>>,
+}
+
+impl FakeWorktrees {
+    /// Un repo en `main` con estos worktrees (ruta, rama) además del principal.
+    pub fn with(main: &std::path::Path, others: &[(&std::path::Path, &str)]) -> Self {
+        let mut list = vec![Worktree {
+            path: main.to_path_buf(),
+            branch: Some("master".into()),
+        }];
+        list.extend(others.iter().map(|(path, branch)| Worktree {
+            path: path.to_path_buf(),
+            branch: Some((*branch).to_owned()),
+        }));
+        Self {
+            list: Mutex::new(list),
+            ..Self::default()
+        }
+    }
+
+    /// `add` falla, como git con la carpeta ocupada.
+    #[must_use]
+    pub fn failing(mut self) -> Self {
+        self.failing_add = true;
+        self
+    }
+
+    /// Los worktrees creados: ruta y rama.
+    pub fn added(&self) -> Vec<(std::path::PathBuf, String)> {
+        self.added.lock().expect("lock").clone()
+    }
+
+    pub fn removed(&self) -> Vec<std::path::PathBuf> {
+        self.removed.lock().expect("lock").clone()
+    }
+}
+
+#[async_trait]
+impl Worktrees for FakeWorktrees {
+    async fn list(&self, _repo: &std::path::Path) -> Result<Vec<Worktree>, RepoError> {
+        Ok(self.list.lock().expect("lock").clone())
+    }
+
+    async fn add(
+        &self,
+        _repo: &std::path::Path,
+        path: &std::path::Path,
+        branch: &str,
+    ) -> Result<(), RepoError> {
+        if self.failing_add {
+            return Err(RepoError::Invalid("git worktree add failed".into()));
+        }
+        std::fs::create_dir_all(path).map_err(|e| RepoError::Storage(e.to_string()))?;
+        self.added
+            .lock()
+            .expect("lock")
+            .push((path.to_path_buf(), branch.to_owned()));
+        self.list.lock().expect("lock").push(Worktree {
+            path: path.to_path_buf(),
+            branch: Some(branch.to_owned()),
+        });
+        Ok(())
+    }
+
+    async fn remove(
+        &self,
+        _repo: &std::path::Path,
+        path: &std::path::Path,
+    ) -> Result<(), RepoError> {
+        self.removed.lock().expect("lock").push(path.to_path_buf());
+        self.list.lock().expect("lock").retain(|w| w.path != path);
+        Ok(())
     }
 }
 

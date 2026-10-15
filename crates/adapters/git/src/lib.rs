@@ -4,6 +4,7 @@
 //!   `status`). Nunca cambia nada.
 //! - `RepoCommitter`: `git add` y `git commit` **solo** de los archivos que elegiste, para
 //!   `taskflow commit`, y `git push` para `taskflow pr`.
+//! - `Worktrees`: una carpeta y una rama por tarea (`git worktree`).
 //!
 //! Y `GhPullRequests` (módulo [`github`]): los PR de GitHub con `gh`.
 #![warn(clippy::pedantic)]
@@ -12,11 +13,12 @@ mod github;
 
 pub use github::GhPullRequests;
 
-use std::path::Path;
-
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use application::ports::{ChangedFile, RepoChanges, RepoCommitter, RepoError, RepoInspector};
+use application::ports::{
+    ChangedFile, RepoChanges, RepoCommitter, RepoError, RepoInspector, Worktree, Worktrees,
+};
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -42,6 +44,34 @@ async fn git(repo: &Path, args: &[&str]) -> Result<Option<String>, RepoError> {
             .trim_end()
             .to_owned()
     }))
+}
+
+/// Como [`git`], pero si falla el error trae lo que dijo git (`what` dice qué se intentaba).
+/// Sin terminal para pedir credenciales: si hacen falta, falla en vez de esperar.
+async fn git_checked(repo: &Path, args: &[&str], what: &str) -> Result<String, RepoError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| RepoError::Storage(format!("git: {e}")))?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_owned());
+    }
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout).trim(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Err(RepoError::Invalid(format!(
+        "{what} failed:\n{}",
+        text.trim()
+    )))
 }
 
 /// La rama base: la que apunta `origin/HEAD` (`origin/master`), o la primera que exista de
@@ -264,6 +294,79 @@ impl RepoCommitter for GitRepoInspector {
     }
 }
 
+/// `git worktree list --porcelain`: bloques separados por una línea vacía, con
+/// `worktree <ruta>` y `branch refs/heads/<rama>` (o `detached`).
+fn parse_worktrees(raw: &str) -> Vec<Worktree> {
+    let mut list = Vec::new();
+    for block in raw.split("\n\n") {
+        let mut path = None;
+        let mut branch = None;
+        for line in block.lines() {
+            if let Some(rest) = line.strip_prefix("worktree ") {
+                path = Some(PathBuf::from(rest));
+            } else if let Some(rest) = line.strip_prefix("branch ") {
+                branch = Some(rest.trim_start_matches("refs/heads/").to_owned());
+            }
+        }
+        if let Some(path) = path {
+            list.push(Worktree { path, branch });
+        }
+    }
+    list
+}
+
+async fn has_ref(repo: &Path, name: &str) -> Result<bool, RepoError> {
+    Ok(git(repo, &["rev-parse", "--verify", "--quiet", name])
+        .await?
+        .is_some())
+}
+
+#[async_trait]
+impl Worktrees for GitRepoInspector {
+    async fn list(&self, repo: &Path) -> Result<Vec<Worktree>, RepoError> {
+        let raw = git(repo, &["worktree", "list", "--porcelain"])
+            .await?
+            .unwrap_or_default();
+        Ok(parse_worktrees(&raw))
+    }
+
+    /// 1. `git fetch origin`, para partir de la base al día. Si falla (sin red, sin
+    ///    `origin`), se sigue con lo que hay.
+    /// 2. `git worktree add`: con la rama local si existe; si solo está en `origin`, desde
+    ///    esa; si no, una rama nueva desde la base, sin seguirla (`--no-track`: su upstream
+    ///    será `origin/<rama>` al hacer push, no la base).
+    async fn add(&self, repo: &Path, path: &Path, branch: &str) -> Result<(), RepoError> {
+        let _ = git_checked(repo, &["fetch", "--quiet", "origin"], "git fetch").await;
+        let target = path.to_string_lossy();
+        let remote = format!("origin/{branch}");
+        let args: Vec<String> = if has_ref(repo, &format!("refs/heads/{branch}")).await? {
+            vec![target.into_owned(), branch.to_owned()]
+        } else if has_ref(repo, &format!("refs/remotes/{remote}")).await? {
+            vec!["-b".into(), branch.to_owned(), target.into_owned(), remote]
+        } else {
+            let mut args = vec!["--no-track".into(), "-b".into(), branch.to_owned()];
+            args.push(target.into_owned());
+            args.extend(base_branch(repo).await?);
+            args
+        };
+        let mut full = vec!["worktree", "add", "--quiet"];
+        full.extend(args.iter().map(String::as_str));
+        git_checked(repo, &full, "git worktree add").await?;
+        Ok(())
+    }
+
+    async fn remove(&self, repo: &Path, path: &Path) -> Result<(), RepoError> {
+        let target = path.to_string_lossy();
+        git_checked(
+            repo,
+            &["worktree", "remove", &target],
+            "git worktree remove",
+        )
+        .await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -428,6 +531,97 @@ mod tests {
         assert!(
             diff.ends_with("Archivos nuevos (sin git add):\nnotas.md"),
             "{diff}"
+        );
+    }
+
+    #[test]
+    fn parses_the_worktree_list() {
+        let raw = "worktree /code/idk\nHEAD abc\nbranch refs/heads/master\n\n\
+                   worktree /code/idk-worktrees/CU-1\nHEAD def\nbranch refs/heads/CU-1\n\n\
+                   worktree /tmp/x\nHEAD 123\ndetached\n";
+
+        let list = parse_worktrees(raw);
+
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].path, PathBuf::from("/code/idk"));
+        assert_eq!(list[1].branch.as_deref(), Some("CU-1"));
+        assert_eq!(list[2].branch, None);
+    }
+
+    #[tokio::test]
+    async fn adds_a_worktree_from_the_base_and_reuses_a_branch() {
+        let dir = repo().await; // En `CU-1`, con `main` como base.
+        let root = tempfile::tempdir().unwrap();
+        let new = root.path().join("wt/CU-2");
+        let again = root.path().join("wt/CU-3");
+
+        GitRepoInspector
+            .add(dir.path(), &new, "CU-2")
+            .await
+            .unwrap();
+        run(dir.path(), &["branch", "CU-3", "CU-1"]).await;
+        GitRepoInspector
+            .add(dir.path(), &again, "CU-3")
+            .await
+            .unwrap();
+
+        let list = GitRepoInspector.list(dir.path()).await.unwrap();
+        let branches: Vec<_> = list.iter().map(|w| w.branch.as_deref()).collect();
+        assert_eq!(branches, [Some("CU-1"), Some("CU-2"), Some("CU-3")]);
+        // CU-2 sale de `main` (sin el commit de CU-1) y no sigue a ninguna rama.
+        let log = git(&new, &["log", "--oneline"]).await.unwrap().unwrap();
+        assert_eq!(log.lines().count(), 1, "{log}");
+        assert!(git(&new, &["rev-parse", "@{u}"]).await.unwrap().is_none());
+        // CU-3 ya existía: el worktree la usa tal cual.
+        let log = git(&again, &["log", "--oneline", "-1"])
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(log.ends_with("fondo del login"), "{log}");
+    }
+
+    #[tokio::test]
+    async fn a_dirty_worktree_is_not_removed() {
+        let dir = repo().await;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("CU-2");
+        GitRepoInspector
+            .add(dir.path(), &path, "CU-2")
+            .await
+            .unwrap();
+        fs::write(path.join("login.html"), "cambio").unwrap();
+
+        let refused = GitRepoInspector
+            .remove(dir.path(), &path)
+            .await
+            .unwrap_err();
+        run(&path, &["checkout", "--", "login.html"]).await;
+        GitRepoInspector.remove(dir.path(), &path).await.unwrap();
+
+        assert!(
+            refused.to_string().contains("git worktree remove failed"),
+            "{refused}"
+        );
+        assert!(!path.exists());
+        assert!(
+            has_ref(dir.path(), "refs/heads/CU-2").await.unwrap(),
+            "the branch stays"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_branch_checked_out_elsewhere_brings_git_output() {
+        let dir = repo().await; // `CU-1` ya está en el repo principal.
+        let root = tempfile::tempdir().unwrap();
+
+        let error = GitRepoInspector
+            .add(dir.path(), &root.path().join("CU-1"), "CU-1")
+            .await
+            .unwrap_err();
+
+        assert!(
+            error.to_string().contains("git worktree add failed"),
+            "{error}"
         );
     }
 

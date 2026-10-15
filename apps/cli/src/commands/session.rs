@@ -10,15 +10,16 @@
 //! FR-61); con `--yes`, o sin terminal, no se pregunta nada y cada comando hace solo lo suyo.
 
 use std::io::IsTerminal;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use application::AppContext;
 use application::ai::AiLimits;
-use application::dto::SessionOutcome;
+use application::dto::{SessionOutcome, WorkDirSetup, WorktreeCandidate};
 use application::session::{
     CommitChanges, HandleSession, PrepareAgent, PrepareCommit, PreparePullRequest,
-    PrepareWorkReport, PublishPullRequest, RetrySession, SessionPrefs, ShowSession, StartSession,
-    Suggestion, suggested_statuses,
+    PrepareWorkReport, PublishPullRequest, RetrySession, SessionPrefs, SessionWorkDir, ShowSession,
+    StartSession, Suggestion, suggested_statuses,
 };
 use application::settings::{AfterCommit, AppSettings};
 use application::tasks::{GetTodayTasks, PrepareClose};
@@ -46,6 +47,10 @@ pub fn prefs(settings: &AppSettings) -> SessionPrefs {
         },
         report_language: settings.ai.report_language.clone(),
         agent_language: settings.ai.agent_language.clone(),
+        worktrees: settings.session.worktrees,
+        worktree_dir: Some(settings.session.worktree_dir.trim())
+            .filter(|dir| !dir.is_empty())
+            .map(std::path::PathBuf::from),
     }
 }
 
@@ -373,8 +378,12 @@ pub async fn agent(
         println!("{}", brief.prompt);
         return Ok(());
     }
+    for warning in &brief.warnings {
+        eprintln!("⚠ {warning}");
+    }
     let program = &settings.session.agent_command;
-    let dir = if let Some(dir) = &brief.repo_path {
+    let place = worktree_label(brief.worktree.as_ref());
+    let mut dir = if let Some(dir) = &brief.repo_path {
         dir.clone()
     } else {
         eprintln!("⚠ el proyecto no tiene `repo_path` (o no existe); se abre en la carpeta actual");
@@ -404,7 +413,10 @@ pub async fn agent(
                 "con el prompt de la sesión",
             )
         };
-        eprintln!("Abriendo {program} en {} {label}…", presenter::path(&dir));
+        eprintln!(
+            "Abriendo {program} en {}{place} {label}…",
+            presenter::path(&dir)
+        );
         let started = Instant::now();
         let status = std::process::Command::new(program)
             .args(&args)
@@ -431,6 +443,7 @@ pub async fn agent(
             );
             return Ok(());
         }
+        other_worktrees(ctx).await;
         // El menú se repite (por ejemplo, después del commit) hasta que elijas algo que
         // termine o vuelva al agente.
         loop {
@@ -450,6 +463,10 @@ pub async fn agent(
                 AfterAgent::Finish => return done(ctx, settings, None, None, false).await,
                 AfterAgent::BackToAgent => {
                     let again = PrepareAgent::new(ctx).execute(&prefs(settings)).await?;
+                    // Si cambiaste de worktree, el agente vuelve a abrirse en el nuevo.
+                    if let Some(new_dir) = again.repo_path {
+                        dir = new_dir;
+                    }
                     resume = again.agent_session;
                     briefed = again.briefed;
                     break;
@@ -461,6 +478,128 @@ pub async fn agent(
             }
         }
     }
+}
+
+/// `" (worktree de la tarea, rama `CU-1`, recién creado)"`, o nada si no es un worktree.
+fn worktree_label(setup: Option<&WorkDirSetup>) -> String {
+    match setup {
+        Some(setup) if setup.is_worktree => format!(
+            " (worktree de la tarea{}{})",
+            setup
+                .branch
+                .as_deref()
+                .map(|b| format!(", rama `{b}`"))
+                .unwrap_or_default(),
+            if setup.created {
+                ", recién creado"
+            } else {
+                ""
+            }
+        ),
+        _ => String::new(),
+    }
+}
+
+/// Si el agente trabajó en **otro** worktree (lo creó por su cuenta), pregunta si usarlo
+/// para el commit, el PR y el reporte. Nada de esto debe detener el menú: los errores se
+/// avisan y se sigue.
+async fn other_worktrees(ctx: &AppContext) {
+    let workdir = SessionWorkDir::new(ctx);
+    let others = match workdir.others().await {
+        Ok(others) => others,
+        Err(error) => {
+            eprintln!("⚠ no se pudieron revisar los worktrees: {error:#}");
+            return;
+        }
+    };
+    if others.is_empty() {
+        return;
+    }
+    let current = workdir.current().await.ok().flatten();
+    let label = |o: &WorktreeCandidate| {
+        format!(
+            "{} (rama `{}`: {} archivos sin commit, {} commits)",
+            presenter::path(&o.path),
+            o.branch.as_deref().unwrap_or("sin rama"),
+            o.changed_files,
+            o.commits
+        )
+    };
+    eprintln!("El agente dejó cambios en otro worktree:");
+    for other in &others {
+        eprintln!("  · {}", label(other));
+    }
+    let mut items: Vec<String> = others
+        .iter()
+        .map(|o| format!("Usar {}", label(o)))
+        .collect();
+    items.push(format!(
+        "Seguir en {}",
+        current
+            .as_deref()
+            .map_or_else(|| "la carpeta actual".to_owned(), presenter::path)
+    ));
+    let Ok(index) = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("¿Dónde hago el commit, el PR y el reporte?")
+        .items(&items)
+        .default(0)
+        .interact()
+    else {
+        return;
+    };
+    if let Some(chosen) = others.get(index) {
+        match workdir.switch_to(&chosen.path).await {
+            Ok(()) => println!(
+                "✔ La sesión trabaja ahora en {}",
+                presenter::path(&chosen.path)
+            ),
+            Err(error) => eprintln!("⚠ {error:#}"),
+        }
+    }
+}
+
+/// Después de `done` o `abort`: quitar el worktree de la tarea si quedó limpio. La rama se
+/// queda con sus commits (y en `origin`, si se subió). Con `--yes` o sin terminal no se
+/// borra nada: solo se dice cómo.
+async fn offer_cleanup(ctx: &AppContext, cleanup: Option<(PathBuf, PathBuf)>, yes: bool) {
+    let Some((repo, path)) = cleanup else {
+        return;
+    };
+    let shown = presenter::path(&path);
+    if yes || !interactive() {
+        println!(
+            "El worktree de la tarea sigue en {shown}. Para quitarlo: git -C {} worktree remove {shown}",
+            presenter::path(&repo)
+        );
+        return;
+    }
+    let inside = std::env::current_dir().is_ok_and(|dir| dir.starts_with(&path));
+    let question = if inside {
+        format!("¿Quitar el worktree {shown}? (tu terminal está dentro de esa carpeta)")
+    } else {
+        format!("¿Quitar el worktree {shown}? La rama se queda con sus commits.")
+    };
+    let Ok(remove) = Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt(question)
+        .default(!inside)
+        .interact()
+    else {
+        return;
+    };
+    if remove {
+        match SessionWorkDir::new(ctx).remove(&repo, &path).await {
+            Ok(()) => println!("✔ Worktree quitado: {shown}"),
+            Err(error) => eprintln!("⚠ no se pudo quitar el worktree: {error:#}"),
+        }
+    }
+}
+
+/// El worktree que se puede quitar al terminar la sesión activa, con su repo.
+async fn cleanup_candidate(ctx: &AppContext) -> Option<(PathBuf, PathBuf)> {
+    let workdir = SessionWorkDir::new(ctx);
+    let path = workdir.removable().await.ok().flatten()?;
+    let repo = workdir.repo().await.ok().flatten()?;
+    Some((repo, path))
 }
 
 /// Lo que se puede hacer al salir del agente.
@@ -1003,7 +1142,10 @@ pub async fn done(
             return Ok(());
         }
     }
-    handle(ctx, settings, SessionCommand::Finish { status, comment }).await
+    let cleanup = cleanup_candidate(ctx).await;
+    handle(ctx, settings, SessionCommand::Finish { status, comment }).await?;
+    offer_cleanup(ctx, cleanup, yes).await;
+    Ok(())
 }
 
 /// `taskflow abort [--restore-status] [--yes]`.
@@ -1038,7 +1180,10 @@ pub async fn abort(
             return Ok(());
         }
     }
-    handle(ctx, settings, SessionCommand::Abort { restore_status }).await
+    let cleanup = cleanup_candidate(ctx).await;
+    handle(ctx, settings, SessionCommand::Abort { restore_status }).await?;
+    offer_cleanup(ctx, cleanup, yes).await;
+    Ok(())
 }
 
 /// `taskflow session [show|status|retry]`.

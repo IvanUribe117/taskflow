@@ -15,6 +15,7 @@ mod session_store;
 mod summarizer;
 mod task_provider;
 mod time_tracker;
+mod worktrees;
 
 pub use clock::{Clock, SystemClock};
 pub use config_store::ConfigStore;
@@ -36,6 +37,7 @@ pub use summarizer::{
 };
 pub use task_provider::{ProviderError, TaskProvider, TaskQuery};
 pub use time_tracker::{LocalTimeTracker, TimeEntry, TimeTracker};
+pub use worktrees::{Worktree, Worktrees};
 
 /// Reexportados para que los adaptadores usen la misma versión de `secrecy` que el puerto.
 pub use secrecy::{ExposeSecret, SecretString};

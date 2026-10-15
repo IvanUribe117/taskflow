@@ -30,6 +30,8 @@ fn prefs() -> SessionPrefs {
         },
         report_language: "español".into(),
         agent_language: "English".into(),
+        worktrees: true,
+        worktree_dir: None,
     }
 }
 
@@ -1169,4 +1171,241 @@ async fn without_gh_the_push_still_works() {
 
     assert!(pr.is_none());
     assert_eq!(committer.pushes(), 1);
+}
+
+/// Una sesión aprobada en un proyecto con repo en disco y estos worktrees.
+async fn with_worktrees(
+    worktrees: impl FnOnce(&std::path::Path) -> crate::testing::FakeWorktrees,
+    committer: crate::testing::FakeRepoCommitter,
+    prefs: &SessionPrefs,
+) -> (
+    AppContext,
+    Arc<crate::testing::FakeWorktrees>,
+    std::path::PathBuf,
+    SessionOutcome,
+) {
+    use domain::project::MatchRule;
+    use domain::testing::project;
+
+    let repo = tempfile_dir();
+    let mut idk = project("idk", vec![MatchRule::Tag("idk".into())]);
+    idk.repo_path = Some(repo.clone());
+    let mut task = task("86b1");
+    task.tags = vec!["idk".into()];
+    let provider = FakeTaskProvider::new(user("me"))
+        .with_tasks(vec![task])
+        .with_statuses(vec![StatusOption::new("in progress", StatusKind::Custom)]);
+    let (mut ctx, _) = context(provider, vec![idk], FixedClock::at(NOW));
+    let worktrees = Arc::new(worktrees(&repo));
+    ctx.worktrees = worktrees.clone();
+    ctx.committer = Arc::new(committer);
+    ctx.sessions = Arc::new(FakeSessionStore::default());
+    ctx.time = Arc::new(FakeTimeTracker::default());
+    ctx.notifier = Arc::new(FakeNotifier::default());
+    let outcome = StartSession::new(&ctx)
+        .execute(&id(), false, prefs)
+        .await
+        .unwrap();
+    HandleSession::new(&ctx)
+        .execute(SessionCommand::Approve { status: None }, prefs)
+        .await
+        .unwrap();
+    (ctx, worktrees, repo, outcome)
+}
+
+/// `<repo>-worktrees/CU-86b1`, junto al repo.
+fn default_worktree(repo: &std::path::Path) -> std::path::PathBuf {
+    worktree_path(repo, None, &id())
+}
+
+#[tokio::test]
+async fn start_creates_the_task_worktree_and_everything_works_there() {
+    let (ctx, worktrees, repo, outcome) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[]),
+        crate::testing::FakeRepoCommitter::with_files(&[(" M", "a.py")]),
+        &prefs(),
+    )
+    .await;
+    let path = default_worktree(&repo);
+
+    let brief = PrepareAgent::new(&ctx).execute(&prefs()).await.unwrap();
+    let proposal = PrepareCommit::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+
+    assert_eq!(worktrees.added(), [(path.clone(), "CU-86b1".to_owned())]);
+    assert_eq!(outcome.session.work_dir.as_deref(), Some(path.as_path()));
+    assert_eq!(brief.repo_path.as_deref(), Some(path.as_path()));
+    assert!(
+        brief
+            .worktree
+            .as_ref()
+            .is_some_and(|w| w.is_worktree && !w.created)
+    );
+    assert!(
+        brief
+            .prompt
+            .contains("you are in a git worktree created for this task")
+            && brief.prompt.contains("on branch `CU-86b1`")
+            && brief.prompt.contains("Leave your changes uncommitted"),
+        "{}",
+        brief.prompt
+    );
+    assert_eq!(proposal.repo, path, "the commit is made in the worktree");
+    assert_eq!(worktrees.added().len(), 1, "the agent reuses it");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[tokio::test]
+async fn a_worktree_already_on_the_task_branch_is_reused() {
+    let other = tempfile_dir();
+    let (ctx, worktrees, repo, outcome) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[(&other, "CU-86b1-fondo-login")]),
+        crate::testing::FakeRepoCommitter::default(),
+        &prefs(),
+    )
+    .await;
+
+    let brief = PrepareAgent::new(&ctx).execute(&prefs()).await.unwrap();
+
+    assert!(worktrees.added().is_empty());
+    assert_eq!(outcome.session.work_dir.as_deref(), Some(other.as_path()));
+    assert_eq!(brief.repo_path.as_deref(), Some(other.as_path()));
+    assert_eq!(
+        brief.worktree.and_then(|w| w.branch).as_deref(),
+        Some("CU-86b1-fondo-login")
+    );
+    let _ = std::fs::remove_dir_all(other);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[tokio::test]
+async fn without_worktrees_everything_stays_in_the_project_repo() {
+    let mut no_worktrees = prefs();
+    no_worktrees.worktrees = false;
+    let (ctx, worktrees, repo, outcome) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[]),
+        crate::testing::FakeRepoCommitter::default(),
+        &no_worktrees,
+    )
+    .await;
+
+    let brief = PrepareAgent::new(&ctx)
+        .execute(&no_worktrees)
+        .await
+        .unwrap();
+
+    assert!(worktrees.added().is_empty());
+    assert_eq!(outcome.session.work_dir, None);
+    assert_eq!(brief.repo_path.as_deref(), Some(repo.as_path()));
+    assert!(!brief.prompt.contains("git worktree"), "{}", brief.prompt);
+    assert_eq!(
+        SessionWorkDir::new(&ctx).removable().await.unwrap(),
+        None,
+        "the main repo is never removed"
+    );
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[tokio::test]
+async fn a_failing_worktree_does_not_stop_the_session() {
+    let (ctx, _, repo, outcome) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[]).failing(),
+        crate::testing::FakeRepoCommitter::default(),
+        &prefs(),
+    )
+    .await;
+
+    let brief = PrepareAgent::new(&ctx).execute(&prefs()).await.unwrap();
+
+    assert_eq!(outcome.session.state, "awaiting_approval");
+    assert!(
+        outcome.warnings.iter().any(|w| w.contains("worktree")),
+        "{:?}",
+        outcome.warnings
+    );
+    assert_eq!(brief.repo_path.as_deref(), Some(repo.as_path()));
+    assert!(
+        brief.warnings[0].contains("worktree"),
+        "{:?}",
+        brief.warnings
+    );
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[tokio::test]
+async fn a_worktree_made_by_the_agent_is_found_and_can_be_used() {
+    let mut agent_dir = None;
+    let (ctx, _, repo, _) = with_worktrees(
+        |repo| {
+            let dir = repo.join(".claude/worktrees/brave-otter");
+            std::fs::create_dir_all(&dir).unwrap();
+            agent_dir = Some(dir.clone());
+            crate::testing::FakeWorktrees::with(repo, &[(&dir, "worktree-brave-otter")])
+        },
+        crate::testing::FakeRepoCommitter::with_files(&[(" M", "a.py")]),
+        &prefs(),
+    )
+    .await;
+    let agent_dir = agent_dir.unwrap();
+    let workdir = SessionWorkDir::new(&ctx);
+
+    let others = workdir.others().await.unwrap();
+    workdir.switch_to(&agent_dir).await.unwrap();
+    let proposal = PrepareCommit::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+
+    assert_eq!(others.len(), 1, "{others:?}");
+    assert_eq!(others[0].path, agent_dir);
+    assert_eq!(others[0].changed_files, 1);
+    assert_eq!(proposal.repo, agent_dir);
+    // Ahora el "otro" es el que creó Taskflow (el fake dice que todo tiene cambios).
+    let now_others: Vec<_> = workdir
+        .others()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|o| o.path)
+        .collect();
+    assert_eq!(now_others, [default_worktree(&repo)]);
+    let error = workdir.switch_to(&repo.join("nope")).await.unwrap_err();
+    assert!(error.to_string().contains("is not a worktree"), "{error}");
+    let _ = std::fs::remove_dir_all(default_worktree(&repo).parent().unwrap());
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[tokio::test]
+async fn only_a_clean_worktree_is_offered_for_removal() {
+    let (clean, worktrees, repo, _) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[]),
+        crate::testing::FakeRepoCommitter::default(),
+        &prefs(),
+    )
+    .await;
+    let (dirty, _, dirty_repo, _) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[]),
+        crate::testing::FakeRepoCommitter::with_files(&[(" M", "a.py")]),
+        &prefs(),
+    )
+    .await;
+    let path = default_worktree(&repo);
+
+    let removable = SessionWorkDir::new(&clean).removable().await.unwrap();
+    SessionWorkDir::new(&clean)
+        .remove(&repo, &path)
+        .await
+        .unwrap();
+
+    assert_eq!(removable.as_deref(), Some(path.as_path()));
+    assert_eq!(worktrees.removed(), std::slice::from_ref(&path));
+    assert_eq!(SessionWorkDir::new(&dirty).removable().await.unwrap(), None);
+    for dir in [path.parent().unwrap().to_path_buf(), repo] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    let _ = std::fs::remove_dir_all(default_worktree(&dirty_repo).parent().unwrap());
+    let _ = std::fs::remove_dir_all(dirty_repo);
 }

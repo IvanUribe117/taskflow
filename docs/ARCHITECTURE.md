@@ -1379,6 +1379,7 @@ El diseño de arriba se implementó con estos ajustes (detalle en `docs/learning
 | FR-71 "publicar el reporte de trabajo" | Se publica `work-report.md`, **lo que se hizo**, solo con la sesión aprobada. Lo escribe el mismo agente retomando su conversación (`--resume`), con el diff de git (`RepoInspector`) como respaldo | Publicar el plan no le sirve al equipo; lo que importa es lo hecho |
 | Comentarios como texto | `add_comment` convierte Markdown al formato de tramos de ClickUp | `comment_text` mostraba los `##` tal cual |
 | — | `taskflow commit` y `taskflow pr`: el commit, el push y el PR los hace **Taskflow** (`git` y `gh`), no el agente; la IA solo propone el mensaje del commit y la descripción del PR (con la plantilla del repo); el título del PR es `CU-<id> - <título de la tarea>`, sin IA. Puertos `RepoCommitter` (con `push`) y `PullRequests` (`GhPullRequests`). `session.after_commit = "pr"` encadena push + PR tras cada commit | Lo pidió el uso real: cerrar la tarea sin salir de Taskflow, y que lo que sale al repo pase por tu revisión |
+| — | Un **worktree por tarea** (`session.worktrees`, por defecto): Taskflow lo crea en `start` en `<repo>-worktrees/CU-<id>`, rama `CU-<id>` desde la base, y lo guarda en `WorkSession::work_dir`. El agente, `commit`, `pr` y el reporte usan esa carpeta; si el agente dejó cambios en otro worktree, se pregunta cuál usar; al terminar se ofrece quitarlo si está limpio. Puerto `Worktrees` (`GitRepoInspector`) | Que el agente no tenga que crear worktrees, que el repo principal no cambie de rama y poder llevar varias tareas a la vez |
 
 ## 10. Puertos (traits)
 
@@ -2537,6 +2538,8 @@ notify = true                     # notificaciones de escritorio
 agent_command = "claude"          # lo que abre `taskflow agent`
 after_commit = "ask"              # tras `taskflow commit`: none | ask | push | pr (push + abrir el PR)
 pr_draft = false                  # abrir los PR como borrador
+worktrees = true                  # un worktree por tarea (rama CU-<id>); lo crea Taskflow
+worktree_dir = ""                 # dónde; vacío = <repo>-worktrees junto al repo
 
 [playbooks]
 shell = "auto"                    # auto | sh | bash | zsh | pwsh | cmd

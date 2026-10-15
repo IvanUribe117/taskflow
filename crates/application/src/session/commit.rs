@@ -18,23 +18,21 @@ const MAX_DIFF_CHARS: usize = 12_000;
 /// Commits recientes que se le muestran como ejemplo de la convención.
 const RECENT_COMMITS: usize = 10;
 
-/// La sesión activa y el repositorio de su proyecto (debe existir en disco).
+/// La sesión activa y la carpeta donde se trabaja: su worktree o, sin él, el repo del
+/// proyecto (debe existir en disco).
 pub(super) async fn session_repo(ctx: &AppContext) -> Result<(WorkSession, PathBuf), AppError> {
     let session = ctx
         .sessions
         .active()
         .await?
         .ok_or_else(|| AppError::InvalidInput("there is no active session".into()))?;
-    let repo = match &session.project {
-        Some(slug) => ctx.projects.get(slug).await.ok().and_then(|p| p.repo_path),
-        None => None,
-    }
-    .filter(|path| path.is_dir())
-    .ok_or_else(|| {
-        AppError::InvalidInput(
-            "the session's project has no `repo_path` (or it does not exist)".into(),
-        )
-    })?;
+    let repo = super::workdir::resolve(ctx, &session)
+        .await
+        .ok_or_else(|| {
+            AppError::InvalidInput(
+                "the session's project has no `repo_path` (or it does not exist)".into(),
+            )
+        })?;
     Ok((session, repo))
 }
 

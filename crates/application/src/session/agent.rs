@@ -27,14 +27,16 @@ impl<'a> PrepareAgent<'a> {
     /// 2. El prompt de `agent-prompt.md`, el reporte de `report.md` **con tus ediciones**,
     ///    las secciones `instruction` del uso `agent_prompt` (tus reglas) y la regla de
     ///    idiomas, en ese orden. Lo que agrega Taskflow va en inglés: es para el agente.
-    /// 3. La carpeta: el `repo_path` del proyecto si existe en disco; si no, `None`.
+    /// 3. La carpeta: el worktree de la tarea, que se crea si hace falta (ver
+    ///    `workdir::ensure`); sin él, el `repo_path` del proyecto si existe en disco; si
+    ///    no, `None`. En un worktree, el prompt le dice al agente que se quede ahí.
     ///
     /// # Errors
     ///
     /// No hay sesión, no está aprobada, no hay reporte o fallan las secciones.
     pub async fn execute(&self, prefs: &SessionPrefs) -> Result<AgentBrief, AppError> {
         let budget_chars = prefs.limits.budget_chars;
-        let session = self
+        let mut session = self
             .ctx
             .sessions
             .active()
@@ -49,7 +51,7 @@ impl<'a> PrepareAgent<'a> {
                 session.state.name()
             )));
         }
-        let id = &session.task_id;
+        let id = &session.task_id.clone();
         let prompt = self.ctx.sessions.load_agent_prompt(id).await?;
         let report = self.ctx.sessions.load_report(id).await?;
         let context = BuildContext::new(self.ctx)
@@ -59,17 +61,21 @@ impl<'a> PrepareAgent<'a> {
                 budget_chars,
             })
             .await?;
-        let repo_path = match &session.project {
-            Some(slug) => self
-                .ctx
-                .projects
-                .get(slug)
-                .await
-                .ok()
-                .and_then(|project| project.repo_path)
-                .filter(|path| path.is_dir()),
-            None => None,
+        let mut warnings = Vec::new();
+        let before = session.work_dir.clone();
+        let worktree = match super::workdir::ensure(self.ctx, prefs, &mut session).await {
+            Ok(setup) => setup,
+            Err(error) => {
+                warnings.push(format!(
+                    "no se pudo preparar el worktree de la tarea ({error}); el agente se abre en el repo del proyecto"
+                ));
+                None
+            }
         };
+        if session.work_dir != before {
+            self.ctx.sessions.save(&session).await?;
+        }
+        let repo_path = super::workdir::resolve(self.ctx, &session).await;
 
         let (talk, code) = (&prefs.report_language, &prefs.agent_language);
         let mut full = prompt.trim().to_owned();
@@ -91,10 +97,23 @@ impl<'a> PrepareAgent<'a> {
              Task: {} ({}). Do not change its status or close it in ClickUp: I do that with Taskflow.\n",
             session.title, session.url
         );
+        if let Some(setup) = worktree.as_ref().filter(|setup| setup.is_worktree) {
+            let branch = setup.branch.as_deref().unwrap_or("the task branch");
+            let _ = write!(
+                full,
+                "\nWorkspace: you are in a git worktree created for this task, `{}`, on branch \
+                 `{branch}`. Work only here: do not create other worktrees, switch branches or \
+                 touch the main checkout. Leave your changes uncommitted: I review them and \
+                 commit and push with Taskflow.\n",
+                setup.path.display()
+            );
+        }
 
         Ok(AgentBrief {
             prompt: full,
             repo_path,
+            worktree,
+            warnings,
             prompt_path: self.ctx.sessions.agent_prompt_path(id),
             agent_session: session.agent_session.clone(),
             briefed: session.agent_briefed,

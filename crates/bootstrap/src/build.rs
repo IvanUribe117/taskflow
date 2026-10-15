@@ -74,6 +74,7 @@ pub fn secret_store() -> LayeredSecretStore {
 /// - `sessions`: `FsSessionStore` en [`session_dir`].
 /// - `repo`: `GitRepoInspector` (lee la rama de trabajo para el reporte de lo hecho).
 /// - `prs`: `GhPullRequests` (los PR de GitHub, con `gh`).
+/// - `worktrees`: `GitRepoInspector` (una carpeta y una rama por tarea).
 /// - `policy`: `WeightedPolicy` con los pesos de `settings.policy`.
 /// - `clock`: `SystemClock`.
 ///
@@ -102,6 +103,7 @@ pub fn build(
         repo: Arc::new(GitRepoInspector),
         committer: Arc::new(GitRepoInspector),
         prs: Arc::new(GhPullRequests::default()),
+        worktrees: Arc::new(GitRepoInspector),
         context: Arc::new(FsContextRepository::new(
             context_dir(settings, config_path),
             projects_dir(settings, config_path),

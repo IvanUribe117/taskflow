@@ -610,6 +610,7 @@ fn next_steps(state: &str) -> Option<&'static str> {
 /// Fix invoice rounding (86b2x1abc)
 /// Estado: esperando tu aprobación · contador corriendo · 1 h 25 min
 /// Proyecto: idk-base                                   (solo si tiene)
+/// Carpeta de trabajo: /…/idk-worktrees/CU-86b2x1abc    (el worktree, si hay)
 /// Reporte: listo · /…/sessions/86b2x1abc/report.md     (o "falló: <motivo>", o "todavía no")
 /// Prompt para el agente: /…/agent-prompt.md            (solo con el reporte listo)
 /// Publicado: 2026-10-14 15:30                          (solo si se publicó)
@@ -639,6 +640,9 @@ pub fn session(view: &SessionView, offset: FixedOffset) -> String {
     }
     if let Some(project) = &view.project {
         lines.push(format!("Proyecto: {project}"));
+    }
+    if let Some(dir) = &view.work_dir {
+        lines.push(format!("Carpeta de trabajo: {}", self::path(dir)));
     }
     match (view.report, &view.report_error) {
         (Some("ready"), _) => {
@@ -1375,6 +1379,7 @@ mod tests {
             agent_prompt_path: "/s/86b1/agent-prompt.md".into(),
             pending: vec![],
             timer_out_of_sync: false,
+            work_dir: None,
         }
     }
 

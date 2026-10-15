@@ -234,6 +234,7 @@ impl Default for HistorySettings {
 /// Sección `[session]` (§13.1): la sesión de trabajo (`start` → `done`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)] // Son interruptores de config.toml, no un estado.
 pub struct SessionSettings {
     /// Carpeta de la sesión activa, sus reportes y el archivo. Relativa al directorio de
     /// `config.toml`, o absoluta.
@@ -248,6 +249,12 @@ pub struct SessionSettings {
     pub after_commit: AfterCommit,
     /// Abrir los PR como borrador.
     pub pr_draft: bool,
+    /// Un worktree de git por tarea, en su rama `CU-<id>`: lo crea Taskflow al empezar y
+    /// el agente trabaja ahí. Con `false`, todo pasa en el `repo_path` del proyecto.
+    pub worktrees: bool,
+    /// Dónde se crean los worktrees (`<carpeta>/CU-<id>`): absoluta, o relativa al repo.
+    /// Vacía: `<repo>-worktrees`, junto al repo.
+    pub worktree_dir: String,
 }
 
 /// `session.after_commit`. En `config.toml`: `"none"`, `"ask"`, `"push"` o `"pr"`.
@@ -274,6 +281,8 @@ impl Default for SessionSettings {
             agent_command: "claude".to_owned(),
             after_commit: AfterCommit::Ask,
             pr_draft: false,
+            worktrees: true,
+            worktree_dir: String::new(),
         }
     }
 }

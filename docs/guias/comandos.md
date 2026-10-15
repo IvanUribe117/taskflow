@@ -147,7 +147,8 @@ analizando → esperando aprobación → en progreso ⇄ pausada → cerrada
 2. Inicia el contador de ClickUp (o uno local, con `session.track_time = false`).
 3. La IA analiza la tarea con el contexto del proyecto y deja el reporte en `report.md`.
 4. Pasa la tarea al estado "preparado" (`provider.status_map.ready` o `[statuses]` del proyecto). Si ese estado no existe en la lista, solo avisa.
-5. Te muestra el análisis: **aprobar y abrir el agente**, aprobar, editarlo, rechazarlo con una nota o decidir después.
+5. Prepara la carpeta de la tarea: un **worktree** en su rama `CU-<id>` (ver [Worktrees](#worktrees-una-carpeta-por-tarea)).
+6. Te muestra el análisis: **aprobar y abrir el agente**, aprobar, editarlo, rechazarlo con una nota o decidir después.
 
 | Opción     | Qué hace                                                                                  |
 | ----------- | ------------------------------------------------------------------------------------------ |
@@ -155,6 +156,22 @@ analizando → esperando aprobación → en progreso ⇄ pausada → cerrada
 | `--fresh` | Si la tarea ya tuvo una sesión (te la devolvieron), empieza de cero en vez de continuarla |
 
 **Tareas devueltas.** Si la tarea ya se trabajó, `start` lo dice y ofrece continuar. Al continuar, el análisis sabe qué se hizo antes, y el agente retoma su conversación anterior.
+
+### Worktrees: una carpeta por tarea
+
+Con `session.worktrees = true` (por defecto), **Taskflow crea el worktree, no el agente**:
+
+- Al hacer `start` (o, si no se pudo, al abrir el agente), crea `<repo>-worktrees/CU-<id>` junto al repo, en la rama `CU-<id>`. La rama sale de la base al día (`git fetch` + `origin/master`); si ya existe, en local o en `origin`, la usa.
+- Si algún worktree ya tiene la rama de la tarea (incluido el repo principal), usa ese y no crea otro.
+- El agente se abre ahí, y el prompt le dice que trabaje solo en esa carpeta: que no cree otros worktrees, no cambie de rama y no haga commit.
+- `commit`, `pr` y `report publish` usan esa misma carpeta. El repo principal no cambia de rama, así que puedes llevar varias tareas a la vez.
+- Si el agente creó **otro** worktree por su cuenta (por ejemplo, en `.claude/worktrees/`) y dejó cambios ahí, al salir Taskflow te lo muestra y pregunta dónde hacer el commit y el PR.
+- Al terminar (`done` o `abort`), si el worktree no tiene cambios sin commit, pregunta si quitarlo. La rama se queda con sus commits. Con `--yes` no quita nada: te dice el comando.
+- `taskflow session` muestra la carpeta en "Carpeta de trabajo".
+
+**Ojo:** un worktree solo trae lo que está en git. Lo ignorado (`.env`, `node_modules`, entornos virtuales) no aparece: cópialo o instálalo ahí si el agente lo necesita para correr el proyecto.
+
+Para trabajar como antes, en el repo del proyecto: `taskflow config set session.worktrees false`.
 
 ### `taskflow approve`
 
@@ -178,7 +195,7 @@ Pausa la sesión y detiene el contador, o la reanuda. `resume` también reanuda 
 
 ### `taskflow done`
 
-Termina la sesión: estado final, comentario opcional y contador detenido. Archiva la sesión.
+Termina la sesión: estado final, comentario opcional y contador detenido. Archiva la sesión y, si el worktree de la tarea quedó sin cambios, ofrece quitarlo.
 
 | Opción               | Qué hace                                                                                                                    |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -193,6 +210,8 @@ Cancela la sesión y detiene el contador.
 | Opción              | Qué hace                                         |
 | -------------------- | ------------------------------------------------- |
 | `--restore-status` | Devuelve la tarea al estado que tenía al empezar |
+
+Como `done`, al final ofrece quitar el worktree de la tarea si quedó limpio.
 | `--yes`            | Sin confirmación                                 |
 
 ### `taskflow session [show | status | retry]`
@@ -211,11 +230,11 @@ Cancela la sesión y detiene el contador.
 
 ### `taskflow agent`
 
-Abre Claude Code (`session.agent_command`) en el repo del proyecto (`repo_path`). Le pasa el prompt de la sesión aprobada: el prompt de la IA, el reporte con tus ediciones, tus reglas y la tarea.
+Abre Claude Code (`session.agent_command`) en la carpeta de la tarea: su worktree o, sin él, el repo del proyecto (`repo_path`). Le pasa el prompt de la sesión aprobada: el prompt de la IA, el reporte con tus ediciones, tus reglas y la tarea.
 
 - Si ya lo abriste antes en esta sesión, **retoma la misma conversación**.
 - El agente trabaja en inglés (código, comentarios y commits: `ai.agent_language`) y habla contigo en español (`ai.report_language`).
-- Al salir, el menú ofrece: hacer commit (si hay cambios), subir y crear el PR (si todo está commiteado y no hay PR), publicar lo hecho y terminar, terminar, volver al agente o dejar la sesión abierta.
+- Al salir, si dejó cambios en otro worktree, pregunta cuál usar. Luego el menú ofrece: hacer commit (si hay cambios), subir y crear el PR (si todo está commiteado y no hay PR), publicar lo hecho y terminar, terminar, volver al agente o dejar la sesión abierta.
 
 | Opción     | Qué hace                                       |
 | ----------- | ----------------------------------------------- |
@@ -399,6 +418,8 @@ taskflow config set provider.status_map.in_review '["code review", "qa"]'
 | `session.agent_command`           | `"claude"`               | Lo que abre `taskflow agent`                                     |
 | `session.after_commit`            | `"ask"`                  | Después del commit: `none`, `ask`, `push` o `pr`          |
 | `session.pr_draft`                | `false`                  | Abrir los PR como borrador                                         |
+| `session.worktrees`               | `true`                   | Un worktree por tarea, en su rama `CU-<id>` (lo crea Taskflow)    |
+| `session.worktree_dir`            | `""`                     | Dónde crearlos (absoluta o relativa al repo). Vacía: `<repo>-worktrees` junto al repo |
 | `ui.group_by`                     | `"none"`                 | Agrupar `today`: `none` o `project`                          |
 
 ---
@@ -421,6 +442,8 @@ sessions/<id>/work-report.md         lo que se hizo (el comentario de entrega)
 sessions/archive/<fecha>_<id>.json   sesiones terminadas
 ```
 
+Los worktrees no van ahí: están junto al repo, en `<repo>-worktrees/CU-<id>` (o en `session.worktree_dir`).
+
 ---
 
 ## 11. Problemas frecuentes
@@ -435,4 +458,6 @@ sessions/archive/<fecha>_<id>.json   sesiones terminadas
 | `could not run gh … gh auth login`         | Instala la GitHub CLI y ejecuta `gh auth login`                                                             |
 | `git push failed`                           | Revisa el mensaje de git (permisos, rama protegida, hook de pre-push) y reintenta con `taskflow pr`         |
 | La IA usa contexto que no aplica al proyecto  | `taskflow context exclude <clave> --project <slug>`, y compruébalo con `context preview`                 |
+| "no se pudo preparar el worktree"           | Lee el mensaje de git (la carpeta ya existe, la rama está en otro worktree…). La sesión sigue en el repo del proyecto |
+| En el worktree falta `.env` o las dependencias | Un worktree solo trae lo que está en git: cópialos o instálalos ahí |
 | Quieres ver qué recibe la IA                 | `taskflow context preview <ID> --usage agent_prompt` o `taskflow agent --print`                           |

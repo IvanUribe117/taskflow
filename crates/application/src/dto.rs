@@ -651,6 +651,8 @@ pub struct SessionView {
     /// Si la sesión cree que el contador corre pero el proveedor no lo tiene en esta tarea
     /// (lo detuviste o lo cambiaste fuera de Taskflow). Solo lo calcula `session show`.
     pub timer_out_of_sync: bool,
+    /// La carpeta de trabajo guardada en la sesión (el worktree de la tarea), si hay.
+    pub work_dir: Option<PathBuf>,
 }
 
 impl SessionView {
@@ -692,6 +694,7 @@ impl SessionView {
                 .map(crate::session::effect_label)
                 .collect(),
             timer_out_of_sync: false,
+            work_dir: session.work_dir.clone(),
         }
     }
 }
@@ -763,8 +766,13 @@ impl From<&WorkSession> for PreviousView {
 pub struct AgentBrief {
     /// El prompt de la IA + el reporte con tus ediciones + tus reglas + la tarea.
     pub prompt: String,
-    /// Dónde abrir el agente: el repositorio del proyecto, si existe en disco.
+    /// Dónde abrir el agente: el worktree de la tarea o, sin él, el repositorio del
+    /// proyecto, si existe en disco.
     pub repo_path: Option<PathBuf>,
+    /// El worktree de la tarea, si se trabaja en uno.
+    pub worktree: Option<WorkDirSetup>,
+    /// Lo que no salió pero no impide abrir el agente (no se pudo crear el worktree…).
+    pub warnings: Vec<String>,
     /// `agent-prompt.md`, solo el prompt de la IA.
     pub prompt_path: PathBuf,
     /// La conversación del agente, si ya se abrió antes: se retoma en vez de empezar otra.
@@ -772,6 +780,29 @@ pub struct AgentBrief {
     /// Si esa conversación ya recibió el prompt de esta sesión. Si no (una tarea devuelta),
     /// se retoma **con** el prompt nuevo.
     pub briefed: bool,
+}
+
+/// La carpeta donde se trabaja la tarea.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkDirSetup {
+    pub path: PathBuf,
+    /// Su rama (`CU-86b1`), si se sabe.
+    pub branch: Option<String>,
+    /// `false` si es el repo principal (la rama de la tarea está ahí).
+    pub is_worktree: bool,
+    /// Si se acaba de crear.
+    pub created: bool,
+}
+
+/// Otro worktree con cambios, donde parece que trabajó el agente.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorktreeCandidate {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+    /// Archivos sin commit.
+    pub changed_files: usize,
+    /// Commits que no están en la base.
+    pub commits: usize,
 }
 
 /// El reporte de lo que se hizo, listo para revisar y publicar.

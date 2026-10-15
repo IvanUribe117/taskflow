@@ -10,12 +10,14 @@ mod pr;
 mod report;
 mod runner;
 mod work;
+mod workdir;
 
 pub use agent::PrepareAgent;
 pub use commit::{CommitChanges, PrepareCommit};
 pub use pr::{PreparePullRequest, PublishPullRequest, pr_title};
 pub use report::render as render_report;
 pub use work::PrepareWorkReport;
+pub use workdir::{SessionWorkDir, task_branch, worktree_path};
 
 use chrono::Duration;
 use domain::project::{ProjectResolver, ProjectSlug, StatusSuggestions};
@@ -41,6 +43,10 @@ pub struct SessionPrefs {
     pub report_language: String,
     /// `ai.agent_language`: lo que va al repositorio.
     pub agent_language: String,
+    /// `session.worktrees`: un worktree por tarea, en su rama `CU-<id>`.
+    pub worktrees: bool,
+    /// `session.worktree_dir`: dónde crearlos. `None`: `<repo>-worktrees`, junto al repo.
+    pub worktree_dir: Option<std::path::PathBuf>,
 }
 
 /// Para qué etapa se buscan sugerencias.
@@ -160,7 +166,9 @@ impl<'a> StartSession<'a> {
     /// 4. Si la tarea ya tuvo una sesión (te la devolvieron) y no se pidió `fresh`, la nueva
     ///    la **continúa**: hereda la conversación del agente y el análisis sabe qué se hizo.
     ///    El `work-report.md` anterior se quita siempre, para que no se publique de nuevo.
-    /// 5. Aplicar sus efectos (contador y análisis). La IA puede tardar: la sesión se
+    /// 5. La carpeta de trabajo: el worktree de la tarea (lo crea si hace falta; ver
+    ///    `workdir::ensure`). Si git falla, se avisa y se sigue en el repo del proyecto.
+    /// 6. Aplicar sus efectos (contador y análisis). La IA puede tardar: la sesión se
     ///    guarda **antes** de llamarla.
     ///
     /// # Errors
@@ -198,7 +206,14 @@ impl<'a> StartSession<'a> {
         {
             session.continue_from(&previous, old_work);
         }
-        runner::run(self.ctx, prefs, session, effects).await
+        let worktree = workdir::ensure(self.ctx, prefs, &mut session).await;
+        let mut outcome = runner::run(self.ctx, prefs, session, effects).await?;
+        if let Err(error) = worktree {
+            outcome.warnings.push(format!(
+                "no se pudo preparar el worktree de la tarea ({error}); se trabaja en el repo del proyecto"
+            ));
+        }
+        Ok(outcome)
     }
 }
 

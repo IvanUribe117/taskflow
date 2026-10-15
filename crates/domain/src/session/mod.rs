@@ -13,6 +13,8 @@ pub use command::SessionCommand;
 pub use effect::{CommentKind, Effect, NoticeKind, Stage, StatusTarget};
 pub use state::{Publication, ReportOutcome, SessionState};
 
+use std::path::PathBuf;
+
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -65,6 +67,10 @@ pub struct WorkSession {
     /// Si esta sesión continúa una anterior de la misma tarea (te la devolvieron).
     #[serde(default)]
     pub continues: Option<Continuation>,
+    /// La carpeta donde se trabaja la tarea: el worktree de su rama (`CU-<id>`), que crea
+    /// Taskflow, o el que eligió el agente. `None`: el `repo_path` del proyecto.
+    #[serde(default)]
+    pub work_dir: Option<PathBuf>,
 }
 
 /// Lo que se sabe de la sesión anterior al continuar una tarea.
@@ -114,6 +120,7 @@ impl WorkSession {
             agent_session: None,
             agent_briefed: false,
             continues: None,
+            work_dir: None,
         };
         (
             session,
@@ -269,9 +276,10 @@ impl WorkSession {
     }
 
     /// Continúa una sesión anterior de la misma tarea: hereda la conversación del agente
-    /// (sin el prompt nuevo, que se le da al abrirlo) y recuerda lo que se hizo.
+    /// (sin el prompt nuevo, que se le da al abrirlo) y su carpeta, y recuerda lo que se hizo.
     pub fn continue_from(&mut self, previous: &WorkSession, work_report: Option<String>) {
         self.agent_session.clone_from(&previous.agent_session);
+        self.work_dir.clone_from(&previous.work_dir);
         self.agent_briefed = false;
         self.continues = Some(Continuation {
             ended_at: previous.ended_at(),

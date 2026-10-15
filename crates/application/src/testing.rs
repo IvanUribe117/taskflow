@@ -809,9 +809,8 @@ impl FakeSummarizer {
     pub fn work() -> WorkSummary {
         WorkSummary {
             summary: "Se cambió el fondo del login.".into(),
-            changes: vec!["`login.html`: nueva clase".into()],
-            verification: vec!["Revisado en el navegador".into()],
-            pending: vec![],
+            how_to_test: vec!["Entrar a /accounts/login/ y ver el fondo nuevo.".into()],
+            notes: vec![],
         }
     }
 

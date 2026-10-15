@@ -84,19 +84,18 @@ pub struct WorkInput {
     pub since: Option<String>,
 }
 
-/// Lo que devuelve `summarize_work`.
+/// Lo que devuelve `summarize_work`: el comentario con el que se entrega la tarea. Lo lee
+/// sobre todo QA (qué se hizo y cómo probarlo); el detalle técnico lo ve quien revisa el PR.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkSummary {
-    /// Qué se hizo, en 2-4 oraciones.
+    /// Qué se hizo, cómo y por qué, en palabras simples (uno o dos párrafos cortos).
     pub summary: String,
-    /// Los cambios concretos (archivos, comportamiento).
-    pub changes: Vec<String>,
-    /// Cómo se verificó (tests, revisión manual).
+    /// Los pasos para probarlo: dónde entrar, qué hacer y qué se debería ver.
     #[serde(default)]
-    pub verification: Vec<String>,
-    /// Qué queda pendiente o para quien revise.
+    pub how_to_test: Vec<String>,
+    /// Lo que hay que tener en cuenta (algo pendiente, limitaciones). Vacío si no hay.
     #[serde(default)]
-    pub pending: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Error)]

@@ -218,6 +218,9 @@ pub enum ReportSubcommand {
         /// Vuelve a armarlo aunque ya exista.
         #[arg(long)]
         regenerate: bool,
+        /// Solo lo arma y lo muestra: no publica nada.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -665,7 +668,8 @@ mod tests {
             parse(&["report", "publish"]).unwrap().command,
             Command::Report(ReportSubcommand::Publish {
                 yes: false,
-                regenerate: false
+                regenerate: false,
+                dry_run: false
             })
         ));
         assert!(matches!(

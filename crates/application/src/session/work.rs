@@ -99,10 +99,19 @@ impl<'a> PrepareWorkReport<'a> {
                 .map(|c| super::runner::local(self.ctx, c.ended_at)),
         };
         let mut warnings = Vec::new();
-        let from_agent = input.agent_session.is_some();
+        // El comentario ya no dice si hay cambios sin commit (a QA no le sirve), pero tú sí
+        // tienes que saberlo antes de publicar.
+        if changes.as_ref().is_some_and(|c| c.uncommitted) {
+            warnings.push(
+                "hay cambios sin commit en el repo: QA no los verá hasta que hagas commit y push"
+                    .to_owned(),
+            );
+        }
+        let mut from_agent = input.agent_session.is_some();
         let work = match self.ctx.ai.summarize_work(&input).await {
             Ok(work) => work,
             Err(error) if from_agent => {
+                from_agent = false;
                 warnings.push(format!(
                     "no se pudo retomar la conversación del agente ({error}); el resumen sale del plan y de los cambios de git"
                 ));
@@ -117,7 +126,7 @@ impl<'a> PrepareWorkReport<'a> {
         Ok(WorkReportView {
             markdown,
             path,
-            from_agent: from_agent && warnings.is_empty(),
+            from_agent,
             warnings,
         })
     }

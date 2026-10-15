@@ -181,7 +181,7 @@ async fn a_missing_program_is_unavailable() {
 
 #[tokio::test]
 async fn summarize_work_resumes_the_agent_conversation_inside_the_repo() {
-    const WORK: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"summary":"Hecho","changes":["login.html"],"verification":[],"pending":[]}}"#;
+    const WORK: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"summary":"Hecho","how_to_test":["Entrar al login"],"notes":[]}}"#;
     let (dir, program) = fake_claude(&format!("echo '{WORK}'"));
     let repo = tempfile::tempdir().unwrap();
     let base = input(Some(repo.path().to_path_buf()));

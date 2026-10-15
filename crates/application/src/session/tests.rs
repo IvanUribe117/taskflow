@@ -662,7 +662,7 @@ async fn the_work_report_comes_from_the_agent_conversation() {
     assert!(!view.from_agent);
     assert!(
         view.markdown
-            .starts_with("Trabajo realizado: Se cambió el fondo del login."),
+            .starts_with("Se cambió el fondo del login.\n\nCómo probarlo:\n1. "),
         "{}",
         view.markdown
     );

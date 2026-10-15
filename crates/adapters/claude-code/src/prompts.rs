@@ -31,12 +31,21 @@ un plan en Markdown: en qué orden trabajar, cuánto tiempo aproximado dedicar a
 desbloquear primero (comentarios pendientes, tareas vencidas). Sé breve y concreto.";
 
 /// El rol y las reglas para `summarize_work`.
-const WORK_ROLE: &str = "Escribes el reporte de lo que SE HIZO en una tarea de desarrollo, para el \
-equipo que la sigue en ClickUp. Devuelve exclusivamente el JSON pedido: \
-qué se hizo (2-4 oraciones), los cambios concretos (archivos y comportamiento), cómo se verificó y qué \
-queda pendiente o qué debe mirar quien revise. Cuenta solo lo que consta en la conversación o en los \
-cambios de git: nada del plan que no se haya hecho, y ninguna verificación que no ocurrió. Usa \
-`código` para rutas y nombres, y nada más de Markdown: ni títulos ni negritas.";
+const WORK_ROLE: &str = "Escribes el comentario con el que entregas una tarea que terminaste. Escribe \
+en primera persona, como la persona del equipo que hizo el trabajo (\"Cambié…\", \"Lo probé…\"), con \
+un tono natural y cercano. Lo lee sobre todo QA, para entender qué se hizo y cómo probarlo; el code \
+review se hace en el PR, así que no expliques el código. Lo técnico, solo si ayuda a entender o a \
+probar. Devuelve exclusivamente el JSON pedido. summary: uno o dos párrafos cortos con qué cambió para \
+quien usa el sistema, cómo lo resolviste y por qué así, en palabras simples; si lo comprobaste, dilo con \
+naturalidad. how_to_test: los pasos que haría QA desde la aplicación, en orden: dónde entrar (página, URL \
+o pantalla), con qué usuario o datos si importa, qué hacer y qué debería ver; si aplica, un paso para \
+confirmar que algo que no debía cambiar sigue igual. Nada de comandos de git, grep, builds ni tests \
+automatizados: eso es del code review. notes: como máximo tres puntos breves, solo si QA o el equipo \
+deben saberlo para probar o aprobar (algo que quedó pendiente, una limitación); vacío si no hay nada. \
+No audites ni cuestiones el trabajo, no repitas las dudas del plan ni listes preguntas internas. Basa el \
+comentario en lo que se hizo (la conversación y los cambios de git); el plan aprobado es solo contexto. \
+No inventes páginas ni pruebas que no ocurrieron. Sin títulos ni negritas; `código` solo para rutas o \
+valores que haya que escribir.";
 
 /// El rol y las reglas para `commit_message`.
 const COMMIT_ROLE: &str = "Escribes mensajes de commit. Devuelve exclusivamente el JSON pedido: un \
@@ -109,14 +118,17 @@ pub(crate) fn work_system(input: &WorkInput) -> String {
 pub(crate) fn work_message(input: &WorkInput) -> String {
     let task = &input.task;
     let mut message = if input.agent_session.is_some() {
-        "Taskflow: terminaste de trabajar en esta tarea. Escribe ahora el reporte de lo que hiciste en \
-         esta conversación, con los cambios de git de abajo como respaldo.\n\n"
+        "Taskflow: terminaste de trabajar en esta tarea. Escribe ahora el comentario de entrega de lo \
+         que hiciste en esta conversación, con los cambios de git de abajo como respaldo.\n\n"
             .to_owned()
     } else {
-        "Escribe el reporte de lo que se hizo en esta tarea a partir del plan aprobado y de los \
-         cambios de git.\n\n"
+        "Escribe el comentario de entrega de esta tarea a partir del plan aprobado y de los cambios \
+         de git.\n\n"
             .to_owned()
     };
+    // Las reglas también van aquí: al retomar una conversación (`--resume`), el *system
+    // prompt* que manda es el de esa conversación, no el nuestro.
+    let _ = write!(message, "<rules>\n{WORK_ROLE}\n</rules>\n\n");
     let _ = write!(
         message,
         "<task>\nid: {}\ntítulo: {}\nurl: {}\n</task>\n\n<approved_plan>\n{}\n</approved_plan>",
@@ -207,11 +219,10 @@ pub(crate) fn work_schema() -> Value {
         "type": "object",
         "properties": {
             "summary": { "type": "string" },
-            "changes": list,
-            "verification": list,
-            "pending": list
+            "how_to_test": list,
+            "notes": list
         },
-        "required": ["summary", "changes", "verification", "pending"],
+        "required": ["summary", "how_to_test", "notes"],
         "additionalProperties": false
     })
 }
@@ -530,8 +541,12 @@ mod tests {
             "{resumed}"
         );
         assert!(
-            fresh.starts_with("Escribe el reporte de lo que se hizo"),
+            fresh.starts_with("Escribe el comentario de entrega"),
             "{fresh}"
+        );
+        assert!(
+            resumed.contains("<rules>\nEscribes el comentario con el que entregas"),
+            "the rules travel in the message too: {resumed}"
         );
         for part in [
             "<approved_plan>\n## Plan\n1. Cambiar\n</approved_plan>",
@@ -567,7 +582,7 @@ mod tests {
     #[test]
     fn work_schema_matches_work_summary() {
         let example = serde_json::json!({
-            "summary": "s", "changes": ["c"], "verification": [], "pending": ["p"]
+            "summary": "s", "how_to_test": ["paso"], "notes": ["p"]
         });
 
         let work: application::ports::WorkSummary =
@@ -577,7 +592,8 @@ mod tests {
             work_schema()["required"].as_array().unwrap().len(),
             example.as_object().unwrap().len()
         );
-        assert_eq!(work.pending, ["p"]);
+        assert_eq!(work.how_to_test, ["paso"]);
+        assert_eq!(work.notes, ["p"]);
     }
 
     #[test]

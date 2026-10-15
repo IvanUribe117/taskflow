@@ -624,3 +624,37 @@ Todas las rutas que imprime Taskflow van entre comillas (`presenter::path`): `"/
 | Un `start` que se quedó esperando a ClickUp (una vez) | `session retry` lo retomó y el análisis terminó |
 
 Tests: de 452 a 462.
+
+---
+
+## Sexta parte: el comentario de entrega, escrito para QA
+
+El comentario que publica `report publish` lo lee sobre todo **QA**: necesita entender qué se hizo y cómo probarlo. El code review se hace en el PR. Por eso ahora es un mensaje natural, en primera persona, con lo técnico solo si hace falta:
+
+```text
+Cambié el fondo de la pantalla de inicio de sesión (/accounts/login/) por un degradado azul en
+diagonal. El cambio solo aplica a esa página: le añadí una clase propia al body del login, así que
+las demás pantallas de autenticación que comparten la plantilla base no cambian. Lo revisé en el
+navegador a ancho de escritorio y a 375px de celular.
+
+Cómo probarlo:
+1. Abre /accounts/login/ en un navegador de escritorio. Deberías ver un degradado en diagonal…
+2. Reduce el ancho de la ventana a unos 375px…
+3. Confirma que no cambió nada en otras pantallas: abre /accounts/password/reset/ y /admin/login/…
+
+A tener en cuenta:
+- Falta revisar el contraste del botón "Ingresar" con un experto en accesibilidad.
+
+Rama: `CU-86bcjdn6v`
+```
+
+- **`WorkSummary`** ahora es `summary` (qué, cómo y por qué), `how_to_test` (pasos desde la aplicación: dónde entrar, qué hacer, qué se debe ver, y qué no debía cambiar) y `notes` (como máximo tres, solo si afectan a la prueba o a la aprobación).
+- **Lo que no va:** comandos de git, builds o tests automatizados (son del code review), dudas del plan o una auditoría del trabajo.
+- **Los cambios sin commit** ya no aparecen en el comentario (a QA no le sirven), pero Taskflow te avisa antes de publicar.
+- **`report publish --dry-run`** arma el comentario y lo muestra sin publicar nada.
+
+### Lo que se aprendió al probarlo
+
+- **Al retomar una conversación (`claude -p --resume`), el *system prompt* que manda es el de esa conversación.** Las reglas que pasábamos con `--system-prompt` se ignoraban, y el resultado fue una auditoría técnica con 8 notas y comandos de git. Ahora las reglas también van en el mensaje (`<rules>`), y el resultado sale como se pidió.
+- **"Cuenta solo lo que consta" sin más guía vuelve a la IA desconfiada.** Pedirle que escriba como quien hizo el trabajo, y qué **no** incluir, cambió el tono por completo.
+- **Un indicador que dependía de otra cosa.** `from_agent` se calculaba como "no hubo avisos", y el aviso de cambios sin commit lo apagaba. Ahora es una variable propia, que solo cambia si falla retomar la conversación.

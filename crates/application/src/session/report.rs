@@ -83,46 +83,37 @@ fn bullets(report: &mut String, title: &str, items: &[String], empty: &str) {
     report.push('\n');
 }
 
-/// El reporte de **lo que se hizo**, que es lo que se publica. Sin títulos: un comentario
-/// se lee mejor con etiquetas simples y listas.
+/// El comentario con el que se entrega la tarea (lo que se publica). Natural y para QA:
+/// qué se hizo y por qué, cómo probarlo y qué tener en cuenta. Sin títulos.
 ///
 /// ```markdown
-/// Trabajo realizado: se corrigió el redondeo por línea…
+/// Cambié el fondo de la página de inicio de sesión por un degradado azul, como pedía la
+/// tarea. Lo hice en los estilos de esa página, así que el resto del sitio no cambia.
 ///
-/// Cambios:
-/// - `invoicing/totals.py`: redondeo por línea
+/// Cómo probarlo:
+/// 1. Entrar a /accounts/login/ sin sesión iniciada.
+/// 2. Ver que el fondo es un degradado azul, también en el celular.
 ///
-/// Cómo se verificó:
-/// - `pytest invoicing`                     (vacío: "Cómo se verificó: sin registrar.")
+/// A tener en cuenta:                      (solo si hay algo)
+/// - La página de recuperar contraseña sigue con el fondo anterior.
 ///
-/// Pendiente: nada.                         (o la lista)
-///
-/// Rama: `CU-86b1-fix` · 2 commits · hay cambios sin commit
+/// Rama: `CU-86b1-fondo-login`
 /// ```
 #[must_use]
 pub fn render_work(work: &WorkSummary, changes: Option<&RepoChanges>) -> String {
-    let mut parts = vec![format!("Trabajo realizado: {}", work.summary.trim())];
-    parts.push(labeled(
-        "Cambios",
-        &work.changes,
-        "sin cambios registrados.",
-    ));
-    parts.push(labeled(
-        "Cómo se verificó",
-        &work.verification,
-        "sin registrar.",
-    ));
-    parts.push(labeled("Pendiente", &work.pending, "nada."));
-    if let Some(changes) = changes {
-        let commits = match changes.commits.len() {
-            1 => "1 commit".to_owned(),
-            n => format!("{n} commits"),
-        };
-        let mut line = format!("Rama: `{}` · {commits}", changes.branch);
-        if changes.uncommitted {
-            line.push_str(" · hay cambios sin commit");
+    let mut parts = vec![work.summary.trim().to_owned()];
+    if !work.how_to_test.is_empty() {
+        let mut steps = "Cómo probarlo:".to_owned();
+        for (number, step) in work.how_to_test.iter().enumerate() {
+            let _ = write!(steps, "\n{}. {}", number + 1, step.trim());
         }
-        parts.push(line);
+        parts.push(steps);
+    }
+    if !work.notes.is_empty() {
+        parts.push(labeled("A tener en cuenta", &work.notes, ""));
+    }
+    if let Some(changes) = changes {
+        parts.push(format!("Rama: `{}`", changes.branch));
     }
     parts.join("\n\n") + "\n"
 }
@@ -180,10 +171,12 @@ mod tests {
     #[test]
     fn work_report_with_branch_and_empty_sections() {
         let work = WorkSummary {
-            summary: "Se cambió el fondo.".into(),
-            changes: vec!["`login.html`".into()],
-            verification: vec![],
-            pending: vec![],
+            summary: "Cambié el fondo del login por un degradado azul.".into(),
+            how_to_test: vec![
+                "Entrar a /accounts/login/.".into(),
+                "Ver el degradado.".into(),
+            ],
+            notes: vec![],
         };
         let changes = RepoChanges {
             branch: "CU-1".into(),
@@ -196,15 +189,22 @@ mod tests {
 
         assert_eq!(
             render_work(&work, Some(&changes)),
-            "Trabajo realizado: Se cambió el fondo.\n\n\
-             Cambios:\n- `login.html`\n\n\
-             Cómo se verificó: sin registrar.\n\n\
-             Pendiente: nada.\n\n\
-             Rama: `CU-1` · 1 commit · hay cambios sin commit\n"
+            "Cambié el fondo del login por un degradado azul.\n\n\
+             Cómo probarlo:\n1. Entrar a /accounts/login/.\n2. Ver el degradado.\n\n\
+             Rama: `CU-1`\n"
         );
-        let without_git = render_work(&work, None);
-        assert!(without_git.ends_with("Pendiente: nada.\n"), "{without_git}");
-        assert!(!without_git.contains('#'), "no headings in a comment");
+        let mut with_notes = work.clone();
+        with_notes.notes = vec!["Falta la página de contraseña.".into()];
+        with_notes.how_to_test.clear();
+        assert_eq!(
+            render_work(&with_notes, None),
+            "Cambié el fondo del login por un degradado azul.\n\n\
+             A tener en cuenta:\n- Falta la página de contraseña.\n"
+        );
+        assert!(
+            !render_work(&work, None).contains('#'),
+            "no headings in a comment"
+        );
     }
 
     #[test]

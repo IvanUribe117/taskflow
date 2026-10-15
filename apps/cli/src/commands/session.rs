@@ -438,7 +438,7 @@ pub async fn agent(
                     commit(ctx, settings, false).await?;
                 }
                 AfterAgent::PublishAndFinish => {
-                    publish(ctx, settings, false, false).await?;
+                    publish(ctx, settings, false, false, false).await?;
                     return done(ctx, settings, None, None, false).await;
                 }
                 AfterAgent::Finish => return done(ctx, settings, None, None, false).await,
@@ -638,12 +638,13 @@ fn confirm_message(
 /// 1. Si no hay `work-report.md` (o con `--regenerate`), lo arma la IA: retoma la
 ///    conversación del agente para que él cuente lo que hizo, con los cambios de git.
 /// 2. Lo muestra. Sin `--yes`: publicar, editarlo antes o no publicar.
-/// 3. Lo publica como comentario con formato.
+/// 3. Lo publica como comentario con formato. Con `--dry-run`, se queda en el paso 2.
 async fn publish(
     ctx: &AppContext,
     settings: &AppSettings,
     yes: bool,
     regenerate: bool,
+    dry_run: bool,
 ) -> anyhow::Result<()> {
     let Some(view) = ShowSession::new(ctx).execute().await? else {
         anyhow::bail!("no hay una sesión activa");
@@ -673,6 +674,13 @@ async fn publish(
             markdown::render(report.trim_end()),
             "─".repeat(40)
         );
+        if dry_run {
+            println!(
+                "(--dry-run: no se publicó. Queda en {})",
+                presenter::path(&path)
+            );
+            return Ok(());
+        }
         if yes || !interactive() {
             break;
         }
@@ -884,8 +892,10 @@ pub async fn report(
             println!("Guardado. Se usa tal como quedó.");
             Ok(())
         }
-        ReportSubcommand::Publish { yes, regenerate } => {
-            publish(ctx, settings, yes, regenerate).await
-        }
+        ReportSubcommand::Publish {
+            yes,
+            regenerate,
+            dry_run,
+        } => publish(ctx, settings, yes, regenerate, dry_run).await,
     }
 }

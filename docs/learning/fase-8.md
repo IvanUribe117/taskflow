@@ -814,3 +814,85 @@ En el sandbox (repo temporal, remoto local y `gh` falso; nada en IDK), con un ag
 
 - **Lo ignorado por git no está en el worktree**: `.env`, `node_modules`, entornos virtuales. Si el agente necesita correr el proyecto, cópialos o instálalos ahí.
 - En IDK, la rama `CU-86bcjdn6v` sigue en el repo principal: esa sesión sigue trabajando ahí. Las tareas nuevas tendrán su worktree en `/Users/dev/swapps/idk-worktrees/CU-<id>`.
+
+## Novena parte: contexto propio para commits y PR, y revisión desde el menú
+
+Agregaste al contexto las secciones "Buenas practicas de codigo" y "Herramientas del agente" (globales) y "Practicas de Python y Django en IDK". Con ellas aparecieron dos mejoras:
+
+- **Uso `commit`.** El mensaje de commit y la descripción del PR usaban el contexto del agente (`agent_prompt`): unos 14 000 caracteres con instrucciones que no les sirven ("revisa con el subagente", "usa Grafana"). Ahora usan un uso propio, `commit`, y solo reciben las secciones que lo declaran. En IDK, `17-commits-pr.md` (formato del texto, cambios visuales en su propio commit y declarados en el PR, "How it was verified" solo con lo comprobado): menos de 1 000 caracteres.
+- **"Revisar los cambios" al salir del agente.** Retoma la conversación con `review_request`: revisar el diff con el subagente revisor del repo (en IDK, `senior-code-reviewer`) o la skill `code-review`, contra el plan y las reglas; corregir lo real; tests y linter; no hacer commit; contar qué encontró. Va primero mientras no se haya revisado; después, detrás del commit.
+
+### Conceptos aplicados
+
+- **Una variante nueva en un `EnumSet`.** `Usage::Commit` se agrega al enum y a su `Display`/`FromStr`; el resto (front matter, `--usage`, `select`) funciona sin tocarlo. Ojo: una sección **sin** `usage` vale para todos los usos (`EnumSet::all()`), también para `commit`.
+- **Patrones con `@`.** `choice @ (AfterAgent::Review | AfterAgent::BackToAgent)` une dos ramas que hacen casi lo mismo y conserva cuál fue, para lo poco que cambia.
+- **`match` sobre una tupla de `Option`.** `agent_args` decide los argumentos con `match (resume, message)`: cada combinación es una rama, y el compilador avisa si falta alguna.
+
+### Probado (2026-10-16)
+
+- `context preview 86bcjdn6v --usage commit` en IDK: solo "Commits y PR en IDK". Con `agent_prompt`, las nueve secciones (se subió `context.budget_chars` a 16 000 para que entrara "despliegue").
+- En un sandbox nuevo con un agente falso: el menú ofreció "Revisar los cambios" primero; el agente se volvió a abrir con `--resume` y el pedido de revisión, en el worktree; luego el commit pasó a ser la primera opción.
+- Tests: de 501 a 503.
+
+### A tener en cuenta
+
+- **Llavero de macOS tras recompilar.** Cada `cargo build` cambia la firma del binario y macOS vuelve a pedir permiso para leer el token de ClickUp (un diálogo). Si un comando parece colgado, mira si hay un diálogo del llavero y elige "Permitir siempre", o usa `TASKFLOW_CLICKUP_TOKEN`.
+
+## Décima parte: vista previa del worktree y Playwright
+
+Instalaste el MCP de Playwright y pediste que el agente pudiera probar en el navegador, con Docker como servidor. El problema: el contenedor `idk` monta el repo **principal** (`./:/app`), así que `localhost:8000` nunca muestra el código del worktree.
+
+- **`[preview]` en `project.toml`** (`domain::project::Preview`): plantillas `start`, `stop` y `url` con `{repo}`, `{worktree}`, `{branch}`, `{name}` y `{port}`. Cada tarea tiene un puerto fijo entre `port` y `port + 99`, calculado a partir de su id (`port_for`): no hace falta guardarlo.
+- **En el prompt**, solo en un worktree: la URL, el comando para levantarla y que use Playwright (páginas y flujos, consola, peticiones fallidas, captura). "Revisar los cambios" también lo pide. `done` y `abort` corren `stop`.
+- **IDK** (`projects/idk/preview.sh`, fuera del repo):
+  - arranca Postgres, Redis y Mailhog, reutilizando los contenedores que ya existen aunque sean de otro proyecto de compose;
+  - compila el frontend en `node:20` con el `node_modules` del repo principal;
+  - levanta `idk-preview-<rama>` con `idk:latest`, el worktree en `/app` y el entorno que arma `docker compose config`.
+
+### Lo que se aprendió al probarlo
+
+| Falló | Por qué | Arreglo |
+| --- | --- | --- |
+| `idk-mailhog` "already in use" | Lo había creado otro proyecto de compose (`idk-cu-86bcgkg76`) | `docker start` si existe y `docker network connect idk_default` |
+| `manage.py runserver: unrecognized arguments` | La imagen tiene `ENTRYPOINT ["/bin/bash"]` | `--entrypoint python` |
+| `"PAYU" is not a valid PAYMENT_GATEWAY` | `docker run --env-file` deja las comillas; compose las quita | El entorno sale de `docker compose config --format json` |
+| `No module named 'debug_toolbar'` | Las imágenes que construye compose (`target: final`) no traen las dependencias de desarrollo; las de `make build` sí | Imagen explícita `idk:latest` (o `IDK_PREVIEW_IMAGE`) y aviso si le faltan |
+| Un fallo al arrancar no dejaba rastro | `--rm` borraba el contenedor con sus logs | Sin `--rm`; `stop` hace `docker rm -f` |
+
+### El llavero, por fin
+
+"Permitir siempre" no duraba porque el permiso queda atado a la **firma** del programa, y `cargo build` firma el binario "ad hoc" con un hash nuevo en cada compilación. En macOS, `KeyringSecretStore::get` ahora lee primero con `/usr/bin/security find-generic-password -w`: es de Apple, su firma no cambia y el permiso que le das se mantiene. Si `security` no sirve (sale con otro código), se usa `keyring` como antes; el código 44 significa "no está guardado".
+
+### Probado (2026-10-16)
+
+- Con un clon de IDK en el scratchpad (el repo no se tocó): `preview.sh start` compiló el frontend, levantó Django en `:8199`, el login respondió 200 y los bundles del worktree también.
+- `claude -p` con el MCP de Playwright abrió la vista previa: login "Iniciar Sesión | Platform", sin errores en la consola. `preview.sh stop` lo quitó.
+- Un binario recién compilado leyó el token sin diálogo del llavero.
+- Tests: de 503 a 507.
+
+## Undécima parte: tareas devueltas sin gastar de más, y la rama siempre al día
+
+Revisaste la tarea real `86bcgkg76`, que volvió a "needs more work". Taskflow ya la retomaba (el análisis lee lo nuevo y el agente retoma su conversación), pero esa conversación tenía **~189K tokens** sin compactar: retomarla carga todo ese historial en cada turno, para un arreglo de dos archivos. Y el worktree seguía a `origin/master`, que es como el commit terminó en `master` sin PR.
+
+- **Puerto `AgentConversations`** (`context_tokens(id)`), con `ClaudeConversations` en `adapter-claude-code`. Busca `~/.claude/projects/*/<id>.jsonl` y suma el `usage` de la última respuesta: lo que entró directo, lo leído y lo escrito en caché, y lo que salió.
+- **`AgentBrief`** trae `previous_tokens`, `suggest_fresh` (pasa de `session.resume_max_tokens`, 100 000) y `fresh_prompt`: el prompt más "What was done in the previous session", porque el agente nuevo no lo recuerda. La CLI pregunta; sin terminal, sigue la sugerencia.
+- **`Worktrees::sync_with_base`**, llamado desde `ensure` cada vez que empieza o se retoma algo:
+  - `git fetch`;
+  - si la rama sigue a la base, `--unset-upstream`;
+  - con cambios sin commit, no toca nada;
+  - `git merge --no-edit origin/master`, o `--abort` si choca.
+  
+  El resultado (`SyncOutcome`) llega como nota (`✔`) o como aviso (`⚠`) en `SessionOutcome.notes`, `AgentBrief.notes` y los `warnings`.
+
+### Conceptos aplicados
+
+- **Merge y no rebase.** La rama de una tarea devuelta ya está subida y quizá tiene PR. Un rebase reescribe sus commits y obliga a `push --force`; un merge solo agrega. Si la rama no tiene commits propios, el merge es un *fast-forward* y no crea commit.
+- **`#[serde(tag = "outcome")]`** en `SyncOutcome`: un enum con datos se serializa como `{"outcome": "updated", "base": "origin/master", "commits": 3}`, cómodo para `--json`.
+- **`clippy::too_many_lines`** obligó a separar `PrepareAgent::work_dir` y `print_brief`: funciones con un nombre que dice qué hacen, en vez de una larga.
+- **El binario que pruebas.** `cargo clippy` y `cargo test` no recompilan `target/debug/taskflow`: la primera prueba en el sandbox corrió una versión vieja. Antes de probar a mano, `cargo build`.
+
+### Probado (2026-10-16)
+
+- En el sandbox, la sesión apuntaba a la conversación real de `86bcgkg76` (solo se leyó para medirla): "La tarea volvió y la conversación anterior del agente tiene ~189K tokens", la opción por defecto fue la nueva, y el agente falso recibió `--session-id` con el resumen de lo hecho.
+- `master` avanzó en el remoto y la rama seguía a `origin/master`: al abrir el agente, "✔ `CU-86bcjdn6v` al día con `origin/master`: 1 commit nuevo de la base", y la rama dejó de seguir a `master`. Con cambios sin commit, avisó y no tocó nada.
+- Tests: de 507 a 514.

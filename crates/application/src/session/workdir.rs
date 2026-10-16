@@ -5,11 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
+use domain::project::{PreviewVars, RenderedPreview};
 use domain::session::WorkSession;
 use domain::task::TaskId;
 
-use crate::dto::{WorkDirSetup, WorktreeCandidate};
-use crate::ports::Worktree;
+use crate::dto::{PreviewView, WorkDirSetup, WorktreeCandidate};
+use crate::ports::{SyncOutcome, Worktree};
 use crate::session::SessionPrefs;
 use crate::{AppContext, AppError};
 
@@ -115,11 +116,68 @@ pub(crate) async fn resolve(ctx: &AppContext, session: &WorkSession) -> Option<P
 /// 3. Si algún worktree ya tiene la rama de la tarea (otra sesión, o la creaste tú), ese.
 /// 4. Si no, y `prefs.worktrees`, uno nuevo en [`worktree_path`].
 /// 5. Si no, `None`: se trabaja en el repo del proyecto, como antes.
+/// 6. La rama se pone al día con la base (`sync_with_base`): `git fetch` + `git merge`.
 ///
 /// # Errors
 ///
 /// Si git no puede crear el worktree.
 pub(crate) async fn ensure(
+    ctx: &AppContext,
+    prefs: &SessionPrefs,
+    session: &mut WorkSession,
+) -> Result<Option<WorkDirSetup>, AppError> {
+    let Some(mut setup) = locate_or_create(ctx, prefs, session).await? else {
+        return Ok(None);
+    };
+    // 6. Al día con la base, cada vez que se empieza o se retoma. Uno recién creado ya
+    //    sale de la base al día.
+    if !setup.created {
+        setup.sync = Some(
+            ctx.worktrees
+                .sync_with_base(&setup.path)
+                .await
+                .unwrap_or(SyncOutcome::NoBase),
+        );
+    }
+    Ok(Some(setup))
+}
+
+/// Qué decirte del [`SyncOutcome`]: una nota si se trajeron cambios, un aviso si no se
+/// pudo. `(nota, aviso)`.
+#[must_use]
+pub fn sync_messages(setup: &WorkDirSetup) -> (Option<String>, Option<String>) {
+    let branch = setup.branch.as_deref().unwrap_or("la rama de la tarea");
+    match &setup.sync {
+        Some(SyncOutcome::Updated { base, commits }) => (
+            Some(format!(
+                "`{branch}` al día con `{base}`: {}",
+                if *commits == 1 {
+                    "1 commit nuevo de la base".to_owned()
+                } else {
+                    format!("{commits} commits nuevos de la base")
+                }
+            )),
+            None,
+        ),
+        Some(SyncOutcome::SkippedDirty) => (
+            None,
+            Some(format!(
+                "`{branch}` tiene cambios sin commit: no se actualizó con la base (haz commit y vuelve a abrir el agente)"
+            )),
+        ),
+        Some(SyncOutcome::Conflict { base }) => (
+            None,
+            Some(format!(
+                "`{branch}` choca con `{base}`: no se actualizó. Resuélvelo con `git merge {base}` en {}",
+                setup.path.display()
+            )),
+        ),
+        _ => (None, None),
+    }
+}
+
+/// Los pasos 1 a 5 de [`ensure`]: encontrar o crear la carpeta.
+async fn locate_or_create(
     ctx: &AppContext,
     prefs: &SessionPrefs,
     session: &mut WorkSession,
@@ -133,6 +191,7 @@ pub(crate) async fn ensure(
         branch: branch.map(str::to_owned),
         is_worktree: !same_dir(path, &repo),
         created,
+        sync: None,
     };
     if let Some(dir) = session.work_dir.clone().filter(|dir| dir.is_dir()) {
         let branch = list
@@ -154,6 +213,32 @@ pub(crate) async fn ensure(
     ctx.worktrees.add(&repo, &path, &branch).await?;
     session.work_dir = Some(path.clone());
     Ok(Some(setup(&path, Some(&branch), true)))
+}
+
+/// La vista previa de la tarea (`[preview]` del proyecto), con los comandos completos.
+/// Solo en un worktree: en el repo principal ya está la app de siempre.
+pub(crate) async fn preview(ctx: &AppContext, session: &WorkSession) -> Option<RenderedPreview> {
+    let slug = session.project.as_ref()?;
+    let project = ctx.projects.get(slug).await.ok()?;
+    let template = project.preview?;
+    let repo = project.repo_path.filter(|path| path.is_dir())?;
+    let dir = resolve(ctx, session).await?;
+    if same_dir(&repo, &dir) {
+        return None;
+    }
+    let list = ctx.worktrees.list(&repo).await.unwrap_or_default();
+    let branch = list
+        .iter()
+        .find(|w| same_dir(&w.path, &dir))
+        .and_then(|w| w.branch.clone())
+        .unwrap_or_else(|| task_branch(&session.task_id));
+    let (repo, worktree) = (repo.display().to_string(), dir.display().to_string());
+    Some(template.render(&PreviewVars {
+        repo: &repo,
+        worktree: &worktree,
+        branch: &branch,
+        task_id: session.task_id.as_str(),
+    }))
 }
 
 /// La carpeta de trabajo de la sesión activa: prepararla, detectar si el agente trabajó en
@@ -318,6 +403,16 @@ impl<'a> SessionWorkDir<'a> {
     pub async fn remove(&self, repo: &Path, path: &Path) -> Result<(), AppError> {
         self.ctx.worktrees.remove(repo, path).await?;
         Ok(())
+    }
+
+    /// La vista previa del worktree de la sesión activa, si el proyecto tiene `[preview]`.
+    ///
+    /// # Errors
+    ///
+    /// No hay sesión activa.
+    pub async fn preview(&self) -> Result<Option<PreviewView>, AppError> {
+        let session = self.active().await?;
+        Ok(preview(self.ctx, &session).await.map(PreviewView::from))
     }
 
     /// El repo del proyecto de la sesión activa.

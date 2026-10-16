@@ -12,12 +12,12 @@ mod runner;
 mod work;
 mod workdir;
 
-pub use agent::PrepareAgent;
+pub use agent::{PrepareAgent, review_request};
 pub use commit::{CommitChanges, PrepareCommit};
 pub use pr::{PreparePullRequest, PublishPullRequest, pr_title};
 pub use report::render as render_report;
 pub use work::PrepareWorkReport;
-pub use workdir::{SessionWorkDir, task_branch, worktree_path};
+pub use workdir::{SessionWorkDir, sync_messages, task_branch, worktree_path};
 
 use chrono::Duration;
 use domain::project::{ProjectResolver, ProjectSlug, StatusSuggestions};
@@ -47,6 +47,9 @@ pub struct SessionPrefs {
     pub worktrees: bool,
     /// `session.worktree_dir`: dónde crearlos. `None`: `<repo>-worktrees`, junto al repo.
     pub worktree_dir: Option<std::path::PathBuf>,
+    /// `session.resume_max_tokens`: desde cuántos tokens se sugiere no retomar la
+    /// conversación anterior del agente.
+    pub resume_max_tokens: u64,
 }
 
 /// Para qué etapa se buscan sugerencias.
@@ -208,10 +211,16 @@ impl<'a> StartSession<'a> {
         }
         let worktree = workdir::ensure(self.ctx, prefs, &mut session).await;
         let mut outcome = runner::run(self.ctx, prefs, session, effects).await?;
-        if let Err(error) = worktree {
-            outcome.warnings.push(format!(
+        match worktree {
+            Ok(Some(setup)) => {
+                let (note, warning) = sync_messages(&setup);
+                outcome.notes.extend(note);
+                outcome.warnings.extend(warning);
+            }
+            Ok(None) => {}
+            Err(error) => outcome.warnings.push(format!(
                 "no se pudo preparar el worktree de la tarea ({error}); se trabaja en el repo del proyecto"
-            ));
+            )),
         }
         Ok(outcome)
     }

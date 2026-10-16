@@ -17,7 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use application::ports::{
-    ChangedFile, RepoChanges, RepoCommitter, RepoError, RepoInspector, Worktree, Worktrees,
+    ChangedFile, RepoChanges, RepoCommitter, RepoError, RepoInspector, SyncOutcome, Worktree,
+    Worktrees,
 };
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
@@ -365,6 +366,58 @@ impl Worktrees for GitRepoInspector {
         .await?;
         Ok(())
     }
+
+    /// 1. `git fetch origin` (si falla, con lo que hay).
+    /// 2. Sin base, o en la base misma → `NoBase`.
+    /// 3. Si `@{u}` es la base, `git branch --unset-upstream`.
+    /// 4. Con cambios en archivos que git conoce → `SkippedDirty` (los nuevos sin `git add`
+    ///    no estorban: si chocaran, git se niega y es un `Conflict`).
+    /// 5. `git rev-list --count HEAD..<base>`: 0 → `UpToDate`.
+    /// 6. `git merge --no-edit <base>`; si falla, `git merge --abort` → `Conflict`.
+    async fn sync_with_base(&self, path: &Path) -> Result<SyncOutcome, RepoError> {
+        let _ = git_checked(path, &["fetch", "--quiet", "origin"], "git fetch").await;
+        let (Some(base), Some(branch)) = (
+            base_branch(path).await?,
+            git(path, &["rev-parse", "--abbrev-ref", "HEAD"]).await?,
+        ) else {
+            return Ok(SyncOutcome::NoBase);
+        };
+        if branch == "HEAD" || base.trim_start_matches("origin/") == branch {
+            return Ok(SyncOutcome::NoBase);
+        }
+        if git(path, &["rev-parse", "--abbrev-ref", "@{u}"])
+            .await?
+            .as_deref()
+            == Some(&base)
+        {
+            let _ = git(path, &["branch", "--unset-upstream"]).await?;
+        }
+        let tracked_changes = git(path, &["status", "--porcelain", "--untracked-files=no"])
+            .await?
+            .unwrap_or_default();
+        if !tracked_changes.trim().is_empty() {
+            return Ok(SyncOutcome::SkippedDirty);
+        }
+        let range = format!("HEAD..{base}");
+        let behind: usize = git(path, &["rev-list", "--count", &range])
+            .await?
+            .and_then(|n| n.trim().parse().ok())
+            .unwrap_or(0);
+        if behind == 0 {
+            return Ok(SyncOutcome::UpToDate);
+        }
+        if git_checked(path, &["merge", "--no-edit", &base], "git merge")
+            .await
+            .is_err()
+        {
+            let _ = git(path, &["merge", "--abort"]).await?;
+            return Ok(SyncOutcome::Conflict { base });
+        }
+        Ok(SyncOutcome::Updated {
+            base,
+            commits: behind,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -623,6 +676,71 @@ mod tests {
             error.to_string().contains("git worktree add failed"),
             "{error}"
         );
+    }
+
+    #[tokio::test]
+    async fn syncs_the_task_branch_with_the_base() {
+        let dir = repo().await; // `CU-1` con 1 commit sobre `main`, y `site.css` preparado.
+        let path = dir.path();
+        run(path, &["commit", "-q", "-m", "css"]).await;
+        run(path, &["checkout", "-q", "main"]).await;
+        fs::write(path.join("readme.md"), "base").unwrap();
+        run(path, &["add", "readme.md"]).await;
+        run(path, &["commit", "-q", "-m", "otro en main"]).await;
+        run(path, &["checkout", "-q", "CU-1"]).await;
+        // CU-1 sigue a main, como la rama que se subió a master sin querer.
+        run(path, &["branch", "--set-upstream-to", "main"]).await;
+
+        let first = GitRepoInspector.sync_with_base(path).await.unwrap();
+        let again = GitRepoInspector.sync_with_base(path).await.unwrap();
+
+        assert_eq!(
+            first,
+            SyncOutcome::Updated {
+                base: "main".into(),
+                commits: 1
+            }
+        );
+        assert_eq!(again, SyncOutcome::UpToDate);
+        assert!(path.join("readme.md").exists());
+        assert!(
+            git(path, &["rev-parse", "--abbrev-ref", "@{u}"])
+                .await
+                .unwrap()
+                .is_none(),
+            "no longer tracks the base"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dirty_or_conflicting_branch_is_left_as_it_was() {
+        let dir = repo().await;
+        let path = dir.path();
+        run(path, &["commit", "-q", "-m", "css"]).await;
+        run(path, &["checkout", "-q", "main"]).await;
+        fs::write(path.join("login.html"), "<body class=\"otro\">\n").unwrap();
+        run(path, &["commit", "-q", "-am", "choca"]).await;
+        run(path, &["checkout", "-q", "CU-1"]).await;
+        let head = git(path, &["rev-parse", "HEAD"]).await.unwrap();
+
+        fs::write(path.join("site.css"), "sin commit").unwrap();
+        let dirty = GitRepoInspector.sync_with_base(path).await.unwrap();
+        run(path, &["checkout", "--", "site.css"]).await;
+        let conflict = GitRepoInspector.sync_with_base(path).await.unwrap();
+
+        assert_eq!(dirty, SyncOutcome::SkippedDirty);
+        assert_eq!(
+            conflict,
+            SyncOutcome::Conflict {
+                base: "main".into()
+            }
+        );
+        assert_eq!(git(path, &["rev-parse", "HEAD"]).await.unwrap(), head);
+        let status = git(path, &["status", "--porcelain"])
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(status.is_empty(), "the merge was aborted: {status}");
     }
 
     #[test]

@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use domain::DomainError;
-use domain::project::{MatchRule, Project, StatusSuggestions};
+use domain::project::{MatchRule, Preview, Project, StatusSuggestions};
 use serde::{Deserialize, Serialize};
 
 /// El archivo tal cual. Todo es texto: la validación ocurre en `TryFrom`.
@@ -30,6 +30,31 @@ pub(crate) struct ProjectFile {
     /// `[context]`: qué secciones globales no aplican. Opcional.
     #[serde(default, skip_serializing_if = "ContextFile::is_empty")]
     pub context: ContextFile,
+    /// `[preview]`: la vista previa de un worktree. Opcional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<PreviewFile>,
+}
+
+/// ```toml
+/// [preview]
+/// start = "bash ~/previews/idk.sh start {repo} {worktree} {name} {port}"
+/// stop = "docker rm -f idk-preview-{name}"
+/// url = "http://localhost:{port}"
+/// port = 8100
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PreviewFile {
+    pub start: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<String>,
+    pub url: String,
+    #[serde(default = "default_preview_port")]
+    pub port: u16,
+}
+
+fn default_preview_port() -> u16 {
+    8100
 }
 
 /// ```toml
@@ -142,6 +167,12 @@ impl TryFrom<ProjectFile> for Project {
                 .iter()
                 .map(|key| key.parse())
                 .collect::<Result<_, _>>()?,
+            preview: file.preview.map(|p| Preview {
+                start: p.start,
+                stop: p.stop,
+                url: p.url,
+                port: p.port,
+            }),
         })
     }
 }
@@ -171,6 +202,12 @@ impl From<&Project> for ProjectFile {
                     .map(ToString::to_string)
                     .collect(),
             },
+            preview: project.preview.as_ref().map(|p| PreviewFile {
+                start: p.start.clone(),
+                stop: p.stop.clone(),
+                url: p.url.clone(),
+                port: p.port,
+            }),
         }
     }
 }
@@ -251,6 +288,21 @@ tag = "acme"
                 MatchRule::Tag("acme".into()),
             ]
         );
+    }
+
+    #[test]
+    fn the_preview_section_round_trips() {
+        let text = "slug = \"idk\"\nname = \"IDK\"\nkind = \"client\"\n\n[preview]\n\
+                    start = \"bash p.sh {worktree} {port}\"\nurl = \"http://localhost:{port}\"\n";
+
+        let project = parse(text).unwrap();
+        let preview = project.preview.clone().unwrap();
+        let back = toml::to_string(&ProjectFile::from(&project)).unwrap();
+
+        assert_eq!(preview.start, "bash p.sh {worktree} {port}");
+        assert_eq!(preview.stop, None);
+        assert_eq!(preview.port, 8100, "default first port");
+        assert_eq!(parse(&back).unwrap(), project);
     }
 
     #[test]

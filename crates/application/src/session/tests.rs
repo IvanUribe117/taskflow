@@ -32,6 +32,7 @@ fn prefs() -> SessionPrefs {
         agent_language: "English".into(),
         worktrees: true,
         worktree_dir: None,
+        resume_max_tokens: 100_000,
     }
 }
 
@@ -1408,4 +1409,248 @@ async fn only_a_clean_worktree_is_offered_for_removal() {
     }
     let _ = std::fs::remove_dir_all(default_worktree(&dirty_repo).parent().unwrap());
     let _ = std::fs::remove_dir_all(dirty_repo);
+}
+
+#[tokio::test]
+async fn commit_and_pr_get_only_the_commit_sections() {
+    use domain::context::{ContextSection, SectionRole, Usage};
+
+    let (mut ctx, _, ai) = with_repo(crate::testing::FakeRepoCommitter::with_files(&[(
+        " M", "a.py",
+    )]))
+    .await;
+    let section = |key: &str, usage: Usage| ContextSection {
+        key: key.parse().unwrap(),
+        title: key.into(),
+        role: SectionRole::Instruction,
+        usage: usage.into(),
+        priority: 10,
+        private: false,
+        body: format!("regla {key}"),
+    };
+    ctx.context = Arc::new(
+        crate::testing::FakeContextRepository::default().with_global(vec![
+            section("herramientas", Usage::AgentPrompt),
+            section("commits", Usage::Commit),
+        ]),
+    );
+    ctx.repo = Arc::new(crate::testing::FakeRepoInspector {
+        changes: Some(crate::ports::RepoChanges {
+            branch: "CU-86b1".into(),
+            base: Some("origin/master".into()),
+            commits: vec!["abc CU-86b1 - feat: x".into()],
+            stat: String::new(),
+            diff: String::new(),
+            uncommitted: false,
+        }),
+    });
+
+    PrepareCommit::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+    PreparePullRequest::new(&ctx)
+        .execute(prefs().limits)
+        .await
+        .unwrap();
+
+    let titles = |blocks: &[crate::dto::ContextBlock]| -> Vec<String> {
+        blocks.iter().map(|b| b.title.clone()).collect()
+    };
+    assert_eq!(
+        titles(&ai.commit_inputs()[0].context.instructions),
+        ["commits"]
+    );
+    assert_eq!(titles(&ai.pr_inputs()[0].context.instructions), ["commits"]);
+}
+
+#[test]
+fn the_review_request_asks_for_the_repo_reviewer_and_answers_in_the_report_language() {
+    let text = review_request(&prefs());
+
+    assert!(text.contains("reviewer subagent") && text.contains("`code-review` skill"));
+    assert!(text.contains("Leave everything uncommitted"));
+    assert!(
+        text.ends_with(
+            "Then tell me in español, briefly, what the review found and what you fixed."
+        )
+    );
+}
+
+#[tokio::test]
+async fn the_preview_goes_in_the_prompt_only_in_a_worktree() {
+    use domain::project::Preview;
+
+    let (mut ctx, _, repo, _) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[]),
+        crate::testing::FakeRepoCommitter::default(),
+        &prefs(),
+    )
+    .await;
+    let mut idk = ctx.projects.list().await.unwrap().remove(0);
+    idk.preview = Some(Preview {
+        start: "bash preview.sh '{worktree}' {name} {port}".into(),
+        stop: Some("docker rm -f idk-preview-{name}".into()),
+        url: "http://localhost:{port}".into(),
+        port: 8100,
+    });
+    ctx.projects = Arc::new(crate::testing::FakeProjectRepository::new(vec![
+        idk.clone(),
+    ]));
+    let path = default_worktree(&repo);
+    let port = idk.preview.as_ref().unwrap().port_for("86b1");
+
+    let brief = PrepareAgent::new(&ctx).execute(&prefs()).await.unwrap();
+    let stop = SessionWorkDir::new(&ctx)
+        .preview()
+        .await
+        .unwrap()
+        .unwrap()
+        .stop;
+
+    let preview = brief.preview.unwrap();
+    assert_eq!(preview.url, format!("http://localhost:{port}"));
+    assert_eq!(
+        preview.start,
+        format!("bash preview.sh '{}' cu-86b1 {port}", path.display())
+    );
+    assert!(brief.prompt.contains("Playwright MCP"), "{}", brief.prompt);
+    assert!(brief.prompt.contains(&preview.start), "{}", brief.prompt);
+    assert_eq!(stop.as_deref(), Some("docker rm -f idk-preview-cu-86b1"));
+
+    let mut no_worktrees = prefs();
+    no_worktrees.worktrees = false;
+    let (mut main_ctx, _, main_repo, _) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[]),
+        crate::testing::FakeRepoCommitter::default(),
+        &no_worktrees,
+    )
+    .await;
+    let mut main_idk = main_ctx.projects.list().await.unwrap().remove(0);
+    main_idk.preview = idk.preview.clone();
+    main_ctx.projects = Arc::new(crate::testing::FakeProjectRepository::new(vec![main_idk]));
+    let main = PrepareAgent::new(&main_ctx)
+        .execute(&no_worktrees)
+        .await
+        .unwrap();
+    assert!(
+        main.preview.is_none(),
+        "the main checkout keeps its usual app"
+    );
+    assert!(!main.prompt.contains("Playwright"));
+    for dir in [path.parent().unwrap().to_path_buf(), repo, main_repo] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[tokio::test]
+async fn a_big_previous_conversation_suggests_a_fresh_one_with_the_previous_work() {
+    let mut w = finished_with_work().await;
+    let conversation = w.sessions.archived()[0].agent_session.clone().unwrap();
+    StartSession::new(&w.ctx)
+        .execute(&id(), false, &prefs())
+        .await
+        .unwrap();
+    HandleSession::new(&w.ctx)
+        .execute(SessionCommand::Approve { status: None }, &prefs())
+        .await
+        .unwrap();
+
+    w.ctx.conversations = Arc::new(crate::testing::FakeConversations::with(
+        &conversation,
+        187_682,
+    ));
+    let big = PrepareAgent::new(&w.ctx).execute(&prefs()).await.unwrap();
+    w.ctx.conversations = Arc::new(crate::testing::FakeConversations::with(
+        &conversation,
+        20_000,
+    ));
+    let small = PrepareAgent::new(&w.ctx).execute(&prefs()).await.unwrap();
+    PrepareAgent::new(&w.ctx).mark_briefed().await.unwrap();
+    let briefed = PrepareAgent::new(&w.ctx).execute(&prefs()).await.unwrap();
+
+    assert_eq!(big.previous_tokens, Some(187_682));
+    assert!(big.suggest_fresh);
+    assert!(
+        big.fresh_prompt.starts_with(&big.prompt)
+            && big
+                .fresh_prompt
+                .contains("# What was done in the previous session (in español)")
+            && big.fresh_prompt.contains("Trabajo realizado: fondo azul."),
+        "{}",
+        big.fresh_prompt
+    );
+    assert!(!small.suggest_fresh, "a small one is worth resuming");
+    assert_eq!(
+        briefed.previous_tokens, None,
+        "only before the new prompt reaches it"
+    );
+}
+
+#[tokio::test]
+async fn the_task_branch_is_brought_up_to_date_on_start_and_when_opening_the_agent() {
+    use crate::ports::SyncOutcome;
+
+    let other = tempfile_dir();
+    let (ctx, worktrees, repo, outcome) = with_worktrees(
+        |repo| {
+            crate::testing::FakeWorktrees::with(repo, &[(&other, "CU-86b1")]).syncing(
+                SyncOutcome::Updated {
+                    base: "origin/master".into(),
+                    commits: 3,
+                },
+            )
+        },
+        crate::testing::FakeRepoCommitter::default(),
+        &prefs(),
+    )
+    .await;
+
+    let brief = PrepareAgent::new(&ctx).execute(&prefs()).await.unwrap();
+
+    assert_eq!(
+        worktrees.synced(),
+        [other.clone(), other.clone()],
+        "start and agent"
+    );
+    assert_eq!(
+        outcome.notes,
+        ["`CU-86b1` al día con `origin/master`: 3 commits nuevos de la base"]
+    );
+    assert_eq!(brief.notes, outcome.notes);
+    let _ = std::fs::remove_dir_all(other);
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[tokio::test]
+async fn a_conflict_with_the_base_is_a_warning_and_nothing_changes() {
+    use crate::ports::SyncOutcome;
+
+    let other = tempfile_dir();
+    let (_, worktrees, repo, outcome) = with_worktrees(
+        |repo| {
+            crate::testing::FakeWorktrees::with(repo, &[(&other, "CU-86b1")]).syncing(
+                SyncOutcome::Conflict {
+                    base: "origin/master".into(),
+                },
+            )
+        },
+        crate::testing::FakeRepoCommitter::default(),
+        &prefs(),
+    )
+    .await;
+
+    assert!(outcome.notes.is_empty());
+    assert!(
+        outcome
+            .warnings
+            .iter()
+            .any(|w| w.contains("choca con `origin/master`")
+                && w.contains("git merge origin/master")),
+        "{:?}",
+        outcome.warnings
+    );
+    assert!(worktrees.added().is_empty());
+    let _ = std::fs::remove_dir_all(other);
+    let _ = std::fs::remove_dir_all(repo);
 }

@@ -132,6 +132,8 @@ pub struct ProjectDetail {
     /// Los estados sugeridos propios, por etapa: `"ready: needs approval"`. Vacío si usa
     /// los globales.
     pub statuses: Vec<String>,
+    /// `[preview]`: la URL (plantilla, con `{port}`) y el primer puerto.
+    pub preview: Option<String>,
 }
 
 impl From<&Project> for ProjectDetail {
@@ -155,6 +157,10 @@ impl From<&Project> for ProjectDetail {
             .filter(|(_, names)| !names.is_empty())
             .map(|(stage, names)| format!("{stage}: {}", names.join(", ")))
             .collect(),
+            preview: project
+                .preview
+                .as_ref()
+                .map(|p| format!("{} (puertos desde {})", p.url, p.port)),
         }
     }
 }
@@ -480,6 +486,7 @@ mod tests {
                 repo_path: Some("/code/acme".into()),
                 priority_boost: 20,
                 statuses: vec![],
+                preview: None,
             }
         );
     }
@@ -706,6 +713,8 @@ pub struct SessionOutcome {
     /// Lo que no salió pero no detiene la sesión (una notificación, un estado sugerido que
     /// no existe en la lista...).
     pub warnings: Vec<String>,
+    /// Lo que conviene saber y salió bien (la rama se puso al día con la base...).
+    pub notes: Vec<String>,
     /// Dónde quedó archivada, si terminó (`done` o `abort`).
     pub archived_to: Option<PathBuf>,
 }
@@ -771,8 +780,12 @@ pub struct AgentBrief {
     pub repo_path: Option<PathBuf>,
     /// El worktree de la tarea, si se trabaja en uno.
     pub worktree: Option<WorkDirSetup>,
+    /// La vista previa del worktree, si el proyecto tiene `[preview]`.
+    pub preview: Option<PreviewView>,
     /// Lo que no salió pero no impide abrir el agente (no se pudo crear el worktree…).
     pub warnings: Vec<String>,
+    /// Lo que conviene saber y salió bien (la rama se puso al día con la base…).
+    pub notes: Vec<String>,
     /// `agent-prompt.md`, solo el prompt de la IA.
     pub prompt_path: PathBuf,
     /// La conversación del agente, si ya se abrió antes: se retoma en vez de empezar otra.
@@ -780,6 +793,13 @@ pub struct AgentBrief {
     /// Si esa conversación ya recibió el prompt de esta sesión. Si no (una tarea devuelta),
     /// se retoma **con** el prompt nuevo.
     pub briefed: bool,
+    /// Una tarea devuelta: cuántos tokens tiene la conversación anterior, si se sabe.
+    pub previous_tokens: Option<u64>,
+    /// Si pasa de `session.resume_max_tokens`: conviene una conversación nueva.
+    pub suggest_fresh: bool,
+    /// El prompt para una conversación nueva en una tarea devuelta: `prompt` más lo que se
+    /// hizo en la sesión anterior (el agente nuevo no lo recuerda).
+    pub fresh_prompt: String,
 }
 
 /// La carpeta donde se trabaja la tarea.
@@ -792,6 +812,26 @@ pub struct WorkDirSetup {
     pub is_worktree: bool,
     /// Si se acaba de crear.
     pub created: bool,
+    /// Si se puso al día con la base, y cómo salió. `None` si no se intentó.
+    pub sync: Option<crate::ports::SyncOutcome>,
+}
+
+/// La vista previa del worktree: dónde se ve y cómo se levanta y se detiene.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PreviewView {
+    pub url: String,
+    pub start: String,
+    pub stop: Option<String>,
+}
+
+impl From<domain::project::RenderedPreview> for PreviewView {
+    fn from(preview: domain::project::RenderedPreview) -> Self {
+        Self {
+            url: preview.url,
+            start: preview.start,
+            stop: preview.stop,
+        }
+    }
 }
 
 /// Otro worktree con cambios, donde parece que trabajó el agente.

@@ -15,11 +15,11 @@ use std::time::{Duration, Instant};
 
 use application::AppContext;
 use application::ai::AiLimits;
-use application::dto::{SessionOutcome, WorkDirSetup, WorktreeCandidate};
+use application::dto::{AgentBrief, PreviewView, SessionOutcome, WorkDirSetup, WorktreeCandidate};
 use application::session::{
     CommitChanges, HandleSession, PrepareAgent, PrepareCommit, PreparePullRequest,
     PrepareWorkReport, PublishPullRequest, RetrySession, SessionPrefs, SessionWorkDir, ShowSession,
-    StartSession, Suggestion, suggested_statuses,
+    StartSession, Suggestion, review_request, suggested_statuses,
 };
 use application::settings::{AfterCommit, AppSettings};
 use application::tasks::{GetTodayTasks, PrepareClose};
@@ -51,6 +51,7 @@ pub fn prefs(settings: &AppSettings) -> SessionPrefs {
         worktree_dir: Some(settings.session.worktree_dir.trim())
             .filter(|dir| !dir.is_empty())
             .map(std::path::PathBuf::from),
+        resume_max_tokens: settings.session.resume_max_tokens,
     }
 }
 
@@ -182,7 +183,7 @@ pub async fn start(
             fresh = Select::with_theme(&theme)
                 .with_prompt("¿Cómo sigues?")
                 .items(&[
-                    "Continuar donde quedó (la IA ve lo hecho y lo nuevo; el agente retoma su conversación)",
+                    "Continuar donde quedó (la IA ve lo hecho y lo nuevo; al abrir el agente eliges si retoma su conversación o empieza una con el resumen)",
                     "Empezar de cero",
                 ])
                 .default(0)
@@ -378,9 +379,7 @@ pub async fn agent(
         println!("{}", brief.prompt);
         return Ok(());
     }
-    for warning in &brief.warnings {
-        eprintln!("⚠ {warning}");
-    }
+    print_brief(&brief);
     let program = &settings.session.agent_command;
     let place = worktree_label(brief.worktree.as_ref());
     let mut dir = if let Some(dir) = &brief.repo_path {
@@ -390,29 +389,20 @@ pub async fn agent(
         std::env::current_dir()?
     };
 
-    let mut resume = brief.agent_session.clone();
+    let fresh = start_fresh(&brief)?;
+    let prompt = if fresh {
+        &brief.fresh_prompt
+    } else {
+        &brief.prompt
+    };
+    let mut resume = brief.agent_session.clone().filter(|_| !fresh);
     let mut briefed = brief.briefed;
+    // Un mensaje para el agente al volver a abrirlo (el pedido de revisión).
+    let mut message: Option<String> = None;
+    let mut reviewed = false;
     loop {
-        let (args, label) = if let Some(id) = &resume {
-            if briefed {
-                (
-                    vec!["--resume".to_owned(), id.clone()],
-                    "retomando la conversación",
-                )
-            } else {
-                // Una tarea devuelta: la conversación de antes, con el prompt nuevo.
-                (
-                    vec!["--resume".to_owned(), id.clone(), brief.prompt.clone()],
-                    "retomando la conversación anterior con el análisis nuevo",
-                )
-            }
-        } else {
-            let id = PrepareAgent::new(ctx).new_conversation().await?;
-            (
-                vec!["--session-id".to_owned(), id, brief.prompt.clone()],
-                "con el prompt de la sesión",
-            )
-        };
+        let (args, label) =
+            agent_args(ctx, prompt, resume.as_deref(), briefed, message.take()).await?;
         eprintln!(
             "Abriendo {program} en {}{place} {label}…",
             presenter::path(&dir)
@@ -447,7 +437,7 @@ pub async fn agent(
         // El menú se repite (por ejemplo, después del commit) hasta que elijas algo que
         // termine o vuelva al agente.
         loop {
-            match after_agent(ctx).await? {
+            match after_agent(ctx, reviewed).await? {
                 AfterAgent::Commit => {
                     commit(ctx, settings, false).await?;
                 }
@@ -461,7 +451,7 @@ pub async fn agent(
                     return done(ctx, settings, None, None, false).await;
                 }
                 AfterAgent::Finish => return done(ctx, settings, None, None, false).await,
-                AfterAgent::BackToAgent => {
+                choice @ (AfterAgent::Review | AfterAgent::BackToAgent) => {
                     let again = PrepareAgent::new(ctx).execute(&prefs(settings)).await?;
                     // Si cambiaste de worktree, el agente vuelve a abrirse en el nuevo.
                     if let Some(new_dir) = again.repo_path {
@@ -469,6 +459,10 @@ pub async fn agent(
                     }
                     resume = again.agent_session;
                     briefed = again.briefed;
+                    if matches!(choice, AfterAgent::Review) {
+                        message = Some(review_request(&prefs(settings)));
+                        (briefed, reviewed) = (true, true);
+                    }
                     break;
                 }
                 AfterAgent::Leave => {
@@ -478,6 +472,96 @@ pub async fn agent(
             }
         }
     }
+}
+
+/// Lo que conviene saber antes de abrir el agente: la rama al día, los avisos y la vista
+/// previa.
+fn print_brief(brief: &AgentBrief) {
+    for note in &brief.notes {
+        eprintln!("✔ {note}");
+    }
+    for warning in &brief.warnings {
+        eprintln!("⚠ {warning}");
+    }
+    if let Some(preview) = &brief.preview {
+        eprintln!(
+            "Vista previa del worktree: {} (el agente la levanta si necesita probar en el navegador)",
+            preview.url
+        );
+    }
+}
+
+/// Una tarea devuelta con una conversación anterior grande: ¿empezar una nueva (con el
+/// resumen de lo hecho) en vez de retomarla? Retomarla carga todo el historial en cada
+/// turno. Sin terminal, o con un tamaño desconocido, se sigue la sugerencia
+/// (`session.resume_max_tokens`).
+fn start_fresh(brief: &AgentBrief) -> anyhow::Result<bool> {
+    let Some(tokens) = brief.previous_tokens.filter(|_| !brief.briefed) else {
+        return Ok(false);
+    };
+    let size = format!("~{}K tokens", tokens / 1000);
+    if !interactive() {
+        if brief.suggest_fresh {
+            eprintln!(
+                "La conversación anterior del agente tiene {size}: se empieza una nueva con el resumen de lo hecho."
+            );
+        }
+        return Ok(brief.suggest_fresh);
+    }
+    let options = [
+        "Conversación nueva con el análisis y el resumen de lo que se hizo (más barata; el agente relee solo lo que necesite)"
+            .to_owned(),
+        format!(
+            "Retomar la conversación anterior ({size}: recuerda todo, pero carga ese historial en cada turno)"
+        ),
+    ];
+    let choice = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt(format!(
+            "La tarea volvió y la conversación anterior del agente tiene {size}. ¿Cómo sigue?"
+        ))
+        .items(&options)
+        .default(usize::from(!brief.suggest_fresh))
+        .interact()?;
+    Ok(choice == 0)
+}
+
+/// Los argumentos para abrir el agente y cómo decirlo:
+///
+/// - con `message` (el pedido de revisión): se retoma la conversación con ese mensaje; sin
+///   conversación, una nueva con el prompt de la sesión y el mensaje;
+/// - sin él: se retoma la conversación (con el prompt nuevo si aún no lo recibió, en una
+///   tarea devuelta) o se empieza una con el prompt de la sesión.
+async fn agent_args(
+    ctx: &AppContext,
+    prompt: &str,
+    resume: Option<&str>,
+    briefed: bool,
+    message: Option<String>,
+) -> anyhow::Result<(Vec<String>, &'static str)> {
+    let resume_with = |id: &str, text: Option<String>| {
+        let mut args = vec!["--resume".to_owned(), id.to_owned()];
+        args.extend(text);
+        args
+    };
+    Ok(match (resume, message) {
+        (Some(id), Some(text)) => (resume_with(id, Some(text)), "para revisar los cambios"),
+        (Some(id), None) if briefed => (resume_with(id, None), "retomando la conversación"),
+        (Some(id), None) => (
+            resume_with(id, Some(prompt.to_owned())),
+            "retomando la conversación anterior con el análisis nuevo",
+        ),
+        (None, message) => {
+            let id = PrepareAgent::new(ctx).new_conversation().await?;
+            let (first, label) = match message {
+                Some(text) => (
+                    format!("{prompt}\n\n---\n\n{text}"),
+                    "con el prompt de la sesión y el pedido de revisión",
+                ),
+                None => (prompt.to_owned(), "con el prompt de la sesión"),
+            };
+            (vec!["--session-id".to_owned(), id, first], label)
+        }
+    })
 }
 
 /// `" (worktree de la tarea, rama `CU-1`, recién creado)"`, o nada si no es un worktree.
@@ -594,6 +678,24 @@ async fn offer_cleanup(ctx: &AppContext, cleanup: Option<(PathBuf, PathBuf)>, ye
     }
 }
 
+/// Al terminar la sesión: el comando `stop` de la vista previa, en silencio. Si no estaba
+/// corriendo, falla y no pasa nada.
+fn stop_preview(preview: Option<&PreviewView>) {
+    let Some(stop) = preview.and_then(|p| p.stop.as_deref()) else {
+        return;
+    };
+    let stopped = std::process::Command::new("sh")
+        .args(["-c", stop])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if stopped {
+        println!("✔ Vista previa detenida");
+    }
+}
+
 /// El worktree que se puede quitar al terminar la sesión activa, con su repo.
 async fn cleanup_candidate(ctx: &AppContext) -> Option<(PathBuf, PathBuf)> {
     let workdir = SessionWorkDir::new(ctx);
@@ -604,6 +706,7 @@ async fn cleanup_candidate(ctx: &AppContext) -> Option<(PathBuf, PathBuf)> {
 
 /// Lo que se puede hacer al salir del agente.
 enum AfterAgent {
+    Review,
     Commit,
     PullRequest,
     PublishAndFinish,
@@ -614,16 +717,27 @@ enum AfterAgent {
 
 /// El menú al salir del agente. "Hacer commit" aparece primero, y solo si hay cambios.
 /// Con todo commiteado, si la rama tiene commits y aún no tiene PR, "Crear el PR".
-async fn after_agent(ctx: &AppContext) -> anyhow::Result<AfterAgent> {
+async fn after_agent(ctx: &AppContext, reviewed: bool) -> anyhow::Result<AfterAgent> {
     let pending = PrepareCommit::new(ctx)
         .pending_files()
         .await
         .unwrap_or_default();
+    let status = PreparePullRequest::new(ctx).status().await.ok();
     let mut options: Vec<(String, AfterAgent)> = Vec::new();
+    // Revisar va primero mientras no se haya revisado; después, detrás del commit y el PR.
+    let review = (!pending.is_empty() || status.is_some()).then(|| {
+        (
+            "Revisar los cambios (el agente los revisa con el revisor del repo y corrige)"
+                .to_owned(),
+            AfterAgent::Review,
+        )
+    });
+    let mut review = review;
+    if !reviewed {
+        options.extend(review.take());
+    }
     if pending.is_empty() {
-        if let Ok(status) = PreparePullRequest::new(ctx).status().await
-            && status.pr.is_none()
-        {
+        if let Some(status) = status.as_ref().filter(|s| s.pr.is_none()) {
             options.push((
                 format!(
                     "Subir `{}` y crear el PR ({} commits; descripción sugerida por la IA)",
@@ -642,6 +756,7 @@ async fn after_agent(ctx: &AppContext) -> anyhow::Result<AfterAgent> {
             AfterAgent::Commit,
         ));
     }
+    options.extend(review);
     options.extend([
         (
             "Publicar lo que se hizo y terminar la sesión".to_owned(),
@@ -1143,7 +1258,9 @@ pub async fn done(
         }
     }
     let cleanup = cleanup_candidate(ctx).await;
+    let preview = SessionWorkDir::new(ctx).preview().await.ok().flatten();
     handle(ctx, settings, SessionCommand::Finish { status, comment }).await?;
+    stop_preview(preview.as_ref());
     offer_cleanup(ctx, cleanup, yes).await;
     Ok(())
 }
@@ -1181,7 +1298,9 @@ pub async fn abort(
         }
     }
     let cleanup = cleanup_candidate(ctx).await;
+    let preview = SessionWorkDir::new(ctx).preview().await.ok().flatten();
     handle(ctx, settings, SessionCommand::Abort { restore_status }).await?;
+    stop_preview(preview.as_ref());
     offer_cleanup(ctx, cleanup, yes).await;
     Ok(())
 }

@@ -308,7 +308,7 @@ pub enum ContextCommand {
         #[arg(
             long,
             default_value = "summary",
-            help = "Uso: summary, plan, agent_prompt o playbook"
+            help = "Uso: summary, plan, agent_prompt, playbook o commit"
         )]
         usage: Usage,
         /// Salida en JSON (para scripts).

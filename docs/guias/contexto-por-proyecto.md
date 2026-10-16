@@ -55,7 +55,7 @@ El cuerpo: texto normal en Markdown.
 | --- | --- | --- |
 | `title` | Texto libre | La clave |
 | `role` | `knowledge` o `instruction` | `knowledge` |
-| `usage` | Lista con `summary`, `plan`, `agent_prompt`, `playbook` | Todos |
+| `usage` | Lista con `summary`, `plan`, `agent_prompt`, `playbook`, `commit` | Todos |
 | `priority` | 0 a 255; **menor = más importante** | 100 |
 | `private` | `true` o `false` | `false` |
 
@@ -84,6 +84,7 @@ El encabezado es opcional: un archivo con solo texto es una sección de conocimi
 | `plan` | Al armar el plan del día (`plan`) | Qué es importante para el cliente; poco más |
 | `agent_prompt` | Al escribir el prompt para el agente de código | Todo lo técnico: arquitectura, comandos, convenciones, estilo |
 | `playbook` | En los pasos de IA de las automatizaciones | Despliegue, procesos |
+| `commit` | Al escribir el mensaje de commit y la descripción del PR (`taskflow commit`, `taskflow pr`) | Convenciones de commits y PR, qué declarar en el PR. No las instrucciones para el agente |
 
 Ser selectivo ahorra presupuesto: los comandos de desarrollo no ayudan a resumir una tarea, y el estilo de código no sirve para planear el día.
 

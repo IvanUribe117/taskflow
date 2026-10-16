@@ -7,14 +7,17 @@
 //! - `process`: ejecutar el programa, con tiempo límite.
 //! - `output`: leer el JSON que imprime `claude`.
 //! - `summarizer`: `impl Summarizer for ClaudeCodeSummarizer`, que une todo lo anterior.
+//! - `conversations`: cuánto pesa una conversación del agente (sus archivos `.jsonl`).
 #![warn(clippy::pedantic)]
 
 mod command;
 mod config;
+mod conversations;
 mod output;
 mod process;
 mod prompts;
 mod summarizer;
 
 pub use config::ClaudeCodeConfig;
+pub use conversations::ClaudeConversations;
 pub use summarizer::ClaudeCodeSummarizer;

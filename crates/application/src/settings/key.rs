@@ -49,6 +49,7 @@ impl ConfigKey {
         "session.pr_draft",
         "session.worktrees",
         "session.worktree_dir",
+        "session.resume_max_tokens",
         "ui.group_by",
     ];
 

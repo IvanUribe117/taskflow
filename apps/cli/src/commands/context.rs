@@ -116,7 +116,7 @@ fn create_from_template(path: &Path, key: &SectionKey) -> anyhow::Result<()> {
              title = \"{key}\"\n\
              # knowledge (datos del proyecto) o instruction (cómo debe responder la IA)\n\
              role = \"knowledge\"\n\
-             # summary, plan, agent_prompt, playbook\n\
+             # summary, plan, agent_prompt, playbook, commit\n\
              usage = [\"summary\", \"agent_prompt\"]\n\
              # 0-255: menor = más importante\n\
              priority = 50\n\

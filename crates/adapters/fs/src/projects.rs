@@ -241,6 +241,7 @@ mod tests {
             priority_boost: 5,
             statuses: StatusSuggestions::default(),
             context_exclude: Vec::new(),
+            preview: None,
         }
     }
 

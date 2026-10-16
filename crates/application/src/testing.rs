@@ -14,13 +14,13 @@ use domain::task::{Comment, LocationNode, LocationSegment, StatusOption, Task, T
 
 use crate::AppContext;
 use crate::ports::{
-    AiError, ChangedFile, Clock, CommitInput, CommitMessage, Complexity, ContextRepository,
-    ExposeSecret, HistoryEntry, HistoryFilter, HistoryRecord, HistoryRepository, Notice, Notifier,
-    NotifyError, PlanInput, PrInput, ProjectRepository, ProviderError, PullRequest,
-    PullRequestDraft, PullRequests, RepoChanges, RepoCommitter, RepoError, RepoInspector,
-    SecretError, SecretName, SecretStore, SecretString, SessionStore, Summarizer, SummaryInput,
-    TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker, WorkInput, WorkSummary, Worktree,
-    Worktrees, markdown_title,
+    AgentConversations, AiError, ChangedFile, Clock, CommitInput, CommitMessage, Complexity,
+    ContextRepository, ExposeSecret, HistoryEntry, HistoryFilter, HistoryRecord, HistoryRepository,
+    Notice, Notifier, NotifyError, PlanInput, PrInput, ProjectRepository, ProviderError,
+    PullRequest, PullRequestDraft, PullRequests, RepoChanges, RepoCommitter, RepoError,
+    RepoInspector, SecretError, SecretName, SecretStore, SecretString, SessionStore, Summarizer,
+    SummaryInput, SyncOutcome, TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker,
+    WorkInput, WorkSummary, Worktree, Worktrees, markdown_title,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
@@ -329,6 +329,7 @@ pub fn context(
         committer: Arc::new(FakeRepoCommitter::default()),
         prs: Arc::new(FakePullRequests::default()),
         worktrees: Arc::new(FakeWorktrees::default()),
+        conversations: Arc::new(FakeConversations::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -901,6 +902,27 @@ impl Summarizer for FakeSummarizer {
     }
 }
 
+/// Conversaciones del agente en memoria: id → tokens de contexto.
+#[derive(Debug, Default)]
+pub struct FakeConversations {
+    pub tokens: HashMap<String, u64>,
+}
+
+impl FakeConversations {
+    pub fn with(id: &str, tokens: u64) -> Self {
+        Self {
+            tokens: HashMap::from([(id.to_owned(), tokens)]),
+        }
+    }
+}
+
+#[async_trait]
+impl AgentConversations for FakeConversations {
+    async fn context_tokens(&self, id: &str) -> Option<u64> {
+        self.tokens.get(id).copied()
+    }
+}
+
 /// Worktrees en memoria. `add` crea la carpeta (para que exista en disco) y la agrega a
 /// la lista; `remove` la quita de la lista.
 #[derive(Debug, Default)]
@@ -909,6 +931,9 @@ pub struct FakeWorktrees {
     pub failing_add: bool,
     added: Mutex<Vec<(std::path::PathBuf, String)>>,
     removed: Mutex<Vec<std::path::PathBuf>>,
+    /// Lo que devuelve `sync_with_base` (por defecto, `UpToDate`).
+    pub sync: Option<SyncOutcome>,
+    synced: Mutex<Vec<std::path::PathBuf>>,
 }
 
 impl FakeWorktrees {
@@ -933,6 +958,18 @@ impl FakeWorktrees {
     pub fn failing(mut self) -> Self {
         self.failing_add = true;
         self
+    }
+
+    /// `sync_with_base` devuelve `outcome`.
+    #[must_use]
+    pub fn syncing(mut self, outcome: SyncOutcome) -> Self {
+        self.sync = Some(outcome);
+        self
+    }
+
+    /// Las carpetas que se pusieron al día con la base.
+    pub fn synced(&self) -> Vec<std::path::PathBuf> {
+        self.synced.lock().expect("lock").clone()
     }
 
     /// Los worktrees creados: ruta y rama.
@@ -980,6 +1017,11 @@ impl Worktrees for FakeWorktrees {
         self.removed.lock().expect("lock").push(path.to_path_buf());
         self.list.lock().expect("lock").retain(|w| w.path != path);
         Ok(())
+    }
+
+    async fn sync_with_base(&self, path: &std::path::Path) -> Result<SyncOutcome, RepoError> {
+        self.synced.lock().expect("lock").push(path.to_path_buf());
+        Ok(self.sync.clone().unwrap_or(SyncOutcome::UpToDate))
     }
 }
 

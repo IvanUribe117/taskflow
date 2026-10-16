@@ -255,6 +255,10 @@ pub struct SessionSettings {
     /// Dónde se crean los worktrees (`<carpeta>/CU-<id>`): absoluta, o relativa al repo.
     /// Vacía: `<repo>-worktrees`, junto al repo.
     pub worktree_dir: String,
+    /// Al continuar una tarea devuelta: si la conversación anterior del agente pasa de
+    /// estos tokens, se sugiere empezar una nueva con el resumen de lo hecho en vez de
+    /// retomarla (retomarla carga todo ese historial en cada turno).
+    pub resume_max_tokens: u64,
 }
 
 /// `session.after_commit`. En `config.toml`: `"none"`, `"ask"`, `"push"` o `"pr"`.
@@ -283,6 +287,7 @@ impl Default for SessionSettings {
             pr_draft: false,
             worktrees: true,
             worktree_dir: String::new(),
+            resume_max_tokens: 100_000,
         }
     }
 }

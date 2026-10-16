@@ -13,6 +13,22 @@ pub struct Worktree {
     pub branch: Option<String>,
 }
 
+/// Lo que pasó al poner la rama de la tarea al día con la base.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum SyncOutcome {
+    /// Ya tenía todo lo de la base.
+    UpToDate,
+    /// Se trajeron `commits` de la base (`base`, como `origin/master`).
+    Updated { base: String, commits: usize },
+    /// Hay cambios sin commit: no se tocó nada.
+    SkippedDirty,
+    /// La unión choca: se deshizo (`git merge --abort`) y la rama quedó como estaba.
+    Conflict { base: String },
+    /// No se encontró la rama base, o la carpeta está en la base misma.
+    NoBase,
+}
+
 /// Los worktrees del repositorio: así cada tarea tiene su carpeta y su rama, y el repo
 /// principal no cambia de rama. Lo implementa `adapter-git`.
 #[async_trait]
@@ -39,6 +55,16 @@ pub trait Worktrees: Send + Sync {
     ///
     /// [`RepoError::Invalid`] con la salida de git.
     async fn remove(&self, repo: &Path, path: &Path) -> Result<(), RepoError>;
+
+    /// Pone la rama de `path` al día con la base: `git fetch` y `git merge` de
+    /// `origin/master` (sin reescribir la historia: lo ya subido no necesita `--force`).
+    /// Si la rama seguía a la base (`@{u}` = `origin/master`), deja de seguirla, para que
+    /// un `git push` suelto no suba a la base.
+    ///
+    /// # Errors
+    ///
+    /// Si no se puede ejecutar git.
+    async fn sync_with_base(&self, path: &Path) -> Result<SyncOutcome, RepoError>;
 }
 
 #[async_trait]
@@ -53,5 +79,9 @@ impl Worktrees for NoRepoInspector {
 
     async fn remove(&self, _repo: &Path, _path: &Path) -> Result<(), RepoError> {
         Err(RepoError::Invalid("not a git repository".into()))
+    }
+
+    async fn sync_with_base(&self, _path: &Path) -> Result<SyncOutcome, RepoError> {
+        Ok(SyncOutcome::NoBase)
     }
 }

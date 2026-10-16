@@ -134,6 +134,7 @@ pub fn projects(projects: &[ProjectDetail]) -> String {
 /// Reglas:
 ///   - list 901100200300
 ///   - tag acme
+/// Vista previa de los worktrees: http://localhost:{port} (puertos desde 8100)   (si tiene)
 /// ```
 #[must_use]
 pub fn project_detail(project: &ProjectDetail) -> String {
@@ -161,6 +162,9 @@ pub fn project_detail(project: &ProjectDetail) -> String {
         for line in &project.statuses {
             lines.push(format!("  - {line}"));
         }
+    }
+    if let Some(preview) = &project.preview {
+        lines.push(format!("Vista previa de los worktrees: {preview}"));
     }
     lines.join("\n")
 }
@@ -679,6 +683,7 @@ pub fn session(view: &SessionView, offset: FixedOffset) -> String {
 #[must_use]
 pub fn session_outcome(outcome: &SessionOutcome, offset: FixedOffset) -> String {
     let mut lines = vec![session(&outcome.session, offset)];
+    lines.extend(outcome.notes.iter().map(|n| format!("✔ {n}")));
     lines.extend(outcome.warnings.iter().map(|w| format!("⚠ {w}")));
     if let Some(path) = &outcome.archived_to {
         lines.push(format!("Sesión archivada en {}", self::path(path)));
@@ -1069,6 +1074,7 @@ mod tests {
             repo_path: repo.map(str::to_owned),
             priority_boost: boost,
             statuses: vec![],
+            preview: None,
         }
     }
 
@@ -1437,6 +1443,7 @@ mod tests {
         let outcome = SessionOutcome {
             session: session_view("closed"),
             warnings: vec!["no se pudo notificar".into()],
+            notes: vec![],
             archived_to: Some("/s/archive/x.json".into()),
         };
 

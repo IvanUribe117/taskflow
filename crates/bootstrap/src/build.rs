@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use adapter_claude_code::ClaudeConversations;
 use adapter_desktop::MacNotifier;
 use adapter_fs::{
     FsConfigStore, FsContextRepository, FsHistoryRepository, FsProjectRepository, FsSessionStore,
@@ -75,6 +76,7 @@ pub fn secret_store() -> LayeredSecretStore {
 /// - `repo`: `GitRepoInspector` (lee la rama de trabajo para el reporte de lo hecho).
 /// - `prs`: `GhPullRequests` (los PR de GitHub, con `gh`).
 /// - `worktrees`: `GitRepoInspector` (una carpeta y una rama por tarea).
+/// - `conversations`: `ClaudeConversations` (cuánto pesa la conversación del agente).
 /// - `policy`: `WeightedPolicy` con los pesos de `settings.policy`.
 /// - `clock`: `SystemClock`.
 ///
@@ -104,6 +106,7 @@ pub fn build(
         committer: Arc::new(GitRepoInspector),
         prs: Arc::new(GhPullRequests::default()),
         worktrees: Arc::new(GitRepoInspector),
+        conversations: Arc::new(ClaudeConversations::for_current_user()),
         context: Arc::new(FsContextRepository::new(
             context_dir(settings, config_path),
             projects_dir(settings, config_path),

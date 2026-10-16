@@ -155,7 +155,10 @@ analizando → esperando aprobación → en progreso ⇄ pausada → cerrada
 | `--yes`   | Si hay un contador corriendo en otra tarea, lo detiene sin preguntar                       |
 | `--fresh` | Si la tarea ya tuvo una sesión (te la devolvieron), empieza de cero en vez de continuarla |
 
-**Tareas devueltas.** Si la tarea ya se trabajó, `start` lo dice y ofrece continuar. Al continuar, el análisis sabe qué se hizo antes, y el agente retoma su conversación anterior.
+**Tareas devueltas.** Si la tarea ya se trabajó, `start` lo dice y ofrece continuar. Al continuar, el análisis sabe qué se hizo antes y se centra en los comentarios nuevos (qué faltó o qué hay que corregir). Al abrir el agente, Taskflow mide la conversación anterior:
+
+- **Conversación nueva** con el análisis y el resumen de lo que se entregó. Es la opción por defecto si la anterior pasa de `session.resume_max_tokens` (100 000). Sale más barata, porque el agente solo relee los archivos que necesita.
+- **Retomarla:** recuerda todo, pero carga ese historial en cada turno. Es la opción por defecto si la conversación es pequeña.
 
 ### Worktrees: una carpeta por tarea
 
@@ -168,10 +171,33 @@ Con `session.worktrees = true` (por defecto), **Taskflow crea el worktree, no el
 - Si el agente creó **otro** worktree por su cuenta (por ejemplo, en `.claude/worktrees/`) y dejó cambios ahí, al salir Taskflow te lo muestra y pregunta dónde hacer el commit y el PR.
 - Al terminar (`done` o `abort`), si el worktree no tiene cambios sin commit, pregunta si quitarlo. La rama se queda con sus commits. Con `--yes` no quita nada: te dice el comando.
 - `taskflow session` muestra la carpeta en "Carpeta de trabajo".
+- **Siempre al día con `master`.** Cada vez que empieza o se retoma algo (`start`, abrir el agente, "Revisar los cambios"), Taskflow hace `git fetch` y une `origin/master` en la rama de la tarea con `git merge`, sin reescribir la historia: lo ya subido no necesita `--force`. Si la rama seguía a `origin/master`, deja de seguirla, para que un `git push` suelto no suba a `master`. Si hay cambios sin commit no toca nada y avisa; si hay conflicto, deshace la unión, avisa y te dice el comando para resolverlo a mano.
 
 **Ojo:** un worktree solo trae lo que está en git. Lo ignorado (`.env`, `node_modules`, entornos virtuales) no aparece: cópialo o instálalo ahí si el agente lo necesita para correr el proyecto.
 
 Para trabajar como antes, en el repo del proyecto: `taskflow config set session.worktrees false`.
+
+### Vista previa: probar el worktree en el navegador
+
+Si el proyecto tiene `[preview]` en su `project.toml`, el prompt del agente le dice cómo levantar la app **de ese worktree** y en qué URL. Así puede probar los cambios de interfaz con el MCP de Playwright: recorre las páginas, revisa la consola y las peticiones que fallan y toma una captura. Taskflow la detiene al terminar la sesión (`done` o `abort`).
+
+```toml
+[preview]
+start = "bash '/ruta/preview.sh' start '{repo}' '{worktree}' {name} {port}"
+stop = "bash '/ruta/preview.sh' stop {name}"
+url = "http://localhost:{port}"
+port = 8100        # cada tarea usa un puerto fijo entre 8100 y 8199
+```
+
+Las plantillas pueden usar `{repo}` (el repo principal), `{worktree}`, `{branch}` (`CU-86b1`), `{name}` (la rama en minúsculas, válida como nombre de contenedor) y `{port}`. Solo se usa en un worktree: en el repo principal ya tienes la app de siempre. `taskflow project show <slug>` la muestra.
+
+**En IDK** (`projects/idk/preview.sh`) todo corre en Docker:
+
+1. Arranca Postgres, Redis y Mailhog del stack local. Si ya existen, aunque sean de otro proyecto de compose, los arranca tal cual y los une a la red `idk_default`.
+2. Compila el frontend del worktree en un contenedor `node:20`, con el `node_modules` del repo principal. La salida queda en el worktree, y git la ignora.
+3. Levanta Django en un contenedor propio, `idk-preview-<rama>`, con la imagen `idk`, el worktree en `/app` y el `.env` del repo principal.
+
+Comparte la base de datos con el stack local. Celery no corre en la vista previa.
 
 ### `taskflow approve`
 
@@ -235,6 +261,7 @@ Abre Claude Code (`session.agent_command`) en la carpeta de la tarea: su worktre
 - Si ya lo abriste antes en esta sesión, **retoma la misma conversación**.
 - El agente trabaja en inglés (código, comentarios y commits: `ai.agent_language`) y habla contigo en español (`ai.report_language`).
 - Al salir, si dejó cambios en otro worktree, pregunta cuál usar. Luego el menú ofrece: hacer commit (si hay cambios), subir y crear el PR (si todo está commiteado y no hay PR), publicar lo hecho y terminar, terminar, volver al agente o dejar la sesión abierta.
+- **Revisar los cambios** (primera opción si hay cambios y aún no se revisó): retoma la conversación del agente con un pedido de revisión. Revisa su diff con el subagente revisor del repo (o la skill `code-review`) contra el plan y tus reglas, corrige lo real, corre tests y linter, y te cuenta qué encontró. Después, el commit pasa a ser la primera opción.
 
 | Opción     | Qué hace                                       |
 | ----------- | ----------------------------------------------- |
@@ -338,6 +365,10 @@ tag = "idk-todo"
 [context]
 exclude = ["aprendizaje-rust"] # secciones globales que no aplican aquí
 
+[preview]                      # opcional: la app de cada worktree, para probar en el navegador
+start = "…"                    # ver "Vista previa" en la sección 4
+url = "http://localhost:{port}"
+
 [statuses]                     # opcional: estados sugeridos propios del proyecto
 ready = ["needs approval"]     # tras el análisis (también: in_progress, done)
 done = ["code review", "qa"]
@@ -352,7 +383,7 @@ Las **secciones** son archivos Markdown con lo que la IA debe saber (conocimient
 | Comando                                             | Qué hace                                                                                                                                       |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `context list [--project SLUG] [--json]`          | Las secciones globales, o las que aplican a un proyecto (marca las globales excluidas)                                                          |
-| `context preview <ID> [--usage USO] [--json]`     | Exactamente lo que recibiría la IA para esa tarea, sin llamarla. `USO`: `summary` (por defecto), `plan`, `agent_prompt` o `playbook` |
+| `context preview <ID> [--usage USO] [--json]`     | Exactamente lo que recibiría la IA para esa tarea, sin llamarla. `USO`: `summary` (por defecto), `plan`, `agent_prompt`, `playbook` o `commit` |
 | `context edit <CLAVE> [--project SLUG]`           | La abre en tu editor; si no existe, la crea con una plantilla. Al guardar, la valida                                                            |
 | `context remove <CLAVE> [--project SLUG] [--yes]` | La borra, con confirmación                                                                                                                     |
 | `context exclude <CLAVE> --project SLUG`          | Una sección global deja de aplicar a ese proyecto                                                                                              |
@@ -420,6 +451,7 @@ taskflow config set provider.status_map.in_review '["code review", "qa"]'
 | `session.pr_draft`                | `false`                  | Abrir los PR como borrador                                         |
 | `session.worktrees`               | `true`                   | Un worktree por tarea, en su rama `CU-<id>` (lo crea Taskflow)    |
 | `session.worktree_dir`            | `""`                     | Dónde crearlos (absoluta o relativa al repo). Vacía: `<repo>-worktrees` junto al repo |
+| `session.resume_max_tokens`       | `100000`                 | Tarea devuelta: desde cuántos tokens de la conversación anterior se sugiere una nueva |
 | `ui.group_by`                     | `"none"`                 | Agrupar `today`: `none` o `project`                          |
 
 ---
@@ -459,5 +491,7 @@ Los worktrees no van ahí: están junto al repo, en `<repo>-worktrees/CU-<id>` (
 | `git push failed`                           | Revisa el mensaje de git (permisos, rama protegida, hook de pre-push) y reintenta con `taskflow pr`         |
 | La IA usa contexto que no aplica al proyecto  | `taskflow context exclude <clave> --project <slug>`, y compruébalo con `context preview`                 |
 | "no se pudo preparar el worktree"           | Lee el mensaje de git (la carpeta ya existe, la rama está en otro worktree…). La sesión sigue en el repo del proyecto |
-| En el worktree falta `.env` o las dependencias | Un worktree solo trae lo que está en git: cópialos o instálalos ahí |
+| En el worktree falta `.env` o las dependencias | Un worktree solo trae lo que está en git: cópialos o instálalos ahí, o usa una vista previa (`[preview]`) que los tome del repo principal |
+| La vista previa no responde                   | `docker logs idk-preview-<rama>`; se vuelve a levantar con el comando `start` del prompt |
+| macOS pide permiso del llavero en cada build  | Ya no debería: Taskflow lee el token con `/usr/bin/security`. Dale "Permitir siempre" una vez a `security` |
 | Quieres ver qué recibe la IA                 | `taskflow context preview <ID> --usage agent_prompt` o `taskflow agent --print`                           |

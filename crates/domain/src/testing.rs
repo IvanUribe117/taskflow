@@ -73,5 +73,6 @@ pub fn project(slug: &str, rules: Vec<MatchRule>) -> Project {
         priority_boost: 0,
         statuses: StatusSuggestions::default(),
         context_exclude: Vec::new(),
+        preview: None,
     }
 }

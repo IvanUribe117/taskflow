@@ -2,6 +2,7 @@
 //!
 //! Cada fase agrega los puertos que necesita.
 
+mod agent_conversations;
 mod clock;
 mod config_store;
 mod context_repository;
@@ -17,6 +18,7 @@ mod task_provider;
 mod time_tracker;
 mod worktrees;
 
+pub use agent_conversations::{AgentConversations, NoConversations};
 pub use clock::{Clock, SystemClock};
 pub use config_store::ConfigStore;
 pub use context_repository::ContextRepository;
@@ -37,7 +39,7 @@ pub use summarizer::{
 };
 pub use task_provider::{ProviderError, TaskProvider, TaskQuery};
 pub use time_tracker::{LocalTimeTracker, TimeEntry, TimeTracker};
-pub use worktrees::{Worktree, Worktrees};
+pub use worktrees::{SyncOutcome, Worktree, Worktrees};
 
 /// Reexportados para que los adaptadores usen la misma versión de `secrecy` que el puerto.
 pub use secrecy::{ExposeSecret, SecretString};

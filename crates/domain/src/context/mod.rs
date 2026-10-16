@@ -110,9 +110,13 @@ pub enum Usage {
     AgentPrompt,
     /// Pasos `ai` de los Playbooks.
     Playbook,
+    /// El mensaje de commit y la descripción del PR (`taskflow commit` y `taskflow pr`):
+    /// solo lo que sirve para escribirlos, no las instrucciones para el agente.
+    Commit,
 }
 
-/// `summary`, `plan`, `agent_prompt`, `playbook`: como se escriben en el *front matter*.
+/// `summary`, `plan`, `agent_prompt`, `playbook`, `commit`: como se escriben en el *front
+/// matter*.
 impl fmt::Display for Usage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -120,6 +124,7 @@ impl fmt::Display for Usage {
             Self::Plan => "plan",
             Self::AgentPrompt => "agent_prompt",
             Self::Playbook => "playbook",
+            Self::Commit => "commit",
         })
     }
 }
@@ -137,6 +142,7 @@ impl FromStr for Usage {
             "plan" => Ok(Self::Plan),
             "agent_prompt" => Ok(Self::AgentPrompt),
             "playbook" => Ok(Self::Playbook),
+            "commit" => Ok(Self::Commit),
             other => Err(DomainError::InvalidUsage(other.to_owned())),
         }
     }
@@ -306,6 +312,8 @@ mod tests {
             assert_eq!(usage.to_string().parse::<Usage>(), Ok(usage));
         }
         assert_eq!(Usage::AgentPrompt.to_string(), "agent_prompt");
+        assert_eq!("commit".parse::<Usage>().unwrap(), Usage::Commit);
+        assert_eq!(Usage::Commit.to_string(), "commit");
         assert_eq!(
             "agent-prompt".parse::<Usage>(),
             Err(DomainError::InvalidUsage("agent-prompt".into()))

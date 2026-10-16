@@ -140,7 +140,9 @@ impl<'a> PreparePullRequest<'a> {
         let context = BuildContext::new(self.ctx)
             .execute(ContextRequest {
                 project: session.project.clone(),
-                usage: Usage::AgentPrompt.into(),
+                // Solo las secciones para commits y PR: las instrucciones del agente
+                // (herramientas, revisión) no sirven para escribirlos.
+                usage: Usage::Commit.into(),
                 budget_chars: limits.budget_chars,
             })
             .await?;

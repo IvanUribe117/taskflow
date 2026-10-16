@@ -102,6 +102,7 @@ pub(crate) async fn finish(
         None
     };
     Ok(SessionOutcome {
+        notes: Vec::new(),
         session: view,
         warnings,
         archived_to,

@@ -37,9 +37,45 @@ fn backend(error: &keyring::Error) -> SecretError {
     SecretError::Backend(error.to_string())
 }
 
+/// macOS: leer con `/usr/bin/security` en vez de la API del llavero.
+///
+/// El permiso "Permitir siempre" del llavero queda atado a la **firma** del programa que
+/// pide el secreto. El binario de `cargo build` se firma "ad hoc" y su firma cambia en cada
+/// compilación, así que macOS vuelve a preguntar después de cada build. `security` es de
+/// Apple y su firma no cambia: el permiso que le das se mantiene.
+///
+/// `None` si no se pudo usar (no está, falló por otro motivo): se sigue con `keyring`.
+#[cfg(target_os = "macos")]
+fn read_with_security_cli(
+    service: &str,
+    account: &str,
+) -> Option<Result<Option<String>, SecretError>> {
+    /// `security` sale con 44 si el elemento no existe.
+    const NOT_FOUND: i32 = 44;
+    let output = std::process::Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-s", service, "-a", account, "-w"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    match output.status.code() {
+        Some(0) => {
+            let value = String::from_utf8(output.stdout).ok()?;
+            Some(Ok(Some(value.trim_end_matches('\n').to_owned())))
+        }
+        Some(NOT_FOUND) => Some(Ok(None)),
+        _ => None,
+    }
+}
+
 impl SecretStore for KeyringSecretStore {
     /// `keyring::Error::NoEntry` significa "no está guardado": es `Ok(None)`, no un error.
+    /// En macOS se lee primero con `security` ([`read_with_security_cli`]).
     fn get(&self, name: SecretName) -> Result<Option<SecretString>, SecretError> {
+        #[cfg(target_os = "macos")]
+        if let Some(read) = read_with_security_cli(&self.service, name.key()) {
+            return read.map(|value| value.map(SecretString::from));
+        }
         match self.entry(name)?.get_password() {
             Ok(value) => Ok(Some(SecretString::from(value))),
             Err(keyring::Error::NoEntry) => Ok(None),

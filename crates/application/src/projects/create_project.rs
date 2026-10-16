@@ -58,6 +58,7 @@ impl<'a> CreateProject<'a> {
             priority_boost: 0,
             statuses: StatusSuggestions::default(),
             context_exclude: Vec::new(),
+            preview: None,
         };
 
         self.ctx.projects.create(&project).await?;

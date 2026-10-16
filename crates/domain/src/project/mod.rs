@@ -1,7 +1,9 @@
 //! Proyectos (cliente o proyecto de trabajo) y su asociación con tareas (§9.2).
 
+mod preview;
 mod resolver;
 
+pub use preview::{Preview, PreviewVars, RenderedPreview};
 pub use resolver::{ProjectKey, ProjectResolver};
 
 use std::fmt;
@@ -139,6 +141,8 @@ pub struct Project {
     /// Secciones **globales** que no aplican a este proyecto (`[context] exclude`): por
     /// ejemplo, "aprendizaje de Rust" en un proyecto de Python.
     pub context_exclude: Vec<SectionKey>,
+    /// `[preview]`: cómo levantar la app de un worktree para probarla en el navegador.
+    pub preview: Option<Preview>,
 }
 
 /// Nombres de estado sugeridos por etapa, en orden de preferencia. Son **sugerencias**: cada

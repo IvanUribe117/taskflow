@@ -53,6 +53,7 @@ impl ConfigKey {
         "ui.group_by",
     ];
 
+    /// La clave con puntos, como se escribe en `config set`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         self.0

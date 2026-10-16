@@ -40,15 +40,21 @@ pub trait ProjectRepository: Send + Sync {
     async fn rename(&self, old: &ProjectSlug, new: &ProjectSlug) -> Result<(), RepoError>;
 }
 
+/// Error de un almacén local (proyectos, secciones, historial, sesiones, worktrees). Lleva
+/// la ruta o el nombre afectado como texto, para el mensaje.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum RepoError {
+    /// No existe lo que se pidió (un proyecto, una sesión, un archivo).
     #[error("not found: {0}")]
     NotFound(String),
+    /// Ya existe algo con ese nombre (al crear o renombrar).
     #[error("already exists: {0}")]
     AlreadyExists(String),
+    /// Existe pero su contenido no se puede leer (TOML o JSON mal formado, datos fuera de las reglas).
     #[error("invalid data: {0}")]
     Invalid(String),
+    /// Falló el disco u otro almacén (permisos, espacio, E/S).
     #[error("storage error: {0}")]
     Storage(String),
 }

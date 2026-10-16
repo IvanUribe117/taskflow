@@ -152,7 +152,7 @@ analizando → esperando aprobación → en progreso ⇄ pausada → cerrada
 
 | Opción     | Qué hace                                                                                  |
 | ----------- | ------------------------------------------------------------------------------------------ |
-| `--yes`   | Si hay un contador corriendo en otra tarea, lo detiene sin preguntar                       |
+| `--yes`   | No pregunta nada: detiene el contador de otra tarea, continúa la sesión anterior (si la hubo) y no ofrece la revisión del reporte |
 | `--fresh` | Si la tarea ya tuvo una sesión (te la devolvieron), empieza de cero en vez de continuarla |
 
 **Tareas devueltas.** Si la tarea ya se trabajó, `start` lo dice y ofrece continuar. Al continuar, el análisis sabe qué se hizo antes y se centra en los comentarios nuevos (qué faltó o qué hay que corregir). Al abrir el agente, Taskflow mide la conversación anterior:
@@ -236,9 +236,9 @@ Cancela la sesión y detiene el contador.
 | Opción              | Qué hace                                         |
 | -------------------- | ------------------------------------------------- |
 | `--restore-status` | Devuelve la tarea al estado que tenía al empezar |
+| `--yes`            | Sin confirmación                                 |
 
 Como `done`, al final ofrece quitar el worktree de la tarea si quedó limpio.
-| `--yes`            | Sin confirmación                                 |
 
 ### `taskflow session [show | status | retry]`
 

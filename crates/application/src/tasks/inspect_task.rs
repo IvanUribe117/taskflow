@@ -1,4 +1,5 @@
-//! UC-03 `InspectTask` (§6), todavía sin IA: en la fase 6 suma el resumen y el prompt.
+//! UC-03 `InspectTask` (§6): el detalle de una tarea, sin IA. El análisis de `show --ai`
+//! lo agrega [`SummarizeTask`](crate::ai::SummarizeTask).
 
 use domain::project::ProjectResolver;
 use domain::task::TaskId;
@@ -13,6 +14,7 @@ pub struct InspectTask<'a> {
 }
 
 impl<'a> InspectTask<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }

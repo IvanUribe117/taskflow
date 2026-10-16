@@ -12,6 +12,8 @@ use application::ports::{ProviderError, TimeEntry, TimeTracker};
 use async_trait::async_trait;
 use domain::task::TaskId;
 use serde::Deserialize;
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 
 use crate::ClickUpConfig;
@@ -39,9 +41,10 @@ struct ApiTimerTask {
     name: Option<String>,
 }
 
+/// El contador de tiempo de `ClickUp` (`impl TimeTracker`): `time_entries/start`, `stop` y `current`.
 #[derive(Debug)]
 pub struct ClickUpTimeTracker {
-    client: ClickUpClient,
+    client: Arc<ClickUpClient>,
     team_id: String,
 }
 
@@ -51,9 +54,14 @@ impl ClickUpTimeTracker {
     /// [`ProviderError::Network`] si no se puede inicializar el cliente HTTP.
     pub fn new(config: &ClickUpConfig) -> Result<Self, ProviderError> {
         Ok(Self {
-            client: ClickUpClient::new(config)?,
+            client: Arc::new(ClickUpClient::new(config)?),
             team_id: config.team_id.clone(),
         })
+    }
+
+    /// Con un cliente que ya existe (el del proveedor: ver `ClickUpProvider::time_tracker`).
+    pub(crate) fn with_client(client: Arc<ClickUpClient>, team_id: String) -> Self {
+        Self { client, team_id }
     }
 
     fn path(&self, action: &str) -> String {

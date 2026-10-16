@@ -21,11 +21,7 @@ const RECENT_COMMITS: usize = 10;
 /// La sesión activa y la carpeta donde se trabaja: su worktree o, sin él, el repo del
 /// proyecto (debe existir en disco).
 pub(super) async fn session_repo(ctx: &AppContext) -> Result<(WorkSession, PathBuf), AppError> {
-    let session = ctx
-        .sessions
-        .active()
-        .await?
-        .ok_or_else(|| AppError::InvalidInput("there is no active session".into()))?;
+    let session = super::active(ctx).await?;
     let repo = super::workdir::resolve(ctx, &session)
         .await
         .ok_or_else(|| {
@@ -43,6 +39,7 @@ pub struct PrepareCommit<'a> {
 }
 
 impl<'a> PrepareCommit<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -132,6 +129,7 @@ pub struct CommitChanges<'a> {
 }
 
 impl<'a> CommitChanges<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }

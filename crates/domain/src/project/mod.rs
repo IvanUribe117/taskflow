@@ -19,6 +19,7 @@ use crate::task::{LocationLevel, Task};
 pub struct ProjectSlug(String);
 
 impl ProjectSlug {
+    /// El slug tal cual (`idk`).
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -61,9 +62,12 @@ impl<'de> serde::Deserialize<'de> for ProjectSlug {
     }
 }
 
+/// Para quién es el proyecto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectKind {
+    /// De un cliente.
     Client,
+    /// Interno de la empresa.
     Internal,
 }
 
@@ -95,7 +99,14 @@ impl FromStr for ProjectKind {
 /// Regla que asocia tareas a un proyecto.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchRule {
-    Location { level: LocationLevel, id: String },
+    /// La tarea está en esta ubicación (o dentro de ella): un espacio, carpeta o lista.
+    Location {
+        /// El nivel de la ubicación.
+        level: LocationLevel,
+        /// Su id en el proveedor.
+        id: String,
+    },
+    /// La tarea tiene esta etiqueta.
     Tag(String),
 }
 
@@ -127,13 +138,20 @@ impl fmt::Display for MatchRule {
     }
 }
 
+/// Un proyecto: un cliente o un proyecto interno, con su repo, su contexto para la IA y las reglas que dicen qué tareas son suyas (`projects/<slug>/project.toml`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Project {
+    /// El identificador corto, que es también el nombre de su carpeta.
     pub slug: ProjectSlug,
+    /// El nombre visible.
     pub name: String,
+    /// De un cliente o interno.
     pub kind: ProjectKind,
+    /// Las reglas `[[match]]`: una tarea es del proyecto si cumple alguna.
     pub rules: Vec<MatchRule>,
+    /// El repositorio en disco, para el agente y para leer el código (`~` ya expandido).
     pub repo_path: Option<PathBuf>,
+    /// Puntos extra en la priorización para sus tareas.
     pub priority_boost: i64,
     /// Estados sugeridos propios del proyecto (FR-67). Una lista vacía usa la global
     /// (`provider.status_map`).
@@ -158,6 +176,7 @@ pub struct StatusSuggestions {
 }
 
 impl StatusSuggestions {
+    /// Si no hay estados propios para ninguna etapa: se usan los globales.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ready.is_empty() && self.in_progress.is_empty() && self.done.is_empty()

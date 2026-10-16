@@ -23,6 +23,7 @@ pub struct BuildContext<'a> {
 }
 
 impl<'a> BuildContext<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -38,15 +39,16 @@ impl<'a> BuildContext<'a> {
     ///
     /// # Errors
     ///
-    /// [`AppError::Repo`] si no se pueden leer las secciones.
+    /// [`AppError::Repo`] si no se pueden leer las secciones o el proyecto.
     pub async fn execute(&self, request: ContextRequest) -> Result<BuiltContext, AppError> {
         let mut global = self.ctx.context.global_sections().await?;
         let project = match &request.project {
             Some(slug) => {
-                // Las globales que el proyecto excluye (`[context] exclude`) no entran.
-                if let Ok(found) = self.ctx.projects.get(slug).await {
-                    global.retain(|s| !found.context_exclude.contains(&s.key));
-                }
+                // Las globales que el proyecto excluye (`[context] exclude`) no entran. Si
+                // no se puede leer el proyecto, es un error: seguir sin la exclusión
+                // enviaría a la IA secciones que pediste no enviar.
+                let found = self.ctx.projects.get(slug).await?;
+                global.retain(|s| !found.context_exclude.contains(&s.key));
                 self.ctx.context.project_sections(slug).await?
             }
             None => Vec::new(),
@@ -73,7 +75,7 @@ mod tests {
     use std::sync::Arc;
 
     use domain::context::{ContextSection, SectionRole};
-    use domain::testing::user;
+    use domain::testing::{project, user};
     use enumset::{EnumSet, enum_set};
 
     use super::*;
@@ -94,7 +96,7 @@ mod tests {
     fn ctx(repo: FakeContextRepository) -> AppContext {
         let (mut ctx, _) = context(
             FakeTaskProvider::new(user("me")),
-            vec![],
+            vec![project("acme", vec![])],
             FixedClock::at("2026-10-10T15:00:00Z"),
         );
         ctx.context = Arc::new(repo);
@@ -206,5 +208,31 @@ mod tests {
 
         assert_eq!(keys(&built.knowledge), ["negocio"]);
         assert_eq!(built.omitted, ["codigo"]);
+    }
+
+    #[tokio::test]
+    async fn the_project_excludes_global_sections_and_an_unknown_project_is_an_error() {
+        let repo = FakeContextRepository::default().with_global(vec![
+            section("aprendizaje", SectionRole::Instruction, 50, "traits"),
+            section("estilo", SectionRole::Instruction, 10, "breve"),
+        ]);
+        let mut ctx = ctx(repo);
+        let mut acme = project("acme", vec![]);
+        acme.context_exclude = vec!["aprendizaje".parse().unwrap()];
+        ctx.projects = Arc::new(crate::testing::FakeProjectRepository::new(vec![acme]));
+
+        let built = BuildContext::new(&ctx)
+            .execute(request(Some("acme"), Usage::Summary, 1000))
+            .await
+            .unwrap();
+        let unknown = BuildContext::new(&ctx)
+            .execute(request(Some("otro"), Usage::Summary, 1000))
+            .await;
+
+        assert_eq!(keys(&built.instructions), ["estilo"]);
+        assert!(
+            unknown.is_err(),
+            "no silent fallback without the exclusions"
+        );
     }
 }

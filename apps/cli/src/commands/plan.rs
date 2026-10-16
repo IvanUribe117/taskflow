@@ -16,7 +16,7 @@ use crate::{markdown, presenter, record};
 ///
 /// Los de `PlanMyDay` o no poder escribir el historial. Si solo falla la IA, se muestran
 /// las tareas y el aviso.
-pub async fn run(
+pub(crate) async fn run(
     ctx: &AppContext,
     settings: &AppSettings,
     max: Option<usize>,

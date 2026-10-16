@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use domain::session::{
     CommentKind, Effect, NoticeKind, SessionCommand, Stage, StatusTarget, WorkSession,
 };
-use domain::task::find_status;
+use domain::task::{find_status, unknown_status};
 
 use crate::ai::SummarizeTask;
 use crate::dto::{SessionOutcome, SessionView};
@@ -14,7 +14,6 @@ use crate::ports::{Notice, PreviousWork};
 use crate::session::{
     SessionPrefs, Suggestion, duration_label, effect_label, report, suggested_statuses,
 };
-use crate::tasks::unknown_status;
 use crate::{AppContext, AppError};
 
 /// Cómo terminó un efecto que no falló.
@@ -77,7 +76,7 @@ pub(crate) async fn run(
                 // `pending` ya tiene este efecto y los que siguen.
                 ctx.sessions.save(&session).await?;
                 return Err(AppError::EffectFailed {
-                    effect: effect_label(&effect),
+                    effect: super::effect_name(&effect).to_owned(),
                     reason,
                 });
             }
@@ -103,6 +102,7 @@ pub(crate) async fn finish(
     };
     Ok(SessionOutcome {
         notes: Vec::new(),
+        removable_worktree: None,
         session: view,
         warnings,
         archived_to,
@@ -115,6 +115,7 @@ pub(crate) fn view(ctx: &AppContext, session: &WorkSession) -> SessionView {
         ctx.clock.now(),
         ctx.sessions.report_path(&session.task_id),
         ctx.sessions.agent_prompt_path(&session.task_id),
+        ctx.sessions.work_report_path(&session.task_id),
     )
 }
 

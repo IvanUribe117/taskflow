@@ -8,7 +8,7 @@ use domain::session::WorkSession;
 use domain::task::TaskId;
 
 use crate::atomic;
-use crate::history::safe_name;
+use crate::paths::safe_name;
 
 const ACTIVE: &str = "active.json";
 const REPORT: &str = "report.md";
@@ -31,6 +31,7 @@ pub struct FsSessionStore {
 }
 
 impl FsSessionStore {
+    /// Con la carpeta de las sesiones.
     #[must_use]
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }

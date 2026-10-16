@@ -5,6 +5,7 @@ use thiserror::Error;
 /// mal escrito, y cada uno sabe cómo se llama en cada almacén (§13.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SecretName {
+    /// El token personal de la API de `ClickUp` (`pk_...`).
     ClickUpToken,
 }
 
@@ -48,11 +49,14 @@ pub trait SecretStore: Send + Sync {
     fn set(&self, name: SecretName, value: SecretString) -> Result<(), SecretError>;
 }
 
+/// Error al leer o guardar un secreto.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SecretError {
+    /// El almacén no acepta escritura; lleva su nombre (`environment`).
     #[error("{0} is read-only")]
     ReadOnly(&'static str),
+    /// Falló el almacén (llavero bloqueado, sin permisos...); lleva el detalle.
     #[error("secret store error: {0}")]
     Backend(String),
 }

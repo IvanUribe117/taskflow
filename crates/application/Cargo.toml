@@ -15,16 +15,18 @@ futures.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-uuid.workspace = true
+# Solo para los fakes de `testing` (ids de conversación).
+uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
+uuid.workspace = true
 domain = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [features]
 # Expone `application::testing` (fakes de los puertos) para los tests de otros crates.
-test-support = ["domain/test-support"]
+test-support = ["domain/test-support", "dep:uuid"]
 
 [lints]
 workspace = true

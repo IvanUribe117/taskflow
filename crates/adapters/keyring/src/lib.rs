@@ -4,6 +4,7 @@
 //! - `KeyringSecretStore`: el llavero del sistema operativo.
 //! - `LayeredSecretStore`: varios almacenes en orden de precedencia (patrón Composite).
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
 
 mod env;
 mod keychain;

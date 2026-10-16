@@ -14,23 +14,27 @@ use domain::task::{Comment, LocationNode, LocationSegment, StatusOption, Task, T
 
 use crate::AppContext;
 use crate::ports::{
-    AgentConversations, AiError, ChangedFile, Clock, CommitInput, CommitMessage, Complexity,
-    ContextRepository, ExposeSecret, HistoryEntry, HistoryFilter, HistoryRecord, HistoryRepository,
-    Notice, Notifier, NotifyError, PlanInput, PrInput, ProjectRepository, ProviderError,
-    PullRequest, PullRequestDraft, PullRequests, RepoChanges, RepoCommitter, RepoError,
-    RepoInspector, SecretError, SecretName, SecretStore, SecretString, SessionStore, Summarizer,
-    SummaryInput, SyncOutcome, TaskProvider, TaskQuery, TaskSummary, TimeEntry, TimeTracker,
-    WorkInput, WorkSummary, Worktree, Worktrees, markdown_title,
+    AgentConversations, AgentLaunch, AiError, ChangedFile, Clock, CommitInput, CommitMessage,
+    Complexity, ContextRepository, ExposeSecret, Folders, HistoryEntry, HistoryFilter,
+    HistoryRecord, HistoryRepository, Notice, Notifier, NotifyError, PlanInput, PrInput,
+    ProjectRepository, ProviderError, PullRequest, PullRequestDraft, PullRequests, RepoChanges,
+    RepoCommitter, RepoError, RepoInspector, SecretError, SecretName, SecretStore, SecretString,
+    SessionStore, Shell, Summarizer, SummaryInput, SyncOutcome, TaskProvider, TaskQuery,
+    TaskSummary, TimeEntry, TimeTracker, WorkInput, WorkSummary, Worktree, Worktrees,
+    markdown_title,
 };
 
 /// Reloj que siempre devuelve la misma hora, en Bogotá (UTC-5).
 #[derive(Debug, Clone, Copy)]
 pub struct FixedClock {
+    /// La hora fija.
     pub now: DateTime<Utc>,
+    /// La zona horaria del usuario.
     pub offset: FixedOffset,
 }
 
 impl FixedClock {
+    /// A la hora RFC 3339 dada, en UTC.
     pub fn at(rfc3339: &str) -> Self {
         Self {
             now: domain::testing::at(rfc3339),
@@ -67,6 +71,7 @@ pub struct FakeTaskProvider {
 }
 
 impl FakeTaskProvider {
+    /// Un proveedor sin tareas, donde el usuario actual es `me`.
     pub fn new(me: UserId) -> Self {
         Self {
             me,
@@ -81,12 +86,14 @@ impl FakeTaskProvider {
         }
     }
 
+    /// Con estas tareas.
     #[must_use]
     pub fn with_tasks(mut self, tasks: Vec<Task>) -> Self {
         self.tasks = tasks;
         self
     }
 
+    /// Con estos comentarios en la tarea `task_id`.
     #[must_use]
     pub fn with_comments(mut self, task_id: &str, comments: Vec<Comment>) -> Self {
         let id = TaskId::new(task_id).expect("valid task id in test");
@@ -94,6 +101,7 @@ impl FakeTaskProvider {
         self
     }
 
+    /// Con este árbol de ubicaciones (para el asistente de proyectos).
     #[must_use]
     pub fn with_locations(mut self, locations: Vec<LocationNode>) -> Self {
         self.locations = locations;
@@ -234,7 +242,9 @@ impl TaskProvider for FakeTaskProvider {
 /// Una escritura registrada por `FakeTaskProvider`: `(id de la tarea, valor)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Write {
+    /// Un cambio de estado: tarea y nombre del estado.
     Status(String, String),
+    /// Un comentario: tarea y texto.
     Comment(String, String),
 }
 
@@ -245,6 +255,7 @@ pub struct FakeProjectRepository {
 }
 
 impl FakeProjectRepository {
+    /// Con estos proyectos.
     pub fn new(projects: Vec<Project>) -> Self {
         Self {
             projects: Mutex::new(projects),
@@ -330,6 +341,8 @@ pub fn context(
         prs: Arc::new(FakePullRequests::default()),
         worktrees: Arc::new(FakeWorktrees::default()),
         conversations: Arc::new(FakeConversations::default()),
+        folders: Arc::new(RealFolders),
+        shell: Arc::new(FakeShell::default()),
         policy: Arc::new(WeightedPolicy::default()),
         clock: Arc::new(clock),
     };
@@ -343,6 +356,7 @@ pub struct MemorySecretStore {
 }
 
 impl MemorySecretStore {
+    /// Con este secreto guardado.
     #[must_use]
     pub fn with(self, name: SecretName, value: &str) -> Self {
         self.values
@@ -380,12 +394,14 @@ pub struct FakeContextRepository {
 }
 
 impl FakeContextRepository {
+    /// Con estas secciones globales.
     #[must_use]
     pub fn with_global(mut self, sections: Vec<ContextSection>) -> Self {
         self.global = sections;
         self
     }
 
+    /// Con estas secciones del proyecto `slug`.
     #[must_use]
     pub fn with_project(mut self, slug: &str, sections: Vec<ContextSection>) -> Self {
         let slug = slug.parse().expect("valid slug in test");
@@ -424,6 +440,16 @@ impl ContextRepository for FakeContextRepository {
         Err(RepoError::NotFound(
             self.section_file(project, key).0.display().to_string(),
         ))
+    }
+
+    /// No guarda nada: devuelve la ruta donde iría.
+    async fn create_section(
+        &self,
+        project: Option<&ProjectSlug>,
+        key: &SectionKey,
+        _text: &str,
+    ) -> Result<std::path::PathBuf, RepoError> {
+        Ok(self.section_file(project, key).0)
     }
 }
 
@@ -533,10 +559,12 @@ impl FakeTimeTracker {
         }
     }
 
+    /// Las llamadas recibidas, en orden (`start 86b1`, `stop`...).
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().expect("lock").clone()
     }
 
+    /// El contador que corre ahora, si hay.
     pub fn running(&self) -> Option<TimeEntry> {
         self.running.lock().expect("lock").clone()
     }
@@ -588,6 +616,7 @@ pub struct FakeNotifier {
 }
 
 impl FakeNotifier {
+    /// Uno que siempre falla al avisar.
     pub fn failing() -> Self {
         Self {
             failing: true,
@@ -595,6 +624,7 @@ impl FakeNotifier {
         }
     }
 
+    /// Los avisos enviados, en orden.
     pub fn sent(&self) -> Vec<Notice> {
         self.sent.lock().expect("lock").clone()
     }
@@ -622,6 +652,7 @@ pub struct FakeSessionStore {
 }
 
 impl FakeSessionStore {
+    /// Con esta sesión activa.
     pub fn with_active(session: WorkSession) -> Self {
         Self {
             active: Mutex::new(Some(session)),
@@ -629,19 +660,23 @@ impl FakeSessionStore {
         }
     }
 
+    /// La sesión activa, si hay.
     pub fn current(&self) -> Option<WorkSession> {
         self.active.lock().expect("lock").clone()
     }
 
+    /// Las sesiones archivadas, en orden.
     pub fn archived(&self) -> Vec<WorkSession> {
         self.archived.lock().expect("lock").clone()
     }
 
+    /// El `report.md` de la tarea, si hay.
     pub fn report(&self, task: &str) -> Option<String> {
         let id = TaskId::new(task).expect("valid id");
         self.reports.lock().expect("lock").get(&id).cloned()
     }
 
+    /// El `work-report.md` de la tarea, si hay.
     pub fn work_report(&self, task: &str) -> Option<String> {
         let id = TaskId::new(task).expect("valid id");
         self.work_reports.lock().expect("lock").get(&id).cloned()
@@ -902,13 +937,69 @@ impl Summarizer for FakeSummarizer {
     }
 }
 
+/// Comandos en memoria: guarda los que se corrieron y responde `ok`.
+#[derive(Debug)]
+pub struct FakeShell {
+    /// Lo que responde cada comando.
+    pub ok: bool,
+    ran: Mutex<Vec<String>>,
+}
+
+impl Default for FakeShell {
+    fn default() -> Self {
+        Self {
+            ok: true,
+            ran: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl FakeShell {
+    /// Los comandos que se corrieron, en orden.
+    pub fn ran(&self) -> Vec<String> {
+        self.ran.lock().expect("lock").clone()
+    }
+}
+
+#[async_trait]
+impl Shell for FakeShell {
+    async fn run(&self, command: &str) -> bool {
+        self.ran.lock().expect("lock").push(command.to_owned());
+        self.ok
+    }
+}
+
+/// Las carpetas del disco de verdad: los tests de la sesión usan carpetas temporales
+/// reales para el repo y los worktrees, y comparan rutas con enlaces (`/var` →
+/// `/private/var` en macOS). Igual que `FsFolders`, que vive en `adapter-fs`.
+#[derive(Debug, Default)]
+pub struct RealFolders;
+
+impl Folders for RealFolders {
+    fn exists(&self, path: &std::path::Path) -> bool {
+        path.is_dir()
+    }
+
+    fn same(&self, a: &std::path::Path, b: &std::path::Path) -> bool {
+        let real = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        real(a) == real(b)
+    }
+
+    fn is_inside(&self, path: &std::path::Path, dir: &std::path::Path) -> bool {
+        let real = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        path.starts_with(dir) || real(path).starts_with(real(dir))
+    }
+}
+
 /// Conversaciones del agente en memoria: id → tokens de contexto.
 #[derive(Debug, Default)]
 pub struct FakeConversations {
+    /// Los tokens de contexto de cada conversación, por id.
     pub tokens: HashMap<String, u64>,
 }
 
 impl FakeConversations {
+    /// Con una conversación de `tokens` tokens.
     pub fn with(id: &str, tokens: u64) -> Self {
         Self {
             tokens: HashMap::from([(id.to_owned(), tokens)]),
@@ -921,6 +1012,23 @@ impl AgentConversations for FakeConversations {
     async fn context_tokens(&self, id: &str) -> Option<u64> {
         self.tokens.get(id).copied()
     }
+
+    /// Un UUID real: los tests comparan el id devuelto, no un valor fijo.
+    fn new_id(&self) -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+
+    /// `new <id>` o `resume <id> [mensaje]`: legible en los tests.
+    fn launch_args(&self, launch: &AgentLaunch) -> Vec<String> {
+        match launch {
+            AgentLaunch::New { id, first } => vec!["new".into(), id.clone(), first.clone()],
+            AgentLaunch::Resume { id, message } => {
+                let mut args = vec!["resume".to_owned(), id.clone()];
+                args.extend(message.clone());
+                args
+            }
+        }
+    }
 }
 
 /// Worktrees en memoria. `add` crea la carpeta (para que exista en disco) y la agrega a
@@ -928,6 +1036,7 @@ impl AgentConversations for FakeConversations {
 #[derive(Debug, Default)]
 pub struct FakeWorktrees {
     list: Mutex<Vec<Worktree>>,
+    /// `add` falla, como git con la carpeta ocupada.
     pub failing_add: bool,
     added: Mutex<Vec<(std::path::PathBuf, String)>>,
     removed: Mutex<Vec<std::path::PathBuf>>,
@@ -977,6 +1086,7 @@ impl FakeWorktrees {
         self.added.lock().expect("lock").clone()
     }
 
+    /// Los worktrees quitados, en orden.
     pub fn removed(&self) -> Vec<std::path::PathBuf> {
         self.removed.lock().expect("lock").clone()
     }
@@ -1028,19 +1138,23 @@ impl Worktrees for FakeWorktrees {
 /// Cambios de git en memoria.
 #[derive(Debug, Default)]
 pub struct FakeRepoInspector {
+    /// Los cambios que devuelve `changes`; `None`, como fuera de un repo.
     pub changes: Option<RepoChanges>,
 }
 
 /// Un repo en memoria para `taskflow commit`: archivos con cambios y los commits hechos.
 #[derive(Debug, Default)]
 pub struct FakeRepoCommitter {
+    /// Los archivos con cambios sin commit.
     pub files: Vec<ChangedFile>,
+    /// `commit` y `push` fallan (un hook, un push rechazado).
     pub failing: bool,
     commits: Mutex<Vec<(Vec<String>, String)>>,
     pushes: Mutex<usize>,
 }
 
 impl FakeRepoCommitter {
+    /// Un repo con estos archivos cambiados: `(estado de git, ruta)`, como `(" M", "a.py")`.
     pub fn with_files(files: &[(&str, &str)]) -> Self {
         Self {
             files: files
@@ -1116,9 +1230,11 @@ impl RepoCommitter for FakeRepoCommitter {
 /// PRs en memoria: el que ya existe (si hay) y los que se abren.
 #[derive(Debug, Default)]
 pub struct FakePullRequests {
+    /// El PR que ya tiene la rama, si hay.
     pub existing: Option<PullRequest>,
     /// `find` falla, como `gh` sin sesión.
     pub failing_find: bool,
+    /// La plantilla de PR del repo, si hay.
     pub template: Option<String>,
     created: Mutex<Vec<PullRequestDraft>>,
 }

@@ -118,7 +118,8 @@ pub enum Command {
         /// Sin ID, eliges de tu lista priorizada.
         #[arg(value_parser = parse_task_id)]
         task_id: Option<TaskId>,
-        /// Si hay un contador corriendo en otra tarea, detenerlo sin preguntar.
+        /// No preguntar nada: detiene el contador de otra tarea, continúa la sesión anterior
+        /// (si la hubo) y no ofrece revisar el reporte.
         #[arg(long)]
         yes: bool,
         /// Si la tarea ya tuvo una sesión, no continuarla: empezar de cero.
@@ -161,14 +162,16 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
-    /// Abre el agente de código en el repo del proyecto con el prompt de la sesión aprobada.
+    /// Abre el agente de código en la carpeta de la tarea (su worktree o, sin él, el repo
+    /// del proyecto) con el prompt de la sesión aprobada.
     Agent {
         /// Solo imprime el prompt completo, sin abrir nada.
         #[arg(long)]
         print: bool,
     },
-    /// Commit de los cambios del repo del proyecto: la IA propone el mensaje, tú eliges los
-    /// archivos y confirmas; el commit lo hace Taskflow.
+    /// Commit de los cambios en la carpeta de la tarea (su worktree o el repo del proyecto):
+    /// la IA propone el mensaje, tú eliges los archivos y confirmas; el commit lo hace
+    /// Taskflow.
     Commit {
         /// Sin preguntar: los archivos que git ya conoce y el mensaje propuesto.
         #[arg(long)]
@@ -189,7 +192,7 @@ pub enum Command {
         #[command(subcommand)]
         command: Option<SessionSubcommand>,
     },
-    /// El reporte de la sesión: ver o publicar como comentario.
+    /// El reporte de la sesión: ver, editar o publicar como comentario.
     #[command(subcommand)]
     Report(ReportSubcommand),
     /// Ver y cambiar la configuración.
@@ -373,7 +376,7 @@ pub enum ConfigCommand {
 /// # Errors
 ///
 /// [`DomainError::InvalidSectionKey`] si no son minúsculas, dígitos y guiones.
-pub fn parse_section_key(raw: &str) -> Result<SectionKey, DomainError> {
+pub(crate) fn parse_section_key(raw: &str) -> Result<SectionKey, DomainError> {
     raw.parse()
 }
 
@@ -382,7 +385,7 @@ pub fn parse_section_key(raw: &str) -> Result<SectionKey, DomainError> {
 /// # Errors
 ///
 /// [`DomainError::EmptyTaskId`] si está vacío o solo tiene espacios.
-pub fn parse_task_id(raw: &str) -> Result<TaskId, DomainError> {
+pub(crate) fn parse_task_id(raw: &str) -> Result<TaskId, DomainError> {
     TaskId::new(raw)
 }
 
@@ -746,5 +749,104 @@ mod tests {
         let cli = parse(&["today", "--config", "/tmp/taskflow.toml"]).unwrap();
 
         assert_eq!(cli.config, Some(PathBuf::from("/tmp/taskflow.toml")));
+    }
+
+    #[test]
+    fn done_with_every_flag() {
+        let cli = parse(&["done", "--status", "QA", "--comment", "Listo", "--yes"]).unwrap();
+
+        let Command::Done {
+            status,
+            comment,
+            yes,
+        } = cli.command
+        else {
+            panic!("expected done");
+        };
+        assert_eq!(status.as_deref(), Some("QA"));
+        assert_eq!(comment.as_deref(), Some("Listo"));
+        assert!(yes);
+    }
+
+    #[test]
+    fn report_show_and_publish_flags() {
+        assert!(matches!(
+            parse(&["report", "show"]).unwrap().command,
+            Command::Report(ReportSubcommand::Show { work: false })
+        ));
+        assert!(matches!(
+            parse(&["report", "show", "--work"]).unwrap().command,
+            Command::Report(ReportSubcommand::Show { work: true })
+        ));
+        assert!(matches!(
+            parse(&["report", "publish", "--yes", "--regenerate", "--dry-run"])
+                .unwrap()
+                .command,
+            Command::Report(ReportSubcommand::Publish {
+                yes: true,
+                regenerate: true,
+                dry_run: true
+            })
+        ));
+    }
+
+    #[test]
+    fn session_show_json_and_retry() {
+        assert!(matches!(
+            parse(&["session", "show", "--json"]).unwrap().command,
+            Command::Session {
+                command: Some(SessionSubcommand::Show { json: true })
+            }
+        ));
+        assert!(matches!(
+            parse(&["session", "retry"]).unwrap().command,
+            Command::Session {
+                command: Some(SessionSubcommand::Retry)
+            }
+        ));
+    }
+
+    #[test]
+    fn pause_resume_and_fresh_start() {
+        assert!(matches!(parse(&["pause"]).unwrap().command, Command::Pause));
+        assert!(matches!(
+            parse(&["resume"]).unwrap().command,
+            Command::Resume
+        ));
+        assert!(matches!(
+            parse(&["start", "--fresh"]).unwrap().command,
+            Command::Start {
+                task_id: None,
+                yes: false,
+                fresh: true
+            }
+        ));
+    }
+
+    #[test]
+    fn context_include_with_project() {
+        let cli = parse(&["context", "include", "negocio", "--project", "acme"]).unwrap();
+
+        let Command::Context(ContextCommand::Include { key, project }) = cli.command else {
+            panic!("expected context include");
+        };
+        assert_eq!(key.to_string(), "negocio");
+        assert_eq!(project.to_string(), "acme");
+        assert!(
+            parse(&["context", "include", "negocio"]).is_err(),
+            "--project is required"
+        );
+    }
+
+    #[test]
+    fn config_check_and_path() {
+        assert!(matches!(
+            parse(&["config", "check"]).unwrap().command,
+            Command::Config(ConfigCommand::Check)
+        ));
+        assert!(matches!(
+            parse(&["config", "path"]).unwrap().command,
+            Command::Config(ConfigCommand::Path)
+        ));
     }
 }

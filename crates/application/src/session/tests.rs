@@ -438,7 +438,7 @@ async fn a_critical_failure_leaves_the_rest_pending_and_retry_continues() {
     assert!(
         error
             .to_string()
-            .starts_with("could not iniciar el contador: network error"),
+            .starts_with("could not start the timer: network error"),
         "{error}"
     );
     assert_eq!(stuck.pending.len(), 2, "{:?}", stuck.pending);
@@ -536,7 +536,7 @@ async fn show_notices_a_timer_stopped_outside_and_resume_restarts_it() {
 #[tokio::test]
 async fn a_local_timer_is_never_out_of_sync() {
     let mut w = started().await;
-    w.ctx.time = Arc::new(crate::ports::LocalTimeTracker);
+    w.ctx.time = Arc::new(crate::ports::LocalTimeTracker::new(w.ctx.clock.clone()));
 
     let view = ShowSession::new(&w.ctx).execute().await.unwrap().unwrap();
 
@@ -1062,7 +1062,7 @@ async fn a_branch_with_a_pr_only_needs_the_push() {
         .execute(prefs().limits)
         .await
         .unwrap();
-    let (pr, created) = PublishPullRequest::new(&ctx)
+    let OpenedPr { pr, created } = PublishPullRequest::new(&ctx)
         .open("CU-86b1 - x", "body", false)
         .await
         .unwrap();
@@ -1084,7 +1084,7 @@ async fn opening_a_pr_pushes_first_and_targets_the_base() {
     )
     .await;
 
-    let (pr, created) = PublishPullRequest::new(&ctx)
+    let OpenedPr { pr, created } = PublishPullRequest::new(&ctx)
         .open(" CU-86b1 - x ", "Body", true)
         .await
         .unwrap();
@@ -1303,7 +1303,7 @@ async fn without_worktrees_everything_stays_in_the_project_repo() {
     assert_eq!(brief.repo_path.as_deref(), Some(repo.as_path()));
     assert!(!brief.prompt.contains("git worktree"), "{}", brief.prompt);
     assert_eq!(
-        SessionWorkDir::new(&ctx).removable().await.unwrap(),
+        workdir::removable(&ctx, &active(&ctx).await.unwrap()).await,
         None,
         "the main repo is never removed"
     );
@@ -1395,7 +1395,9 @@ async fn only_a_clean_worktree_is_offered_for_removal() {
     .await;
     let path = default_worktree(&repo);
 
-    let removable = SessionWorkDir::new(&clean).removable().await.unwrap();
+    let removable = workdir::removable(&clean, &active(&clean).await.unwrap())
+        .await
+        .map(|r| r.path);
     SessionWorkDir::new(&clean)
         .remove(&repo, &path)
         .await
@@ -1403,7 +1405,10 @@ async fn only_a_clean_worktree_is_offered_for_removal() {
 
     assert_eq!(removable.as_deref(), Some(path.as_path()));
     assert_eq!(worktrees.removed(), std::slice::from_ref(&path));
-    assert_eq!(SessionWorkDir::new(&dirty).removable().await.unwrap(), None);
+    assert_eq!(
+        workdir::removable(&dirty, &active(&dirty).await.unwrap()).await,
+        None
+    );
     for dir in [path.parent().unwrap().to_path_buf(), repo] {
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1653,4 +1658,78 @@ async fn a_conflict_with_the_base_is_a_warning_and_nothing_changes() {
     assert!(worktrees.added().is_empty());
     let _ = std::fs::remove_dir_all(other);
     let _ = std::fs::remove_dir_all(repo);
+}
+
+#[tokio::test]
+async fn ending_the_session_stops_the_preview_and_offers_the_clean_worktree() {
+    use domain::project::Preview;
+
+    let (mut ctx, _, repo, _) = with_worktrees(
+        |repo| crate::testing::FakeWorktrees::with(repo, &[]),
+        crate::testing::FakeRepoCommitter::default(),
+        &prefs(),
+    )
+    .await;
+    let mut idk = ctx.projects.list().await.unwrap().remove(0);
+    idk.preview = Some(Preview {
+        start: "up".into(),
+        stop: Some("docker rm -f idk-preview-{name}".into()),
+        url: "http://localhost:{port}".into(),
+        port: 8100,
+    });
+    ctx.projects = Arc::new(crate::testing::FakeProjectRepository::new(vec![idk]));
+    let shell = Arc::new(crate::testing::FakeShell::default());
+    ctx.shell = shell.clone();
+
+    let outcome = HandleSession::new(&ctx)
+        .execute(
+            SessionCommand::Abort {
+                restore_status: false,
+            },
+            &prefs(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(shell.ran(), ["docker rm -f idk-preview-cu-86b1"]);
+    assert!(outcome.notes.iter().any(|n| n.contains("vista previa")));
+    let removable = outcome.removable_worktree.unwrap();
+    assert_eq!(removable.path, default_worktree(&repo));
+    assert_eq!(removable.repo, repo);
+    let _ = std::fs::remove_dir_all(default_worktree(&repo).parent().unwrap());
+    let _ = std::fs::remove_dir_all(repo);
+}
+
+#[tokio::test]
+async fn the_agent_opening_resumes_or_starts_and_carries_the_review() {
+    let w = approved().await;
+    let agent = PrepareAgent::new(&w.ctx);
+
+    let resume = agent.opening("P", Some("c1"), true, None).await.unwrap();
+    let returned = agent.opening("P", Some("c1"), false, None).await.unwrap();
+    let review = agent
+        .opening("P", Some("c1"), true, Some("R".into()))
+        .await
+        .unwrap();
+    let new = agent.opening("P", None, false, None).await.unwrap();
+    let new_review = agent
+        .opening("P", None, false, Some("R".into()))
+        .await
+        .unwrap();
+
+    assert_eq!(resume.args, ["resume", "c1"]);
+    assert!(resume.resumes);
+    assert_eq!(returned.args, ["resume", "c1", "P"]);
+    assert_eq!(returned.kind, OpeningKind::ResumeWithNewPrompt);
+    assert_eq!(review.args, ["resume", "c1", "R"]);
+    assert_eq!(new.args[0], "new");
+    assert_eq!(new.args[2], "P");
+    assert!(!new.resumes);
+    assert_eq!(new_review.args[2], "P\n\n---\n\nR");
+    let saved = w.sessions.current().unwrap().agent_session;
+    assert_eq!(
+        saved.as_deref(),
+        Some(new_review.args[1].as_str()),
+        "saved in the session"
+    );
 }

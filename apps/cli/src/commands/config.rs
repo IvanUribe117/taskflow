@@ -5,18 +5,21 @@ use crate::args::ConfigCommand;
 
 /// `config show | get | set | check`. (`init` y `path` se atienden antes, en `commands::run`.)
 ///
-/// - `show`: por cada clave de `ConfigKey::KNOWN`, una línea `clave = valor`, o
-///   `clave = (por defecto)` si no está en el archivo. Al final, por cada `SecretName::ALL`,
-///   `clickup_token: guardado` o `clickup_token: falta` (**nunca** el valor).
+/// - `show`: una línea `clave = valor` por cada clave de `ConfigKey::KNOWN`, o
+///   `clave = (por defecto)` si no está en el archivo. Al final, el estado de cada secreto
+///   (`clickup_token: guardado` o `falta`), **nunca** su valor: la salida se puede pegar
+///   en un chat sin filtrar el token.
 /// - `get`: el valor, o `(no definido: se usa el valor por defecto)`.
-/// - `set`: aplicar `SettingsChange::Set` e imprimir `✔ clave = valor`.
-/// - `check`: cargar, `bootstrap::build`, pedir `current_user()` al proveedor e imprimir
+/// - `set`: aplica `SettingsChange::Set`, que conserva los comentarios del archivo, y
+///   confirma con `✔ clave = valor`.
+/// - `check`: carga la configuración, arma el `AppContext` (`bootstrap::build`) y le pide
+///   al proveedor el usuario actual. Si todo responde, la configuración y el token sirven:
 ///   `✔ Configuración válida · conectado como usuario <id>`.
 ///
 /// # Errors
 ///
 /// Configuración inválida, secreto faltante o fallo del proveedor (en `check`).
-pub async fn run(
+pub(crate) async fn run(
     command: ConfigCommand,
     store: &impl ConfigStore,
     secrets: &impl SecretStore,
@@ -53,7 +56,9 @@ pub async fn run(
         ConfigCommand::Check => {
             let settings = store.load()?;
             let ctx = bootstrap::build(&settings, secrets, store.path())?;
-            let me = ctx.tasks.current_user().await?;
+            let me = application::tasks::CheckConnection::new(&ctx)
+                .execute()
+                .await?;
             println!(
                 "✔ Configuración válida · conectado como usuario {}",
                 me.as_str()

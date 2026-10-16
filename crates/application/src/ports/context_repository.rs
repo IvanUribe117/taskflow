@@ -32,4 +32,17 @@ pub trait ContextRepository: Send + Sync {
         project: Option<&ProjectSlug>,
         key: &SectionKey,
     ) -> Result<PathBuf, RepoError>;
+
+    /// Crea el archivo de una sección nueva con `text` (creando la carpeta si falta) y
+    /// devuelve su ruta.
+    ///
+    /// # Errors
+    ///
+    /// [`RepoError::AlreadyExists`] si ya existe; `Storage` si no se puede escribir.
+    async fn create_section(
+        &self,
+        project: Option<&ProjectSlug>,
+        key: &SectionKey,
+        text: &str,
+    ) -> Result<PathBuf, RepoError>;
 }

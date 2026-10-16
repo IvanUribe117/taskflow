@@ -9,6 +9,7 @@ mod commands;
 mod markdown;
 mod presenter;
 mod record;
+mod term;
 mod wizard;
 
 use clap::Parser;

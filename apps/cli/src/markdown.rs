@@ -7,13 +7,13 @@ use dialoguer::console::{Style, colors_enabled};
 
 /// `markdown` listo para imprimir. Los colores siguen a la terminal (`colors_enabled`).
 #[must_use]
-pub fn render(markdown: &str) -> String {
+pub(crate) fn render(markdown: &str) -> String {
     render_with(markdown, colors_enabled())
 }
 
 /// Igual, eligiendo si hay colores. Función pura: así se prueba.
 #[must_use]
-pub fn render_with(markdown: &str, colors: bool) -> String {
+pub(crate) fn render_with(markdown: &str, colors: bool) -> String {
     let paint = |text: &str, style: Style| {
         if colors {
             // `force_styling`: si se pidieron colores, se ponen aunque `console` crea que

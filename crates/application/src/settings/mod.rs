@@ -19,37 +19,48 @@ use crate::tasks::GroupBy;
 /// Todo `config.toml`.
 ///
 /// `deny_unknown_fields`: una clave mal escrita (`priorty_weight`) es un error, no algo que
-/// se ignora en silencio (FR-22). Las secciones de fases posteriores (`ai`, `projects`...)
-/// se agregan aquí cuando llegan.
+/// se ignora en silencio (FR-22). Las secciones opcionales (`[ui]`, `[ai]`, `[session]`...)
+/// tienen `#[serde(default)]`: un archivo sin ellas usa los valores por defecto.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
     /// Versión del esquema (FR-25).
     pub version: u32,
+    /// `[provider]`: el proveedor de tareas y sus estados.
     pub provider: ProviderSettings,
+    /// `[policy]`: los pesos de la priorización.
     #[serde(default)]
     pub policy: PolicySettings,
+    /// `[projects]`: dónde están y cuál es el de por defecto.
     #[serde(default)]
     pub projects: ProjectsSettings,
+    /// `[context]`: las secciones globales y el presupuesto.
     #[serde(default)]
     pub context: ContextSettings,
+    /// `[ai]`: el proveedor de IA y sus límites.
     #[serde(default)]
     pub ai: AiSettings,
+    /// `[history]`: dónde se guardan análisis y planes.
     #[serde(default)]
     pub history: HistorySettings,
+    /// `[session]`: la sesión de trabajo.
     #[serde(default)]
     pub session: SessionSettings,
+    /// `[ui]`: cómo se muestra.
     #[serde(default)]
     pub ui: UiSettings,
 }
 
+/// Sección `[provider]`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderSettings {
+    /// Cuál: hoy, `clickup`.
     pub kind: ProviderKind,
     /// Solo existe si `kind = "clickup"`; lo comprueba [`AppSettings::validate`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clickup: Option<ClickUpSettings>,
+    /// `[provider.status_map]`: qué nombres de estado corresponden a cada etapa.
     #[serde(default)]
     pub status_map: StatusNames,
 }
@@ -58,9 +69,11 @@ pub struct ProviderSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
+    /// `ClickUp`.
     ClickUp,
 }
 
+/// Sección `[provider.clickup]`. El token no va aquí: está en el llavero.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClickUpSettings {
@@ -72,10 +85,15 @@ pub struct ClickUpSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StatusNames {
+    /// Por hacer.
     pub todo: Vec<String>,
+    /// Analizada, esperando tu aprobación (los sugiere `start`).
     pub ready: Vec<String>,
+    /// En progreso (los sugiere `approve`).
     pub in_progress: Vec<String>,
+    /// En revisión o QA.
     pub in_review: Vec<String>,
+    /// Terminada (los sugieren `done` y `close`).
     pub done: Vec<String>,
 }
 
@@ -97,11 +115,17 @@ impl Default for StatusNames {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PolicySettings {
+    /// Cuánto pesa cada punto de prioridad.
     pub priority_weight: i64,
+    /// Bono si venció.
     pub overdue_bonus: i64,
+    /// Bono si vence hoy.
     pub due_today_bonus: i64,
+    /// Bono si vence en los próximos 7 días.
     pub due_this_week_bonus: i64,
+    /// Cuánto suma cada comentario sin resolver que te asignaron.
     pub pending_comment_weight: i64,
+    /// Bono si está en revisión.
     pub in_review_bonus: i64,
 }
 
@@ -134,6 +158,7 @@ impl AiKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AiSettings {
+    /// Cuál: hoy, `claude_code`.
     pub kind: AiKind,
     /// Modelo del proveedor (`"sonnet"`, `"opus"`...). Sin valor, el de su configuración.
     pub model: Option<String>,
@@ -292,9 +317,11 @@ impl Default for SessionSettings {
     }
 }
 
+/// Sección `[ui]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UiSettings {
+    /// Cómo agrupar `taskflow today`: sin grupos o por proyecto.
     pub group_by: GroupBy,
 }
 
@@ -302,7 +329,12 @@ pub struct UiSettings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsChange {
     /// `config set <key> <value>`. `value` llega como texto, tal cual lo escribió el usuario.
-    Set { key: ConfigKey, value: String },
+    Set {
+        /// La clave, ya validada.
+        key: ConfigKey,
+        /// El valor como texto.
+        value: String,
+    },
     /// `config init`: reemplaza el archivo completo.
     ///
     /// En una `Box` porque `AppSettings` es mucho más grande que `Set`: un enum ocupa lo que
@@ -312,6 +344,7 @@ pub enum SettingsChange {
 }
 
 impl AppSettings {
+    /// La versión del esquema que escribe esta versión de Taskflow.
     pub const CURRENT_VERSION: u32 = 1;
 
     /// Configuración nueva para un proveedor: versión actual y el resto por defecto.
@@ -341,9 +374,9 @@ impl AppSettings {
     /// 4. Un mismo nombre de estado (sin distinguir mayúsculas) no puede estar en dos listas
     ///    de `status_map` → clave `provider.status_map`, una vez por nombre repetido.
     /// 5. `projects.default`, si existe, debe ser un `ProjectSlug` válido
-    ///    → clave `projects.default`. (Fase 5)
+    ///    → clave `projects.default`.
     /// 6. `ai.effort`, si existe, debe ser uno de `low`, `medium`, `high`, `xhigh` o `max`;
-    ///    y `ai.timeout_secs` mayor que 0. (Fase 6)
+    ///    y `ai.timeout_secs` mayor que 0.
     ///
     /// # Errors
     ///

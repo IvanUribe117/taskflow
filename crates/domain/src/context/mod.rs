@@ -18,6 +18,7 @@ use crate::project::ProjectSlug;
 pub struct SectionKey(String);
 
 impl SectionKey {
+    /// La clave tal cual (`negocio`), sin número ni extensión.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -148,16 +149,22 @@ impl FromStr for Usage {
     }
 }
 
+/// Una sección de contexto: lo que la IA debe saber (conocimiento) o cómo debe responder (instrucción), escrita en un `.md` con su encabezado.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextSection {
+    /// La clave, del nombre del archivo (`10-negocio.md` → `negocio`): una sección del proyecto reemplaza a la global con la misma clave.
     pub key: SectionKey,
+    /// El título que la encabeza en lo que recibe la IA.
     pub title: String,
+    /// Si es conocimiento o instrucción.
     pub role: SectionRole,
+    /// En qué llamadas a la IA se incluye.
     pub usage: EnumSet<Usage>,
     /// Menor número = más importante.
     pub priority: u8,
     /// Nunca se envía a la IA (FR-39).
     pub private: bool,
+    /// El texto, en Markdown.
     pub body: String,
 }
 
@@ -183,8 +190,8 @@ impl ProjectContext {
     /// - Una sección del proyecto **reemplaza** a la global con la misma clave.
     /// - El resultado queda **ordenado por clave**.
     ///
-    /// Pista: un `BTreeMap<SectionKey, ContextSection>` hace las dos cosas. Insertar una
-    /// clave que ya existe reemplaza el valor, y el mapa se recorre siempre ordenado.
+    /// Se usa un `BTreeMap<SectionKey, ContextSection>` porque hace las dos cosas: insertar
+    /// una clave que ya existe reemplaza el valor, y el mapa se recorre siempre ordenado.
     #[must_use]
     pub fn merge(global: Vec<ContextSection>, project: Vec<ContextSection>) -> Self {
         let mut by_key: BTreeMap<SectionKey, ContextSection> = global
@@ -201,6 +208,7 @@ impl ProjectContext {
         }
     }
 
+    /// Las secciones, ordenadas por clave.
     #[must_use]
     pub fn sections(&self) -> &[ContextSection] {
         &self.sections
@@ -215,10 +223,10 @@ impl ProjectContext {
     /// 4. Recorrerlas acumulando el largo del `body` en **caracteres** (`chars().count()`):
     ///    si cabe en lo que queda del presupuesto, va a `included`; si no, su clave va a
     ///    `omitted` y se **sigue** con la siguiente (una más corta todavía puede caber).
-    #[must_use]
     ///
     /// `usages` acepta un solo `Usage` o un `EnumSet<Usage>`: `select(Usage::Plan, ..)` y
     /// `select(Usage::Summary | Usage::AgentPrompt, ..)` funcionan igual.
+    #[must_use]
     pub fn select(
         &self,
         usages: impl Into<EnumSet<Usage>>,
@@ -423,5 +431,13 @@ mod tests {
             keys(&context.select(Usage::Summary, 5).included),
             ["acentos"]
         );
+    }
+
+    #[test]
+    fn section_roles_round_trip() {
+        for role in [SectionRole::Knowledge, SectionRole::Instruction] {
+            assert_eq!(role.to_string().parse::<SectionRole>().unwrap(), role);
+        }
+        assert!("otro".parse::<SectionRole>().is_err());
     }
 }

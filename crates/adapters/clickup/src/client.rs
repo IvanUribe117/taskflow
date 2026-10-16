@@ -4,6 +4,7 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use application::ports::ProviderError;
+use reqwest::header::{AUTHORIZATION, HeaderValue};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -81,15 +82,19 @@ impl ClickUpClient {
         self.send(Method::POST, path, &[], Some(body)).await
     }
 
-    /// Una petición con cualquier método: autenticación, límite de concurrencia, reintentos
-    /// ante 429, errores HTTP y deserialización. Es el cuerpo que antes tenía `get`.
+    /// Una petición con cualquier método: autenticación, límite de concurrencia, reintentos,
+    /// errores HTTP y deserialización.
     ///
     /// Pasos:
     /// 1. Esperar un permiso del semáforo y conservarlo hasta terminar.
-    /// 2. Enviar la petición con `method`, el header `Authorization`, `query` y, si `body`
-    ///    es `Some`, el cuerpo como JSON.
-    /// 3. Si la respuesta es 429 y quedan reintentos: esperar `retry_delay` y repetir desde 2.
-    /// 4. Si [`status_error`] devuelve un error, devolverlo.
+    /// 2. Enviar la petición con `method`, el header `Authorization` (marcado como sensible:
+    ///    no sale en los logs de `reqwest`), `query` y, si `body` es `Some`, el cuerpo JSON.
+    /// 3. Reintentar, mientras queden reintentos:
+    ///    - un 429, esperando lo que indica `x-ratelimit-reset` ([`retry_wait`]);
+    ///    - en un `GET`, un 5xx o un fallo de red, esperando `retry_delay`. Solo en `GET`:
+    ///      repetir un `POST` podría duplicar un comentario.
+    /// 4. Si [`status_error`] devuelve un error, devolverlo con lo que explica `ClickUp` en
+    ///    el cuerpo (`err` y `ECODE`). Un 429 final lleva la última espera calculada.
     /// 5. Deserializar el cuerpo JSON como `T`.
     ///
     /// # Errors
@@ -105,27 +110,39 @@ impl ClickUpClient {
         body: Option<&Value>,
     ) -> Result<T, ProviderError> {
         let url = format!("{}{path}", self.base_url);
+        let mut authorization =
+            HeaderValue::from_str(&self.token).map_err(|_| ProviderError::Unauthorized)?;
+        authorization.set_sensitive(true);
         let _permit = self
             .permits
             .acquire()
             .await
             .expect("the semaphore is never closed");
+        let idempotent = method == Method::GET;
         let mut attempt: u32 = 0;
+        let mut last_wait = None;
         let response = loop {
             let mut request = self
                 .http
                 .request(method.clone(), &url)
-                .header("Authorization", &self.token)
+                .header(AUTHORIZATION, authorization.clone())
                 .query(query);
             if let Some(body) = body {
                 request = request.json(body);
             }
-            let response = request
-                .send()
-                .await
-                .map_err(|e| ProviderError::Network(e.to_string()))?;
+            let retries_left = attempt < self.max_retries;
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(_) if idempotent && retries_left => {
+                    attempt += 1;
+                    tokio::time::sleep(self.retry_delay).await;
+                    continue;
+                }
+                Err(e) => return Err(ProviderError::Network(e.to_string())),
+            };
 
-            if response.status() == StatusCode::TOO_MANY_REQUESTS && attempt < self.max_retries {
+            let status = response.status();
+            if status == StatusCode::TOO_MANY_REQUESTS && retries_left {
                 attempt += 1;
                 let reset = response
                     .headers()
@@ -138,23 +155,53 @@ impl ClickUpClient {
                         wait.as_secs()
                     );
                 }
+                last_wait = Some(wait);
                 tokio::time::sleep(wait).await;
+                continue;
+            }
+            if status.is_server_error() && idempotent && retries_left {
+                attempt += 1;
+                tokio::time::sleep(self.retry_delay).await;
                 continue;
             }
             break response;
         };
 
-        if let Some(error) = status_error(response.status(), path) {
-            return Err(error);
-        }
-
+        let status = response.status();
         let text = response
             .text()
             .await
             .map_err(|e| ProviderError::Network(e.to_string()))?;
+        if let Some(error) = status_error(status, path) {
+            return Err(explained(error, &text, last_wait));
+        }
 
         serde_json::from_str::<T>(&text)
             .map_err(|e| ProviderError::InvalidResponse(format!("{path}: {e}")))
+    }
+}
+
+/// Completa el error con lo que `ClickUp` dice en el cuerpo (`{"err": "...", "ECODE":
+/// "..."}`), y un 429 final con la última espera conocida.
+fn explained(error: ProviderError, body: &str, last_wait: Option<Duration>) -> ProviderError {
+    let reason = serde_json::from_str::<Value>(body).ok().and_then(|json| {
+        let err = json.get("err").and_then(Value::as_str)?;
+        Some(match json.get("ECODE").and_then(Value::as_str) {
+            Some(code) => format!("{err} ({code})"),
+            None => err.to_owned(),
+        })
+    });
+    match (error, reason) {
+        (ProviderError::RateLimited { .. }, _) => ProviderError::RateLimited {
+            retry_after: last_wait,
+        },
+        (ProviderError::InvalidResponse(message), Some(reason)) => {
+            ProviderError::InvalidResponse(format!("{message}: {reason}"))
+        }
+        (ProviderError::Network(message), Some(reason)) => {
+            ProviderError::Network(format!("{message}: {reason}"))
+        }
+        (error, _) => error,
     }
 }
 
@@ -225,6 +272,31 @@ impl fmt::Debug for ClickUpClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_carry_what_clickup_explains() {
+        let body = r#"{"err":"Status does not exist","ECODE":"ITEM_114"}"#;
+
+        let bad = explained(
+            ProviderError::InvalidResponse("400 Bad Request on /task/1".into()),
+            body,
+            None,
+        );
+        let limited = explained(
+            ProviderError::RateLimited { retry_after: None },
+            "",
+            Some(Duration::from_secs(7)),
+        );
+
+        assert_eq!(
+            bad.to_string(),
+            "unexpected response from the provider: 400 Bad Request on /task/1: Status does not exist (ITEM_114)"
+        );
+        assert!(matches!(
+            limited,
+            ProviderError::RateLimited { retry_after: Some(wait) } if wait == Duration::from_secs(7)
+        ));
+    }
 
     /// 2026-10-14 15:00:00 UTC. Se escribe en segundos, como los *timestamps* de `ClickUp`,
     /// para que los tests se lean comparando números del mismo tipo.

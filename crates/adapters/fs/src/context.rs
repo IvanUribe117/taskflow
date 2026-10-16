@@ -19,6 +19,7 @@ pub struct FsContextRepository {
 }
 
 impl FsContextRepository {
+    /// Con la carpeta de las secciones globales y la de los proyectos.
     #[must_use]
     pub fn new(global_dir: impl Into<PathBuf>, projects_dir: impl Into<PathBuf>) -> Self {
         Self {
@@ -105,6 +106,22 @@ impl ContextRepository for FsContextRepository {
             return Err(RepoError::NotFound(path.display().to_string()));
         }
         fs::remove_file(&path)
+            .map_err(|e| RepoError::Storage(format!("{}: {e}", path.display())))?;
+        Ok(path)
+    }
+
+    /// Con `atomic::write`, que crea la carpeta si falta.
+    async fn create_section(
+        &self,
+        project: Option<&ProjectSlug>,
+        key: &SectionKey,
+        text: &str,
+    ) -> Result<PathBuf, RepoError> {
+        let (path, exists) = self.section_file(project, key);
+        if exists {
+            return Err(RepoError::AlreadyExists(path.display().to_string()));
+        }
+        crate::atomic::write(&path, text)
             .map_err(|e| RepoError::Storage(format!("{}: {e}", path.display())))?;
         Ok(path)
     }

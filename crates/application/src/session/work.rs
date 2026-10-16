@@ -1,8 +1,8 @@
 //! El reporte de **lo que se hizo** (`work-report.md`), que es lo que se publica.
 
 use domain::context::Usage;
-use domain::session::SessionState;
 
+use super::fallback::with_agent_fallback;
 use crate::ai::AiLimits;
 use crate::ai::brief::task_brief;
 use crate::dto::WorkReportView;
@@ -21,6 +21,7 @@ pub struct PrepareWorkReport<'a> {
 }
 
 impl<'a> PrepareWorkReport<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -38,16 +39,8 @@ impl<'a> PrepareWorkReport<'a> {
     ///
     /// No hay sesión o no está aprobada; falla la IA (también sin la conversación).
     pub async fn execute(&self, limits: AiLimits) -> Result<WorkReportView, AppError> {
-        let session = self
-            .ctx
-            .sessions
-            .active()
-            .await?
-            .ok_or_else(|| AppError::InvalidInput("there is no active session".into()))?;
-        if !matches!(
-            session.state,
-            SessionState::InProgress | SessionState::Paused { .. }
-        ) {
+        let session = super::active(self.ctx).await?;
+        if !session.state.is_approved() {
             return Err(AppError::InvalidInput(format!(
                 "the session is `{}`: there is no work to report yet",
                 session.state.name()
@@ -105,19 +98,13 @@ impl<'a> PrepareWorkReport<'a> {
                     .to_owned(),
             );
         }
-        let mut from_agent = input.agent_session.is_some();
-        let work = match self.ctx.ai.summarize_work(&input).await {
-            Ok(work) => work,
-            Err(error) if from_agent => {
-                from_agent = false;
-                warnings.push(format!(
-                    "no se pudo retomar la conversación del agente ({error}); el resumen sale del plan y de los cambios de git"
-                ));
-                input.agent_session = None;
-                self.ctx.ai.summarize_work(&input).await?
-            }
-            Err(error) => return Err(error.into()),
-        };
+        let (work, from_agent) = with_agent_fallback(
+            &mut input,
+            &mut warnings,
+            "el resumen sale del plan y de los cambios de git",
+            async |input| self.ctx.ai.summarize_work(input).await,
+        )
+        .await?;
 
         // Si la rama ya tiene PR, el comentario lo enlaza (para quien hace el code review).
         let pr = match (&repo, &changes) {

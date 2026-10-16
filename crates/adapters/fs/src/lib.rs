@@ -10,19 +10,23 @@
 //! - `history`: `impl HistoryRepository for FsHistoryRepository`.
 //! - `sessions`: `impl SessionStore for FsSessionStore`.
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
 
 mod atomic;
 mod config_store;
 mod context;
 mod edit;
+mod folders;
 mod front_matter;
 mod history;
+mod paths;
 mod project_file;
 mod projects;
 mod sessions;
 
 pub use config_store::FsConfigStore;
 pub use context::FsContextRepository;
+pub use folders::FsFolders;
 pub use history::FsHistoryRepository;
 pub use projects::FsProjectRepository;
 pub use sessions::FsSessionStore;

@@ -4,8 +4,10 @@
 use std::fmt::Write;
 
 use domain::context::Usage;
+use domain::task::TaskId;
 
 use super::commit::session_repo;
+use super::fallback::with_agent_fallback;
 use crate::ai::AiLimits;
 use crate::ai::brief::task_brief;
 use crate::dto::{BranchStatus, PrProposal};
@@ -16,19 +18,21 @@ use crate::{AppContext, AppError};
 /// Máximo de caracteres del diff que recibe la IA para describir el PR.
 const MAX_DIFF_CHARS: usize = 20_000;
 
-/// El título del PR, sin IA: `CU-<id> - <título de la tarea>`.
+/// El título del PR, sin IA: la rama de la tarea ([`TaskId::branch`]) y su título.
 ///
 /// ```
 /// use application::session::pr_title;
+/// use domain::task::TaskId;
 ///
+/// let id = TaskId::new("86baqt7cp").unwrap();
 /// assert_eq!(
-///     pr_title("86baqt7cp", " docs: evaluacion post-upgrade LKE a k8s 1.36 "),
+///     pr_title(&id, " docs: evaluacion post-upgrade LKE a k8s 1.36 "),
 ///     "CU-86baqt7cp - docs: evaluacion post-upgrade LKE a k8s 1.36"
 /// );
 /// ```
 #[must_use]
-pub fn pr_title(task_id: &str, task_title: &str) -> String {
-    format!("CU-{task_id} - {}", task_title.trim())
+pub fn pr_title(task_id: &TaskId, task_title: &str) -> String {
+    format!("{} - {}", task_id.branch(), task_title.trim())
 }
 
 /// La rama de la sesión, su base y su PR, sin IA. Exige una rama de trabajo con commits:
@@ -89,6 +93,7 @@ pub struct PreparePullRequest<'a> {
 }
 
 impl<'a> PreparePullRequest<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -159,20 +164,14 @@ impl<'a> PreparePullRequest<'a> {
             agent_session: session.agent_session.clone(),
             context,
         };
-        let title = pr_title(&input.task.id, &input.task.title);
-        let mut from_agent = input.agent_session.is_some();
-        let body = match self.ctx.ai.pr_body(&input).await {
-            Ok(body) => body,
-            Err(error) if from_agent => {
-                from_agent = false;
-                warnings.push(format!(
-                    "no se pudo retomar la conversación del agente ({error}); la descripción sale de los commits y el diff"
-                ));
-                input.agent_session = None;
-                self.ctx.ai.pr_body(&input).await?
-            }
-            Err(error) => return Err(error.into()),
-        };
+        let title = pr_title(&session.task_id, &input.task.title);
+        let (body, from_agent) = with_agent_fallback(
+            &mut input,
+            &mut warnings,
+            "la descripción sale de los commits y el diff",
+            async |input| self.ctx.ai.pr_body(input).await,
+        )
+        .await?;
         let mut description = PrDescription {
             title,
             body: body.trim().to_owned(),
@@ -189,6 +188,15 @@ impl<'a> PreparePullRequest<'a> {
     }
 }
 
+/// El PR de la rama después de [`PublishPullRequest::open`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenedPr {
+    /// El PR de la rama: número y enlace.
+    pub pr: PullRequest,
+    /// `true` si se abrió ahora; `false` si ya existía (el push lo actualizó).
+    pub created: bool,
+}
+
 /// `git push` y, si se pide, abre el PR.
 #[derive(Debug)]
 pub struct PublishPullRequest<'a> {
@@ -196,6 +204,7 @@ pub struct PublishPullRequest<'a> {
 }
 
 impl<'a> PublishPullRequest<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -213,24 +222,18 @@ impl<'a> PublishPullRequest<'a> {
     }
 
     /// Push y PR. Si entre tanto la rama ya tiene PR, no abre otro: devuelve ese.
-    /// Devuelve el PR y si se abrió ahora.
     ///
     /// # Errors
     ///
     /// Título vacío → `InvalidInput`; los del push y los de `gh`.
-    pub async fn open(
-        &self,
-        title: &str,
-        body: &str,
-        draft: bool,
-    ) -> Result<(PullRequest, bool), AppError> {
+    pub async fn open(&self, title: &str, body: &str, draft: bool) -> Result<OpenedPr, AppError> {
         if title.trim().is_empty() {
             return Err(AppError::InvalidInput("the PR title is empty".into()));
         }
         let status = branch_status(self.ctx, 0).await?.0;
         self.ctx.committer.push(&status.repo).await?;
         if let Some(pr) = status.pr {
-            return Ok((pr, false));
+            return Ok(OpenedPr { pr, created: false });
         }
         let pr = self
             .ctx
@@ -246,6 +249,6 @@ impl<'a> PublishPullRequest<'a> {
                 },
             )
             .await?;
-        Ok((pr, true))
+        Ok(OpenedPr { pr, created: true })
     }
 }

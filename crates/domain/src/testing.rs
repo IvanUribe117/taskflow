@@ -8,16 +8,19 @@ use crate::task::{
     Comment, LocationLevel, LocationSegment, Priority, Status, Task, TaskId, TaskLocation, UserId,
 };
 
+/// Una fecha RFC 3339 (`"2026-10-14T15:00:00Z"`) en UTC.
 pub fn at(rfc3339: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(rfc3339)
         .expect("valid RFC 3339 date in test")
         .with_timezone(&Utc)
 }
 
+/// Un `UserId` válido.
 pub fn user(id: &str) -> UserId {
     UserId::new(id).expect("valid user id in test")
 }
 
+/// Una tarea mínima: por hacer, prioridad normal, sin fecha ni ubicación.
 pub fn task(id: &str) -> Task {
     Task {
         id: TaskId::new(id).expect("valid task id in test"),
@@ -53,6 +56,7 @@ pub fn task_in(id: &str, space: &str, list: &str) -> Task {
     }
 }
 
+/// Un comentario, asignado o no, resuelto o no.
 pub fn comment(assignee: Option<&UserId>, resolved: bool) -> Comment {
     Comment {
         author: "someone".into(),
@@ -63,6 +67,7 @@ pub fn comment(assignee: Option<&UserId>, resolved: bool) -> Comment {
     }
 }
 
+/// Un proyecto de cliente con esas reglas y lo demás por defecto.
 pub fn project(slug: &str, rules: Vec<MatchRule>) -> Project {
     Project {
         slug: slug.parse().expect("valid slug in test"),

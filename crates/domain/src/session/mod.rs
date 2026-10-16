@@ -25,31 +25,49 @@ use crate::task::{Task, TaskId};
 /// Un tramo con el contador corriendo. `end: None` = sigue corriendo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Interval {
+    /// Cuándo se inició el contador.
     pub start: DateTime<Utc>,
+    /// Cuándo se detuvo; `None` si sigue corriendo.
     pub end: Option<DateTime<Utc>>,
 }
 
 impl Interval {
-    /// Hasta `now` si sigue abierto.
+    /// Hasta `now` si sigue abierto. Nunca negativa (un reloj desfasado no resta tiempo).
     #[must_use]
     pub fn duration(&self, now: DateTime<Utc>) -> Duration {
-        self.end.unwrap_or(now) - self.start
+        (self.end.unwrap_or(now) - self.start).max(Duration::zero())
     }
 }
 
+/// Una sesión de trabajo sobre una tarea, de `start` a `done` o `abort` (§9.6). Vive en
+/// `sessions/active.json` mientras dura y después se archiva.
+///
+/// Los cambios de estado pasan por [`WorkSession::handle`], que también dice qué efectos
+/// aplicar. Los campos son públicos porque `application` y los adaptadores los leen y
+/// guardan; los que cambian fuera del dominio son solo los de la conversación del agente,
+/// `pending`, `work_dir` y `project` (al renombrar un proyecto).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkSession {
+    /// La tarea.
     pub task_id: TaskId,
+    /// Su título al empezar (para mostrarlo sin pedírsela al proveedor).
     pub title: String,
+    /// Su enlace.
     pub url: String,
+    /// El proyecto de la tarea, si encajó con alguno.
     pub project: Option<ProjectSlug>,
     /// El nombre **exacto** del estado al empezar, para `abort --restore-status`.
     pub original_status: String,
+    /// Cuándo empezó.
     pub started_at: DateTime<Utc>,
+    /// En qué estado está (la máquina de estados).
     pub state: SessionState,
+    /// Cómo terminó el análisis: `None` mientras se analiza.
     pub report: Option<ReportOutcome>,
+    /// Si el reporte de lo hecho ya se publicó, y cuándo.
     #[serde(default)]
     pub publication: Publication,
+    /// Los tramos con el contador corriendo: suman el tiempo trabajado.
     #[serde(default)]
     pub intervals: Vec<Interval>,
     /// Efectos que no se aplicaron porque falló uno crítico antes (NFR-21). `session retry`
@@ -82,14 +100,20 @@ pub struct Continuation {
     pub work_report: Option<String>,
 }
 
+/// Por qué la máquina de estados rechazó un comando. Ningún error cambia la sesión.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SessionError {
+    /// El comando no vale en este estado.
     #[error("cannot `{command}` while the session is `{from}`; allowed: {}", .allowed.join(", "))]
     InvalidTransition {
+        /// El estado actual.
         from: &'static str,
+        /// El comando rechazado.
         command: &'static str,
+        /// Los que sí valen ahora.
         allowed: Vec<&'static str>,
     },
+    /// El reporte de lo hecho ya se publicó: publicarlo otra vez duplicaría el comentario.
     #[error("the work report was already published")]
     ReportAlreadyPublished,
 }
@@ -133,8 +157,8 @@ impl WorkSession {
     ///
     /// # Errors
     ///
-    /// [`SessionError::InvalidTransition`] con los comandos permitidos; `NoReport` o
-    /// `ReportAlreadyPublished` al publicar.
+    /// [`SessionError::InvalidTransition`] con los comandos permitidos;
+    /// [`SessionError::ReportAlreadyPublished`] al publicar dos veces.
     pub fn handle(
         &mut self,
         command: SessionCommand,
@@ -147,7 +171,6 @@ impl WorkSession {
         let (next, effects) = match (&self.state, command) {
             (S::Analyzing { .. }, C::AnalysisReady) => {
                 self.report = Some(ReportOutcome::Ready);
-                self.publication = Publication::Draft;
                 (
                     S::AwaitingApproval,
                     vec![
@@ -357,6 +380,60 @@ mod tests {
                 .unwrap();
         }
         session
+    }
+
+    /// `allowed_commands` (lo que dicen los errores) y `handle` (lo que de verdad pasa) se
+    /// escriben por separado: este test comprueba que coinciden en todos los pares.
+    #[test]
+    fn allowed_commands_match_what_handle_accepts() {
+        let commands = [
+            SessionCommand::AnalysisReady,
+            SessionCommand::AnalysisFailed { reason: "x".into() },
+            SessionCommand::Approve { status: None },
+            SessionCommand::Reject { note: "x".into() },
+            SessionCommand::Pause,
+            SessionCommand::Resume,
+            SessionCommand::ChangeStatus { status: "x".into() },
+            SessionCommand::PublishReport,
+            SessionCommand::Finish {
+                status: "Closed".into(),
+                comment: None,
+            },
+            SessionCommand::Abort {
+                restore_status: false,
+            },
+        ];
+        let mut closed = in_state("in_progress");
+        closed
+            .handle(commands[8].clone(), at("2026-10-14T16:00:00Z"))
+            .unwrap();
+        let mut aborted = started();
+        aborted.handle(commands[9].clone(), at(T0)).unwrap();
+        let states = [
+            in_state("analyzing"),
+            in_state("awaiting"),
+            in_state("in_progress"),
+            in_state("paused"),
+            closed,
+            aborted,
+        ];
+
+        for state in &states {
+            let allowed = state.state.allowed_commands();
+            for command in &commands {
+                let accepted = state
+                    .clone()
+                    .handle(command.clone(), at("2026-10-14T16:00:00Z"))
+                    .is_ok();
+                assert_eq!(
+                    accepted,
+                    allowed.contains(&command.name()),
+                    "`{}` in `{}`",
+                    command.name(),
+                    state.state.name()
+                );
+            }
+        }
     }
 
     #[test]
@@ -761,5 +838,74 @@ mod tests {
         assert!(json.contains("\"state\": \"paused\""), "{json}");
         let broken = json.replace("\"86b1\"", "\"  \"");
         assert!(serde_json::from_str::<WorkSession>(&broken).is_err());
+    }
+
+    #[test]
+    fn abort_from_paused_does_not_stop_a_stopped_timer() {
+        let mut paused = in_state("paused");
+        let mut working = in_state("in_progress");
+        let abort = SessionCommand::Abort {
+            restore_status: false,
+        };
+
+        let from_paused = paused
+            .handle(abort.clone(), at("2026-10-14T16:00:00Z"))
+            .unwrap();
+        let from_working = working.handle(abort, at("2026-10-14T16:00:00Z")).unwrap();
+
+        assert!(!from_paused.contains(&Effect::StopTimer), "{from_paused:?}");
+        assert!(
+            from_working.contains(&Effect::StopTimer),
+            "{from_working:?}"
+        );
+        assert_eq!(paused.state, SessionState::Aborted);
+    }
+
+    #[test]
+    fn reject_asks_for_a_new_analysis_with_the_note() {
+        let mut session = in_state("awaiting");
+
+        let effects = session
+            .handle(
+                SessionCommand::Reject {
+                    note: "faltan los tests".into(),
+                },
+                at(T0),
+            )
+            .unwrap();
+        let again = session.handle(SessionCommand::AnalysisReady, at(T0));
+
+        assert_eq!(
+            session.state,
+            SessionState::AwaitingApproval,
+            "after the new analysis"
+        );
+        assert!(
+            effects.contains(&Effect::Analyze {
+                note: Some("faltan los tests".into())
+            }),
+            "{effects:?}"
+        );
+        assert!(again.is_ok());
+    }
+
+    #[test]
+    fn resume_while_working_is_rejected_and_changes_nothing() {
+        let mut session = in_state("in_progress");
+        let before = session.clone();
+
+        let error = session
+            .handle(SessionCommand::Resume, at("2026-10-14T16:00:00Z"))
+            .unwrap_err();
+
+        assert!(matches!(error, SessionError::InvalidTransition { .. }));
+        assert_eq!(session, before);
+    }
+
+    #[test]
+    fn without_closed_intervals_the_session_ended_when_it_started() {
+        let session = started();
+
+        assert_eq!(session.ended_at(), session.started_at);
     }
 }

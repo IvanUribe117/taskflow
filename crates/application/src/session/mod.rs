@@ -2,31 +2,35 @@
 //!
 //! El dominio (`WorkSession::handle`) decide; aquí se carga la sesión, se validan los
 //! nombres de estado contra la lista de la tarea, se aplican los efectos con los puertos
-//! ([`runner`]) y se guarda o se archiva.
+//! (`runner`) y se guarda o se archiva.
 
 mod agent;
+mod choices;
 mod commit;
+mod fallback;
 mod pr;
 mod report;
 mod runner;
 mod work;
 mod workdir;
 
-pub use agent::{PrepareAgent, review_request};
+pub use agent::{AgentOpening, OpeningKind, PrepareAgent, review_request};
+pub use choices::{
+    AfterAgentChoice, Upload, UploadDecision, after_agent_choices, upload_after_commit,
+};
 pub use commit::{CommitChanges, PrepareCommit};
-pub use pr::{PreparePullRequest, PublishPullRequest, pr_title};
-pub use report::render as render_report;
+pub use pr::{OpenedPr, PreparePullRequest, PublishPullRequest, pr_title};
 pub use work::PrepareWorkReport;
-pub use workdir::{SessionWorkDir, sync_messages, task_branch, worktree_path};
+pub use workdir::{SessionWorkDir, task_branch, worktree_path};
 
 use chrono::Duration;
 use domain::project::{ProjectResolver, ProjectSlug, StatusSuggestions};
 use domain::session::{Effect, SessionCommand, Stage, StatusTarget, WorkSession};
-use domain::task::{TaskId, find_status};
+use domain::task::{TaskId, find_status, unknown_status};
 
 use crate::ai::AiLimits;
 use crate::dto::{PreviousView, SessionOutcome, SessionView, StartCheck, TimerView};
-use crate::tasks::unknown_status;
+use crate::ports::RepoError;
 use crate::{AppContext, AppError};
 
 /// Lo que la sesión necesita de la configuración.
@@ -38,6 +42,7 @@ pub struct SessionPrefs {
     pub working: Vec<String>,
     /// `provider.status_map.done`: estados sugeridos al terminar.
     pub done: Vec<String>,
+    /// Cuánto de la tarea y del contexto se envía a la IA.
     pub limits: AiLimits,
     /// `ai.report_language`: lo que lees tú y la conversación con el agente.
     pub report_language: String,
@@ -52,11 +57,33 @@ pub struct SessionPrefs {
     pub resume_max_tokens: u64,
 }
 
+impl From<&crate::settings::AppSettings> for SessionPrefs {
+    /// Lo que la sesión toma de `config.toml`: `provider.status_map`, los límites de la
+    /// IA, los idiomas y `[session]` (worktrees y el umbral para retomar la conversación).
+    fn from(settings: &crate::settings::AppSettings) -> Self {
+        let worktree_dir = settings.session.worktree_dir.trim();
+        Self {
+            ready: settings.provider.status_map.ready.clone(),
+            working: settings.provider.status_map.in_progress.clone(),
+            done: settings.provider.status_map.done.clone(),
+            limits: AiLimits::from(settings),
+            report_language: settings.ai.report_language.clone(),
+            agent_language: settings.ai.agent_language.clone(),
+            worktrees: settings.session.worktrees,
+            worktree_dir: (!worktree_dir.is_empty()).then(|| worktree_dir.into()),
+            resume_max_tokens: settings.session.resume_max_tokens,
+        }
+    }
+}
+
 /// Para qué etapa se buscan sugerencias.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Suggestion {
+    /// Al terminar el análisis: el reporte está listo para revisar.
     Ready,
+    /// Al aprobar: la tarea pasa a "en progreso".
     Working,
+    /// Al terminar la sesión (`done`).
     Done,
 }
 
@@ -87,9 +114,9 @@ pub async fn suggested_statuses(
         })
 }
 
-/// Un efecto en palabras, para los errores y la lista de pendientes.
+/// Un efecto en palabras, para los avisos y la lista de pendientes.
 #[must_use]
-pub fn effect_label(effect: &Effect) -> String {
+pub(crate) fn effect_label(effect: &Effect) -> String {
     match effect {
         Effect::StartTimer => "iniciar el contador".to_owned(),
         Effect::StopTimer => "detener el contador".to_owned(),
@@ -107,6 +134,21 @@ pub fn effect_label(effect: &Effect) -> String {
         Effect::PostComment { .. } => "publicar el comentario".to_owned(),
         Effect::MarkReportPublished => "marcar el reporte como publicado".to_owned(),
         Effect::Notify { .. } => "notificar".to_owned(),
+    }
+}
+
+/// Un efecto en inglés, para los errores ([`AppError::EffectFailed`]): los errores van en
+/// inglés y los avisos en español ([`effect_label`]).
+#[must_use]
+pub(crate) fn effect_name(effect: &Effect) -> &'static str {
+    match effect {
+        Effect::StartTimer => "start the timer",
+        Effect::StopTimer => "stop the timer",
+        Effect::Analyze { .. } => "analyze the task with the AI",
+        Effect::SetStatus { .. } => "change the task status",
+        Effect::PostComment { .. } => "post the comment",
+        Effect::MarkReportPublished => "mark the report as published",
+        Effect::Notify { .. } => "send the notification",
     }
 }
 
@@ -131,6 +173,7 @@ pub struct StartSession<'a> {
 }
 
 impl<'a> StartSession<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx, fresh: false }
@@ -213,7 +256,7 @@ impl<'a> StartSession<'a> {
         let mut outcome = runner::run(self.ctx, prefs, session, effects).await?;
         match worktree {
             Ok(Some(setup)) => {
-                let (note, warning) = sync_messages(&setup);
+                let (note, warning) = workdir::sync_messages(&setup);
                 outcome.notes.extend(note);
                 outcome.warnings.extend(warning);
             }
@@ -234,6 +277,7 @@ pub struct HandleSession<'a> {
 }
 
 impl<'a> HandleSession<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -244,6 +288,9 @@ impl<'a> HandleSession<'a> {
     /// 3. Los nombres de estado del comando se buscan en la lista de la tarea **antes** de
     ///    tocar nada, y se cambian por el nombre exacto.
     /// 4. `handle` (el dominio) y aplicar los efectos.
+    /// 5. Al terminar (`done`, `abort`): detener la vista previa del worktree (el `stop`
+    ///    de `[preview]`) y decir si el worktree quedó limpio para quitarlo. Las dos cosas
+    ///    se averiguan **antes** de archivar la sesión, que es lo que dice dónde se trabajó.
     ///
     /// # Errors
     ///
@@ -266,20 +313,39 @@ impl<'a> HandleSession<'a> {
             return runner::run(self.ctx, prefs, session, vec![Effect::StartTimer]).await;
         }
         if command == SessionCommand::PublishReport
-            && self
-                .ctx
-                .sessions
-                .load_work_report(&session.task_id)
-                .await
-                .is_err()
+            && matches!(
+                self.ctx.sessions.load_work_report(&session.task_id).await,
+                Err(RepoError::NotFound(_))
+            )
         {
             return Err(AppError::InvalidInput(
                 "there is no work report yet; generate it with `taskflow report publish`".into(),
             ));
         }
         let command = self.exact_statuses(&session.task_id, command).await?;
+        let ends = matches!(
+            command,
+            SessionCommand::Finish { .. } | SessionCommand::Abort { .. }
+        );
+        let (preview, removable) = if ends {
+            (
+                workdir::preview(self.ctx, &session).await,
+                workdir::removable(self.ctx, &session).await,
+            )
+        } else {
+            (None, None)
+        };
         let effects = session.handle(command, self.ctx.clock.now())?;
-        runner::run(self.ctx, prefs, session, effects).await
+        let mut outcome = runner::run(self.ctx, prefs, session, effects).await?;
+        if let Some(stop) = preview.and_then(|p| p.stop)
+            && self.ctx.shell.run(&stop).await
+        {
+            outcome
+                .notes
+                .push("vista previa del worktree detenida".to_owned());
+        }
+        outcome.removable_worktree = removable;
+        Ok(outcome)
     }
 
     async fn exact_statuses(
@@ -320,6 +386,7 @@ pub struct RetrySession<'a> {
 }
 
 impl<'a> RetrySession<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -348,6 +415,7 @@ pub struct ShowSession<'a> {
 }
 
 impl<'a> ShowSession<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -381,9 +449,26 @@ impl<'a> ShowSession<'a> {
         let session = active(self.ctx).await?;
         Ok(self.ctx.sessions.load_report(&session.task_id).await?)
     }
+
+    /// El reporte de lo que se hizo (`work-report.md`) tal como está en disco, o `None` si
+    /// todavía no se armó.
+    ///
+    /// # Errors
+    ///
+    /// No hay sesión activa, o no se puede leer (un error que no es "no existe").
+    pub async fn work_report(&self) -> Result<Option<String>, AppError> {
+        let session = active(self.ctx).await?;
+        match self.ctx.sessions.load_work_report(&session.task_id).await {
+            Ok(text) => Ok(Some(text)),
+            Err(RepoError::NotFound(_)) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
 }
 
-async fn active(ctx: &AppContext) -> Result<WorkSession, AppError> {
+/// La sesión activa, o el error que dice cómo empezar una. Todos los casos de uso de la
+/// sesión la cargan con esto.
+pub(crate) async fn active(ctx: &AppContext) -> Result<WorkSession, AppError> {
     ctx.sessions.active().await?.ok_or_else(|| {
         AppError::InvalidInput(
             "there is no active session; start one with `taskflow start <TASK_ID>`".into(),

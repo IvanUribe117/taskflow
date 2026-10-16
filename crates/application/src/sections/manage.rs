@@ -3,8 +3,9 @@
 
 use std::path::PathBuf;
 
-use domain::context::SectionKey;
+use domain::context::{SectionKey, Usage};
 use domain::project::ProjectSlug;
+use enumset::EnumSet;
 
 use crate::dto::ProjectDetail;
 use crate::{AppContext, AppError};
@@ -16,6 +17,7 @@ pub struct ExcludeSection<'a> {
 }
 
 impl<'a> ExcludeSection<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -63,6 +65,7 @@ pub struct SectionFile<'a> {
 }
 
 impl<'a> SectionFile<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -84,6 +87,28 @@ impl<'a> SectionFile<'a> {
         Ok(self.ctx.context.section_file(project, key))
     }
 
+    /// Crea la sección `key` con una plantilla comentada, lista para completar en el editor,
+    /// y devuelve su ruta. Los usos que lista la plantilla salen de [`Usage`]: si se agrega
+    /// uno, la plantilla lo muestra.
+    ///
+    /// # Errors
+    ///
+    /// El proyecto no existe, la sección ya existe o no se puede escribir.
+    pub async fn create_from_template(
+        &self,
+        project: Option<&ProjectSlug>,
+        key: &SectionKey,
+    ) -> Result<PathBuf, AppError> {
+        if let Some(slug) = project {
+            self.ctx.projects.get(slug).await?;
+        }
+        Ok(self
+            .ctx
+            .context
+            .create_section(project, key, &section_template(key))
+            .await?)
+    }
+
     /// Borra la sección y devuelve la ruta que tenía.
     ///
     /// # Errors
@@ -99,6 +124,28 @@ impl<'a> SectionFile<'a> {
         }
         Ok(self.ctx.context.remove_section(project, key).await?)
     }
+}
+
+/// El texto de una sección nueva: el *front matter* comentado y una pista del contenido.
+#[must_use]
+pub fn section_template(key: &SectionKey) -> String {
+    let usages: Vec<String> = EnumSet::<Usage>::all()
+        .iter()
+        .map(|u| u.to_string())
+        .collect();
+    format!(
+        "+++\n\
+         title = \"{key}\"\n\
+         # knowledge (datos del proyecto) o instruction (cómo debe responder la IA)\n\
+         role = \"knowledge\"\n\
+         # {}\n\
+         usage = [\"summary\", \"agent_prompt\"]\n\
+         # 0-255: menor = más importante\n\
+         priority = 50\n\
+         +++\n\n\
+         Escribe aquí el contenido. Hechos concretos, viñetas cortas, 800-1.800 caracteres.\n",
+        usages.join(", ")
+    )
 }
 
 #[cfg(test)]
@@ -215,5 +262,16 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("no global section"), "{error}");
+    }
+
+    #[test]
+    fn the_template_lists_every_usage_and_is_a_valid_header() {
+        let text = section_template(&"negocio".parse().unwrap());
+
+        assert!(text.starts_with("+++\ntitle = \"negocio\"\n"), "{text}");
+        assert!(
+            text.contains("# summary, plan, agent_prompt, playbook, commit\n"),
+            "{text}"
+        );
     }
 }

@@ -18,6 +18,7 @@ pub struct FsConfigStore {
 }
 
 impl FsConfigStore {
+    /// Sobre el `config.toml` de `path` (puede no existir todavía).
     #[must_use]
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }

@@ -6,7 +6,9 @@ use crate::task::Task;
 /// Clave de agrupación: un proyecto o "Sin proyecto".
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ProjectKey {
+    /// Las tareas de este proyecto.
     Project(ProjectSlug),
+    /// Las que no encajan con ningún proyecto.
     Unassigned,
 }
 
@@ -17,16 +19,19 @@ pub struct ProjectResolver {
 }
 
 impl ProjectResolver {
+    /// Con los proyectos configurados.
     #[must_use]
     pub fn new(projects: Vec<Project>) -> Self {
         Self { projects }
     }
 
+    /// Los proyectos, en el orden en que llegaron.
     #[must_use]
     pub fn projects(&self) -> &[Project] {
         &self.projects
     }
 
+    /// El proyecto con ese slug. Si hubiera dos con el mismo (no pasa: el slug es el nombre de su carpeta), el primero.
     #[must_use]
     pub fn get(&self, slug: &ProjectSlug) -> Option<&Project> {
         self.projects.iter().find(|p| &p.slug == slug)

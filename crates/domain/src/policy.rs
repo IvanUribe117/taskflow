@@ -10,14 +10,21 @@ use crate::task::{Status, Task, UserId};
 /// Datos externos que necesita una política para puntuar tareas.
 #[derive(Debug, Clone, Copy)]
 pub struct ScoringContext<'a> {
+    /// La hora de ahora: decide si una tarea venció o vence hoy.
     pub now: DateTime<Utc>,
     /// Zona horaria del usuario: "vence hoy" depende del día local, no del día UTC.
     pub offset: FixedOffset,
+    /// Quién soy: para contar los comentarios que me asignaron.
     pub me: &'a UserId,
+    /// Los proyectos, para sumar su `priority_boost`.
     pub projects: &'a ProjectResolver,
 }
 
+/// Cómo se priorizan las tareas de `taskflow today` (§9.3). Una implementación solo da el
+/// puntaje; el orden lo da [`PrioritizationPolicy::rank`].
 pub trait PrioritizationPolicy: Send + Sync {
+    /// El puntaje de `task`: más alto = más arriba. No hace I/O: todo lo que necesita
+    /// (la hora, quién soy, los proyectos) llega en `ctx`.
     fn score(&self, task: &Task, ctx: &ScoringContext<'_>) -> i64;
 
     /// Ordena de mayor a menor puntaje. El orden es estable: los empates conservan
@@ -26,6 +33,10 @@ pub trait PrioritizationPolicy: Send + Sync {
         tasks.sort_by_cached_key(|t| Reverse(self.score(t, ctx)));
     }
 }
+
+/// "Vence pronto" (`DueThisWeek`): en los próximos 7 días desde ahora, no en la semana del
+/// calendario.
+const DUE_SOON_DAYS: i64 = 7;
 
 /// Qué tan cerca está el vencimiento. Las categorías son excluyentes: una tarea vencida
 /// no suma también el bono de "vence hoy".
@@ -39,17 +50,17 @@ enum Urgency {
 }
 
 impl Urgency {
-    fn of(due: Option<DateTime<Utc>>, ctx: &ScoringContext<'_>) -> Self {
-        let Some(due) = due else {
+    fn of(task: &Task, ctx: &ScoringContext<'_>) -> Self {
+        let Some(due) = task.due else {
             return Self::NoDueDate;
         };
-        if due < ctx.now {
+        if task.is_overdue(ctx.now) {
             return Self::Overdue;
         }
         let today = ctx.now.with_timezone(&ctx.offset).date_naive();
         if due.with_timezone(&ctx.offset).date_naive() == today {
             Self::DueToday
-        } else if due - ctx.now <= TimeDelta::days(7) {
+        } else if due - ctx.now <= TimeDelta::days(DUE_SOON_DAYS) {
             Self::DueThisWeek
         } else {
             Self::Later
@@ -68,11 +79,17 @@ impl Urgency {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WeightedPolicy {
+    /// Cuánto pesa cada punto de prioridad (`Urgent = 4` ... `None = 0`).
     pub priority_weight: i64,
+    /// Bono si venció.
     pub overdue_bonus: i64,
+    /// Bono si vence hoy.
     pub due_today_bonus: i64,
+    /// Bono si vence en los próximos 7 días.
     pub due_this_week_bonus: i64,
+    /// Cuánto suma cada comentario sin resolver que me asignaron.
     pub pending_comment_weight: i64,
+    /// Bono si está en revisión: alguien espera mi respuesta.
     pub in_review_bonus: i64,
 }
 
@@ -94,7 +111,7 @@ impl PrioritizationPolicy for WeightedPolicy {
     fn score(&self, task: &Task, ctx: &ScoringContext<'_>) -> i64 {
         let priority = self.priority_weight.saturating_mul(task.priority.value());
 
-        let urgency = match Urgency::of(task.due, ctx) {
+        let urgency = match Urgency::of(task, ctx) {
             Urgency::Overdue => self.overdue_bonus,
             Urgency::DueToday => self.due_today_bonus,
             Urgency::DueThisWeek => self.due_this_week_bonus,

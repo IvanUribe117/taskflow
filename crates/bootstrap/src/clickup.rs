@@ -7,16 +7,14 @@
 
 use std::sync::Arc;
 
-use adapter_clickup::{ClickUpConfig, ClickUpProvider, ClickUpTimeTracker, StatusMap};
-use application::ports::{
-    ExposeSecret, SecretName, SecretStore, SecretString, TaskProvider, TimeTracker,
-};
+use adapter_clickup::{ClickUpConfig, ClickUpProvider, StatusMap};
+use application::ports::{ExposeSecret, SecretName, SecretStore, SecretString, TimeTracker};
 use application::settings::{
     AppSettings, ClickUpSettings, ProviderKind, ProviderSettings, StatusNames,
 };
 
 use crate::BuildError;
-use crate::registry::{FieldKind, FieldSpec, FieldValues, TaskProviderDescriptor};
+use crate::registry::{FieldKind, FieldSpec, FieldValues, ProviderParts, TaskProviderDescriptor};
 
 pub(crate) const DESCRIPTOR: TaskProviderDescriptor = TaskProviderDescriptor {
     kind: ProviderKind::ClickUp,
@@ -35,7 +33,6 @@ pub(crate) const DESCRIPTOR: TaskProviderDescriptor = TaskProviderDescriptor {
     ],
     provider_settings,
     build,
-    build_time: Some(build_time),
 };
 
 /// `team_id` de las respuestas (vacío si falta) y `StatusNames::default()`.
@@ -49,37 +46,24 @@ fn provider_settings(values: &FieldValues) -> ProviderSettings {
     }
 }
 
-/// Pide el token a `secrets` y construye el adaptador.
+/// Pide el token a `secrets` (una vez) y construye el adaptador y su contador, que
+/// comparten el cliente HTTP.
 ///
 /// # Errors
 ///
 /// [`BuildError::MissingSecret`] si el token no está en ningún almacén; los errores de
 /// [`clickup_config`] y de `ClickUpProvider::new`.
-fn build(
-    settings: &AppSettings,
-    secrets: &dyn SecretStore,
-) -> Result<Arc<dyn TaskProvider>, BuildError> {
+fn build(settings: &AppSettings, secrets: &dyn SecretStore) -> Result<ProviderParts, BuildError> {
     let token = secrets
         .get(SecretName::ClickUpToken)?
         .ok_or(BuildError::MissingSecret(SecretName::ClickUpToken))?;
     let config = clickup_config(settings, &token)?;
-    Ok(Arc::new(ClickUpProvider::new(config)?))
-}
-
-/// El contador de `ClickUp`, con la misma configuración que el proveedor.
-///
-/// # Errors
-///
-/// Los mismos que [`build`].
-fn build_time(
-    settings: &AppSettings,
-    secrets: &dyn SecretStore,
-) -> Result<Arc<dyn TimeTracker>, BuildError> {
-    let token = secrets
-        .get(SecretName::ClickUpToken)?
-        .ok_or(BuildError::MissingSecret(SecretName::ClickUpToken))?;
-    let config = clickup_config(settings, &token)?;
-    Ok(Arc::new(ClickUpTimeTracker::new(&config)?))
+    let provider = ClickUpProvider::new(config)?;
+    let time: Arc<dyn TimeTracker> = Arc::new(provider.time_tracker());
+    Ok(ProviderParts {
+        tasks: Arc::new(provider),
+        time: Some(time),
+    })
 }
 
 /// Configuración del adaptador a partir de `config.toml` y el token.
@@ -181,10 +165,9 @@ mod tests {
     fn build_with_token_creates_the_provider() {
         let secrets = MemorySecretStore::default().with(SecretName::ClickUpToken, "pk_123");
 
-        let provider = build(&settings(), &secrets).unwrap();
+        let parts = build(&settings(), &secrets).unwrap();
 
-        assert_eq!(provider.name(), "clickup");
-        let time = build_time(&settings(), &secrets).unwrap();
-        assert_eq!(time.name(), "clickup");
+        assert_eq!(parts.tasks.name(), "clickup");
+        assert_eq!(parts.time.map(|t| t.name()), Some("clickup"));
     }
 }

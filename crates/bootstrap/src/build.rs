@@ -2,16 +2,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use adapter_claude_code::ClaudeConversations;
-use adapter_desktop::MacNotifier;
+use adapter_desktop::{MacNotifier, ShShell};
 use adapter_fs::{
-    FsConfigStore, FsContextRepository, FsHistoryRepository, FsProjectRepository, FsSessionStore,
+    FsConfigStore, FsContextRepository, FsFolders, FsHistoryRepository, FsProjectRepository,
+    FsSessionStore,
 };
 use adapter_git::{GhPullRequests, GitRepoInspector};
 use adapter_keyring::{EnvSecretStore, KeyringSecretStore, LayeredSecretStore};
 use application::AppContext;
 use application::ports::{
-    LocalTimeTracker, MultiNotifier, Notifier, ProviderError, SecretError, SecretName, SecretStore,
-    SystemClock, TimeTracker,
+    Clock, LocalTimeTracker, MultiNotifier, Notifier, ProviderError, SecretError, SecretName,
+    SecretStore, SystemClock, TimeTracker,
 };
 use application::settings::{AppSettings, ConfigError};
 use domain::policy::WeightedPolicy;
@@ -19,23 +20,30 @@ use thiserror::Error;
 
 use crate::registry;
 
+/// Por qué no se pudo armar el `AppContext`.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum BuildError {
+    /// Falta un secreto (el token): ni en el llavero ni en la variable de entorno.
     #[error(
         "missing secret `{}`: set {} or run `taskflow config init`",
         .0.key(),
         .0.env_var()
     )]
     MissingSecret(SecretName),
+    /// Falta una sección de `config.toml` que el proveedor necesita.
     #[error("missing configuration section [{0}]")]
     MissingSection(&'static str),
+    /// No se encontró la carpeta de configuración del usuario.
     #[error("cannot find the user's configuration directory; use --config <PATH>")]
     NoConfigDir,
+    /// No se pudo leer la configuración.
     #[error(transparent)]
     Config(#[from] ConfigError),
+    /// No se pudo leer el llavero.
     #[error(transparent)]
     Secret(#[from] SecretError),
+    /// No se pudo crear el cliente del proveedor.
     #[error(transparent)]
     Provider(#[from] ProviderError),
 }
@@ -77,6 +85,8 @@ pub fn secret_store() -> LayeredSecretStore {
 /// - `prs`: `GhPullRequests` (los PR de GitHub, con `gh`).
 /// - `worktrees`: `GitRepoInspector` (una carpeta y una rama por tarea).
 /// - `conversations`: `ClaudeConversations` (cuánto pesa la conversación del agente).
+/// - `folders`: `FsFolders` (si una carpeta existe y si dos rutas son la misma).
+/// - `shell`: `ShShell` (el `stop` de la vista previa, con `sh -c`).
 /// - `policy`: `WeightedPolicy` con los pesos de `settings.policy`.
 /// - `clock`: `SystemClock`.
 ///
@@ -90,16 +100,17 @@ pub fn build(
     secrets: &dyn SecretStore,
     config_path: &Path,
 ) -> Result<AppContext, BuildError> {
-    let descriptor = registry::find(settings.provider.kind);
+    let parts = (registry::find(settings.provider.kind).build)(settings, secrets)?;
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     Ok(AppContext {
-        tasks: (descriptor.build)(settings, secrets)?,
+        tasks: parts.tasks,
         projects: Arc::new(FsProjectRepository::new(projects_dir(
             settings,
             config_path,
         ))),
         ai: (registry::find_ai(settings.ai.kind).build)(settings, secrets)?,
         history: Arc::new(FsHistoryRepository::new(history_dir(settings, config_path))),
-        time: time_tracker(settings, secrets, descriptor.build_time)?,
+        time: time_tracker(settings, parts.time, &clock),
         notifier: Arc::new(notifier(settings)),
         sessions: Arc::new(FsSessionStore::new(session_dir(settings, config_path))),
         repo: Arc::new(GitRepoInspector),
@@ -107,28 +118,33 @@ pub fn build(
         prs: Arc::new(GhPullRequests::default()),
         worktrees: Arc::new(GitRepoInspector),
         conversations: Arc::new(ClaudeConversations::for_current_user()),
+        folders: Arc::new(FsFolders),
+        shell: Arc::new(ShShell),
         context: Arc::new(FsContextRepository::new(
             context_dir(settings, config_path),
             projects_dir(settings, config_path),
         )),
         policy: Arc::new(WeightedPolicy::from(&settings.policy)),
-        clock: Arc::new(SystemClock),
+        clock,
     })
+}
+
+/// `dir` relativa a la carpeta de `config.toml`, o tal cual si es absoluta: así se ubican
+/// todas las carpetas de Taskflow.
+fn beside_config(config_path: &Path, dir: &str) -> PathBuf {
+    config_path.parent().unwrap_or(Path::new(".")).join(dir)
 }
 
 /// La carpeta de las secciones globales: `settings.context.global_dir` relativa a la
 /// carpeta de `config.toml`, o absoluta. Igual que [`projects_dir`].
 #[must_use]
 pub fn context_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
-    config_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(&settings.context.global_dir)
+    beside_config(config_path, &settings.context.global_dir)
 }
 
 /// La carpeta de proyectos: `settings.projects.dir` relativa a la carpeta de `config.toml`.
 ///
-/// Si `projects.dir` es absoluta, se usa tal cual. Pista: `Path::join` ya hace eso solo.
+/// Si `projects.dir` es absoluta, se usa tal cual (`Path::join` ya hace eso).
 ///
 /// ```text
 /// config_path = /Users/ivan/.config/taskflow/config.toml
@@ -137,20 +153,18 @@ pub fn context_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
 /// ```
 #[must_use]
 pub fn projects_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
-    config_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(&settings.projects.dir)
+    beside_config(config_path, &settings.projects.dir)
 }
 
+/// El contador del proveedor si lo tiene y `session.track_time`; si no, el local.
 fn time_tracker(
     settings: &AppSettings,
-    secrets: &dyn SecretStore,
-    build: Option<crate::registry::TimeBuildFn>,
-) -> Result<Arc<dyn TimeTracker>, BuildError> {
-    match build {
-        Some(build) if settings.session.track_time => build(settings, secrets),
-        _ => Ok(Arc::new(LocalTimeTracker)),
+    provider: Option<Arc<dyn TimeTracker>>,
+    clock: &Arc<dyn Clock>,
+) -> Arc<dyn TimeTracker> {
+    match provider {
+        Some(time) if settings.session.track_time => time,
+        _ => Arc::new(LocalTimeTracker::new(Arc::clone(clock))),
     }
 }
 
@@ -167,20 +181,14 @@ fn notifier(settings: &AppSettings) -> MultiNotifier {
 /// `config.toml`, o absoluta. Igual que [`projects_dir`].
 #[must_use]
 pub fn session_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
-    config_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(&settings.session.dir)
+    beside_config(config_path, &settings.session.dir)
 }
 
 /// La carpeta del historial: `settings.history.dir` relativa a la carpeta de `config.toml`,
 /// o absoluta. Igual que [`projects_dir`].
 #[must_use]
 pub fn history_dir(settings: &AppSettings, config_path: &Path) -> PathBuf {
-    config_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(&settings.history.dir)
+    beside_config(config_path, &settings.history.dir)
 }
 
 #[cfg(test)]
@@ -286,14 +294,10 @@ mod tests {
     fn without_track_time_the_timer_is_local() {
         let mut settings = settings();
         settings.session.track_time = false;
-        let secrets = application::testing::MemorySecretStore::default();
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let clickup: Arc<dyn TimeTracker> = Arc::new(LocalTimeTracker::new(Arc::clone(&clock)));
 
-        let time = time_tracker(
-            &settings,
-            &secrets,
-            crate::registry::find(settings.provider.kind).build_time,
-        )
-        .unwrap();
+        let time = time_tracker(&settings, Some(clickup), &clock);
 
         assert_eq!(time.name(), "local");
     }

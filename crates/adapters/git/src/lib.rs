@@ -6,73 +6,58 @@
 //!   `taskflow commit`, y `git push` para `taskflow pr`.
 //! - `Worktrees`: una carpeta y una rama por tarea (`git worktree`).
 //!
-//! Y `GhPullRequests` (módulo [`github`]): los PR de GitHub con `gh`.
+//! Y [`GhPullRequests`] (módulo `github`): los PR de GitHub con `gh`.
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
 
 mod github;
+mod run;
 
 pub use github::GhPullRequests;
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 use application::ports::{
     ChangedFile, RepoChanges, RepoCommitter, RepoError, RepoInspector, SyncOutcome, Worktree,
     Worktrees,
 };
 use async_trait::async_trait;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
 /// Máximo de commits que se listan.
 const MAX_COMMITS: usize = 50;
 
+/// Los puertos de git (`RepoInspector`, `RepoCommitter`, `Worktrees`) con el programa `git`.
 #[derive(Debug, Clone, Default)]
 pub struct GitRepoInspector;
 
-/// `git -C <repo> <args>`. `Ok(None)` si `git` termina con error (no es un repo, no existe
-/// la referencia…); `Err` solo si no se puede ejecutar `git`.
+/// `git -C <repo> <args>` ([`run::git_command`]). `Ok(None)` si `git` termina con error
+/// (no es un repo, no existe la referencia…); `Err` solo si no se puede ejecutar o se pasa
+/// del tiempo.
 async fn git(repo: &Path, args: &[&str]) -> Result<Option<String>, RepoError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .await
-        .map_err(|e| RepoError::Storage(format!("git: {e}")))?;
-    Ok(output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout)
-            .trim_end()
-            .to_owned()
-    }))
+    let mut command = run::git_command(repo);
+    command.args(args);
+    let output = run::run(command, None, limit(args), "git").await?;
+    Ok(output.status.success().then(|| run::stdout(&output)))
 }
 
 /// Como [`git`], pero si falla el error trae lo que dijo git (`what` dice qué se intentaba).
-/// Sin terminal para pedir credenciales: si hacen falta, falla en vez de esperar.
 async fn git_checked(repo: &Path, args: &[&str], what: &str) -> Result<String, RepoError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .map_err(|e| RepoError::Storage(format!("git: {e}")))?;
+    let mut command = run::git_command(repo);
+    command.args(args);
+    let output = run::run(command, None, limit(args), what).await?;
     if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout)
-            .trim_end()
-            .to_owned());
+        Ok(run::stdout(&output))
+    } else {
+        Err(run::failure(what, &output))
     }
-    let text = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout).trim(),
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
-    Err(RepoError::Invalid(format!(
-        "{what} failed:\n{}",
-        text.trim()
-    )))
+}
+
+/// `fetch` y `push` van por la red: más tiempo. El resto es local.
+fn limit(args: &[&str]) -> std::time::Duration {
+    match args.first() {
+        Some(&("fetch" | "push")) => run::NETWORK,
+        _ => run::LOCAL,
+    }
 }
 
 /// La rama base: la que apunta `origin/HEAD` (`origin/master`), o la primera que exista de
@@ -136,10 +121,12 @@ impl RepoInspector for GitRepoInspector {
             }
             None => Vec::new(),
         };
-        let stat = git(repo, &["diff", "--stat", &against])
+        let stat = git(repo, &["diff", "--no-ext-diff", "--stat", &against])
             .await?
             .unwrap_or_default();
-        let diff = git(repo, &["diff", &against]).await?.unwrap_or_default();
+        let diff = git(repo, &["diff", "--no-ext-diff", &against])
+            .await?
+            .unwrap_or_default();
         let status = git(repo, &["status", "--porcelain"])
             .await?
             .unwrap_or_default();
@@ -190,7 +177,9 @@ impl RepoCommitter for GitRepoInspector {
     /// El diff contra `HEAD` y, al final, los archivos nuevos (su contenido no sale en el
     /// diff hasta hacer `git add`).
     async fn pending_diff(&self, repo: &Path, max_chars: usize) -> Result<String, RepoError> {
-        let mut diff = git(repo, &["diff", "HEAD"]).await?.unwrap_or_default();
+        let mut diff = git(repo, &["diff", "--no-ext-diff", "HEAD"])
+            .await?
+            .unwrap_or_default();
         let untracked: Vec<String> = self
             .changed_files(repo)
             .await?
@@ -228,40 +217,13 @@ impl RepoCommitter for GitRepoInspector {
     ) -> Result<String, RepoError> {
         let mut add: Vec<&str> = vec!["add", "-A", "--"];
         add.extend(files.iter().map(String::as_str));
-        if git(repo, &add).await?.is_none() {
-            return Err(RepoError::Invalid("git add failed".into()));
-        }
+        git_checked(repo, &add, "git add").await?;
 
-        let mut child = Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(["commit", "-F", "-", "--"])
-            .args(files)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| RepoError::Storage(format!("git: {e}")))?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(message.as_bytes())
-                .await
-                .map_err(|e| RepoError::Storage(format!("git: {e}")))?;
-        }
-        let output = child
-            .wait_with_output()
-            .await
-            .map_err(|e| RepoError::Storage(format!("git: {e}")))?;
+        let mut command = run::git_command(repo);
+        command.args(["commit", "-F", "-", "--"]).args(files);
+        let output = run::run(command, Some(message), run::LOCAL, "git commit").await?;
         if !output.status.success() {
-            let text = format!(
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout).trim(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-            return Err(RepoError::Invalid(format!(
-                "git commit failed:\n{}",
-                text.trim()
-            )));
+            return Err(run::failure("git commit", &output));
         }
         git(repo, &["rev-parse", "--short", "HEAD"])
             .await?
@@ -271,27 +233,8 @@ impl RepoCommitter for GitRepoInspector {
     /// `git push -u origin HEAD`. Sin terminal para preguntar credenciales: si hacen falta,
     /// falla con el mensaje de git en vez de quedarse esperando.
     async fn push(&self, repo: &Path) -> Result<(), RepoError> {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(["push", "-u", "origin", "HEAD"])
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .stdin(Stdio::null())
-            .output()
-            .await
-            .map_err(|e| RepoError::Storage(format!("git: {e}")))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let text = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout).trim(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-        Err(RepoError::Invalid(format!(
-            "git push failed:\n{}",
-            text.trim()
-        )))
+        git_checked(repo, &["push", "-u", "origin", "HEAD"], "git push").await?;
+        Ok(())
     }
 }
 

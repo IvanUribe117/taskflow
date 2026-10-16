@@ -10,8 +10,6 @@ mod session;
 mod show;
 mod today;
 
-use std::path::Path;
-
 use application::AppContext;
 use application::ports::{ConfigStore, HistoryFilter, SubjectFilter};
 use application::settings::AppSettings;
@@ -21,13 +19,14 @@ use domain::session::SessionCommand;
 use crate::args::{Cli, Command, ConfigCommand};
 use crate::wizard;
 
-/// Punto de entrada de todos los comandos. Ya está hecho: léelo para ver el orden.
+/// Punto de entrada de todos los comandos. El orden importa, porque no todos necesitan
+/// lo mismo:
 ///
 /// 1. `config init` y `config path` funcionan **sin** configuración (todavía no existe).
 /// 2. El resto de `config` necesita el archivo, pero no el `AppContext`.
 /// 3. El resto (`today`, `show`, `plan`, `history`, `close`, la sesión, `project` y
 ///    `context`) necesitan el `AppContext` completo.
-pub async fn run(cli: Cli) -> anyhow::Result<()> {
+pub(crate) async fn run(cli: Cli) -> anyhow::Result<()> {
     let store = bootstrap::config_store(cli.config.as_deref())?;
     let secrets = bootstrap::secret_store();
 
@@ -41,7 +40,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<()> {
         command => {
             let settings = store.load()?;
             let ctx = bootstrap::build(&settings, &secrets, store.path())?;
-            with_context(command, &ctx, &settings, store.path()).await
+            with_context(command, &ctx, &settings, &store).await
         }
     }
 }
@@ -51,8 +50,9 @@ async fn with_context(
     command: Command,
     ctx: &AppContext,
     settings: &AppSettings,
-    config_path: &Path,
+    store: &dyn ConfigStore,
 ) -> anyhow::Result<()> {
+    let config_path = store.path();
     match command {
         Command::Config(_) => unreachable!("handled in `run`"),
         Command::Today {
@@ -131,25 +131,7 @@ async fn with_context(
         } => session::abort(ctx, settings, restore_status, yes).await,
         Command::Session { command } => session::session(ctx, settings, command).await,
         Command::Report(command) => session::report(ctx, settings, command).await,
-        Command::Project(command) => project::run(command, ctx, settings, config_path).await,
+        Command::Project(command) => project::run(command, ctx, settings, store).await,
         Command::Context(command) => context::run(command, ctx, settings).await,
     }
-}
-
-/// Abre `path` en `$VISUAL`, `$EDITOR` o `vi`. Con `sh -c '<editor> "$1"'` para que un
-/// editor con argumentos (`code --wait`) funcione y la ruta vaya como argumento.
-pub(crate) fn edit_file(path: &Path) -> anyhow::Result<()> {
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".to_owned());
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(format!("{editor} \"$1\""))
-        .arg("sh")
-        .arg(path)
-        .status()?;
-    if !status.success() {
-        anyhow::bail!("el editor terminó con {status}");
-    }
-    Ok(())
 }

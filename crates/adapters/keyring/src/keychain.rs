@@ -12,8 +12,10 @@ pub struct KeyringSecretStore {
 }
 
 impl KeyringSecretStore {
+    /// El servicio con que se guardan los secretos en el llavero.
     pub const SERVICE: &'static str = "taskflow";
 
+    /// Con el servicio `taskflow`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -70,7 +72,7 @@ fn read_with_security_cli(
 
 impl SecretStore for KeyringSecretStore {
     /// `keyring::Error::NoEntry` significa "no está guardado": es `Ok(None)`, no un error.
-    /// En macOS se lee primero con `security` ([`read_with_security_cli`]).
+    /// En macOS se lee primero con `security` (`read_with_security_cli`).
     fn get(&self, name: SecretName) -> Result<Option<SecretString>, SecretError> {
         #[cfg(target_os = "macos")]
         if let Some(read) = read_with_security_cli(&self.service, name.key()) {

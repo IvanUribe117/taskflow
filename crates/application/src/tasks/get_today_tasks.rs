@@ -14,17 +14,21 @@ use crate::{AppContext, AppError};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GroupBy {
+    /// Una sola lista, en orden de prioridad.
     #[default]
     None,
+    /// Un grupo por proyecto; las tareas sin proyecto van en el grupo "Sin proyecto".
     Project,
 }
 
+/// Qué tareas pide `today` y cómo agruparlas.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TodayQuery {
     /// Máximo de tareas, aplicado después de ordenar (se queda con las más prioritarias).
     pub limit: Option<usize>,
     /// Solo tareas de este proyecto.
     pub project: Option<ProjectSlug>,
+    /// Cómo se agrupan en el reporte; por defecto, sin agrupar.
     pub group_by: GroupBy,
 }
 
@@ -35,6 +39,7 @@ pub struct GetTodayTasks<'a> {
 }
 
 impl<'a> GetTodayTasks<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }

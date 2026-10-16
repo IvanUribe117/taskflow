@@ -3,11 +3,15 @@ use std::fmt;
 /// Estado genérico de una tarea. Los estados propios del proveedor se mapean por configuración.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
+    /// Por hacer.
     Todo,
     /// "Preparado": analizado y esperando luz verde.
     Ready,
+    /// Se está trabajando.
     InProgress,
+    /// En revisión o QA.
     InReview,
+    /// Terminada.
     Done,
     /// Estado personalizado del proveedor que no encaja en los anteriores; se conserva tal cual.
     Other(String),
@@ -16,10 +20,15 @@ pub enum Status {
 /// Prioridad genérica. El orden de declaración define `Ord`: `Urgent` es el menor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Priority {
+    /// Urgente: la más alta.
     Urgent,
+    /// Alta.
     High,
+    /// Normal.
     Normal,
+    /// Baja.
     Low,
+    /// Sin prioridad asignada.
     None,
 }
 
@@ -109,10 +118,12 @@ impl fmt::Display for StatusKind {
 pub struct StatusOption {
     /// El nombre exacto en el proveedor: "Code Review", "complete".
     pub name: String,
+    /// Qué tipo de estado es para el proveedor (abierto, personalizado, cerrado).
     pub kind: StatusKind,
 }
 
 impl StatusOption {
+    /// Un estado con su nombre exacto y su tipo.
     #[must_use]
     pub fn new(name: impl Into<String>, kind: StatusKind) -> Self {
         Self {
@@ -122,16 +133,32 @@ impl StatusOption {
     }
 }
 
-/// El estado de `options` que se llama `name`, **sin distinguir mayúsculas**
-/// (`"code review"` encuentra `"Code Review"`). `None` si no existe.
+/// El error cuando `name` no está en la lista de la tarea, con los que sí hay:
+/// `unknown status `QA`; available: to do, in progress, complete`.
+#[must_use]
+pub fn unknown_status(name: &str, options: &[StatusOption]) -> String {
+    let available: Vec<&str> = options.iter().map(|o| o.name.as_str()).collect();
+    format!(
+        "unknown status `{name}`; available: {}",
+        available.join(", ")
+    )
+}
+
+/// Iguales sin distinguir mayúsculas, con Unicode completo: `eq_ignore_ascii_case` no
+/// iguala `Ó` con `ó`.
+fn same_name(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b) || a.to_lowercase() == b.to_lowercase()
+}
+
+/// El estado de `options` que se llama `name`, **sin distinguir mayúsculas**, también con
+/// tildes (`"code review"` encuentra `"Code Review"`, `"REVISIÓN"` encuentra `"Revisión"`).
+/// `None` si no existe.
 ///
 /// Devuelve una referencia al elemento de `options`: quien llama usa `option.name`, el
 /// nombre **exacto** que espera el proveedor, no el que escribió el usuario.
 #[must_use]
 pub fn find_status<'a>(options: &'a [StatusOption], name: &str) -> Option<&'a StatusOption> {
-    options
-        .iter()
-        .find(|option| option.name.eq_ignore_ascii_case(name))
+    options.iter().find(|option| same_name(&option.name, name))
 }
 
 /// El estado que se sugiere para **cerrar** una tarea:

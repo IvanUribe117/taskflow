@@ -22,13 +22,18 @@ pub struct FieldSpec {
     pub key: &'static str,
     /// Lo que ve el usuario: `"ID del Workspace"`.
     pub label: &'static str,
+    /// Si es texto visible o un secreto.
     pub kind: FieldKind,
 }
 
+/// Qué tipo de dato pide el asistente.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
     /// Texto visible, guardado en `config.toml`.
-    Text { default: Option<&'static str> },
+    Text {
+        /// El valor que se propone, si hay.
+        default: Option<&'static str>,
+    },
     /// Texto oculto al escribirlo, guardado en el `SecretStore`, nunca en `config.toml`.
     Secret(SecretName),
 }
@@ -36,12 +41,26 @@ pub enum FieldKind {
 /// Respuestas del asistente a los campos `Text`, por `FieldSpec::key`.
 pub type FieldValues = BTreeMap<&'static str, String>;
 
-/// Configuración + secretos → adaptador listo para usar.
-pub type BuildFn = fn(&AppSettings, &dyn SecretStore) -> Result<Arc<dyn TaskProvider>, BuildError>;
+/// Lo que construye un proveedor de tareas: el adaptador y, si lo tiene, su contador de
+/// tiempo. Se construyen juntos para leer el token una vez y compartir el cliente.
+pub struct ProviderParts {
+    /// El proveedor de tareas.
+    pub tasks: Arc<dyn TaskProvider>,
+    /// `None` si el proveedor no tiene contador: se usa `LocalTimeTracker` (objeto nulo).
+    pub time: Option<Arc<dyn TimeTracker>>,
+}
 
-/// Configuración + secretos → contador de tiempo del proveedor.
-pub type TimeBuildFn =
-    fn(&AppSettings, &dyn SecretStore) -> Result<Arc<dyn TimeTracker>, BuildError>;
+impl fmt::Debug for ProviderParts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProviderParts")
+            .field("tasks", &self.tasks.name())
+            .field("time", &self.time.as_ref().map(|t| t.name()))
+            .finish()
+    }
+}
+
+/// Configuración + secretos → el adaptador y su contador, listos para usar.
+pub type BuildFn = fn(&AppSettings, &dyn SecretStore) -> Result<ProviderParts, BuildError>;
 
 /// Todo lo que el resto del sistema necesita saber de un proveedor de tareas.
 ///
@@ -49,14 +68,16 @@ pub type TimeBuildFn =
 /// closure), así que el descriptor puede ser una constante (`const`).
 #[derive(Clone, Copy)]
 pub struct TaskProviderDescriptor {
+    /// Cuál es.
     pub kind: ProviderKind,
+    /// El nombre que ve el usuario en el asistente.
     pub display_name: &'static str,
+    /// Lo que pide el asistente (el token, el workspace...).
     pub fields: &'static [FieldSpec],
     /// Respuestas del asistente → sección `[provider]` de la configuración.
     pub provider_settings: fn(&FieldValues) -> ProviderSettings,
+    /// Configuración y secretos → el adaptador y su contador.
     pub build: BuildFn,
-    /// `None` si el proveedor no tiene contador: se usa `LocalTimeTracker` (objeto nulo).
-    pub build_time: Option<TimeBuildFn>,
 }
 
 impl fmt::Debug for TaskProviderDescriptor {
@@ -74,10 +95,13 @@ pub type AiBuildFn = fn(&AppSettings, &dyn SecretStore) -> Result<Arc<dyn Summar
 /// Lo mismo que [`TaskProviderDescriptor`], para los proveedores de IA (ADR-027).
 #[derive(Clone, Copy)]
 pub struct AiProviderDescriptor {
+    /// Cuál es.
     pub kind: AiKind,
+    /// El nombre que ve el usuario en el asistente.
     pub display_name: &'static str,
     /// Lo que pide el asistente. Claude Code no pide nada; una API pediría su clave.
     pub fields: &'static [FieldSpec],
+    /// Configuración y secretos → el proveedor de IA.
     pub build: AiBuildFn,
 }
 

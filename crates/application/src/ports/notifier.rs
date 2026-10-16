@@ -5,10 +5,13 @@ use thiserror::Error;
 /// Un aviso para el usuario: "el reporte está listo", "sesión cerrada"...
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
+    /// Una línea corta: el título de la notificación.
     pub title: String,
+    /// El texto del aviso, debajo del título.
     pub body: String,
 }
 
+/// Un canal que no pudo avisar. Lleva el motivo como texto; nunca detiene la sesión.
 #[derive(Debug, Error)]
 #[error("notification failed: {0}")]
 pub struct NotifyError(pub String);
@@ -16,18 +19,8 @@ pub struct NotifyError(pub String);
 /// Un canal de avisos (§10.6): el escritorio hoy; Slack o el correo mañana.
 #[async_trait]
 pub trait Notifier: Send + Sync {
+    /// Muestra `notice` por este canal.
     async fn notify(&self, notice: &Notice) -> Result<(), NotifyError>;
-}
-
-/// Objeto nulo: con `session.notify = false`, o en sistemas sin un canal.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoopNotifier;
-
-#[async_trait]
-impl Notifier for NoopNotifier {
-    async fn notify(&self, _notice: &Notice) -> Result<(), NotifyError> {
-        Ok(())
-    }
 }
 
 /// *Composite*: varios canales se comportan como uno. Avisa por todos **a la vez**

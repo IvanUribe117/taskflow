@@ -6,10 +6,15 @@ use domain::task::Status;
 /// "In Progress" y "in progress" son el mismo estado.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusMap {
+    /// Por hacer.
     pub todo: Vec<String>,
+    /// Analizada, esperando aprobación.
     pub ready: Vec<String>,
+    /// En progreso.
     pub in_progress: Vec<String>,
+    /// En revisión o QA.
     pub in_review: Vec<String>,
+    /// Terminada.
     pub done: Vec<String>,
 }
 

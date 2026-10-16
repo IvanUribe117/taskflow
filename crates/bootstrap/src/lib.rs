@@ -8,6 +8,7 @@
 //! let ctx = bootstrap::build(&store.load()?, &bootstrap::secret_store(), store.path())?;
 //! ```
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
 
 mod build;
 mod claude_code;

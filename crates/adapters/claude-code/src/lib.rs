@@ -9,6 +9,7 @@
 //! - `summarizer`: `impl Summarizer for ClaudeCodeSummarizer`, que une todo lo anterior.
 //! - `conversations`: cuánto pesa una conversación del agente (sus archivos `.jsonl`).
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
 
 mod command;
 mod config;

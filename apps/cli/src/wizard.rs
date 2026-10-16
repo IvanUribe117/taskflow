@@ -17,20 +17,28 @@ use domain::task::{FlatNode, LocationNode, flatten};
 
 use crate::presenter;
 
-/// 1. Si `store.path()` ya existe, preguntar si se reemplaza (por defecto, no). Si la
-///    respuesta es no, terminar sin cambios.
-/// 2. Elegir el proveedor entre `registry::task_providers()` (`Select`).
-/// 3. Por cada campo del descriptor, preguntar con [`ask`]: los `Text` van a un
-///    `FieldValues`; los `Secret`, a una lista `(SecretName, SecretString)`.
-/// 4. `AppSettings::new((descriptor.provider_settings)(&values))` y `validate()`
-///    **antes** de guardar nada.
-/// 5. Guardar cada secreto en `secrets`, y la configuración con `SettingsChange::Replace`.
-/// 6. Imprimir dónde quedó y sugerir `taskflow config check`.
+/// `taskflow config init`: crea la configuración desde cero, pregunta a pregunta.
+///
+/// 1. Si ya hay un archivo en `store.path()`, pregunta si reemplazarlo (por defecto, no).
+///    Si la respuesta es no, termina sin tocar nada.
+/// 2. El proveedor de tareas, de `registry::task_providers()`.
+/// 3. Los campos que pide ese proveedor, con [`ask`]: los de texto van a un
+///    `FieldValues`; los secretos (el token) se guardan aparte, porque van al llavero y
+///    no al archivo.
+/// 4. El proveedor de IA, de `registry::ai_providers()`.
+/// 5. Arma `AppSettings` y la valida **antes** de guardar nada: si algo está mal, ni el
+///    token ni el archivo quedan a medias.
+/// 6. Guarda los secretos en `secrets` y la configuración con `SettingsChange::Replace`,
+///    dice dónde quedó y sugiere `taskflow config check` para probar la conexión.
 ///
 /// # Errors
 ///
 /// Entrada cancelada (Ctrl+C), configuración inválida o fallo al guardar.
-pub fn config_init(store: &impl ConfigStore, secrets: &impl SecretStore) -> anyhow::Result<()> {
+pub(crate) fn config_init(
+    store: &impl ConfigStore,
+    secrets: &impl SecretStore,
+) -> anyhow::Result<()> {
+    crate::term::need_terminal("`config init` es un asistente: córrelo en una terminal")?;
     let theme = ColorfulTheme::default();
 
     if store.path().exists() {
@@ -67,7 +75,6 @@ pub fn config_init(store: &impl ConfigStore, secrets: &impl SecretStore) -> anyh
         }
     }
 
-    // Validar antes de guardar nada: ni el token ni el archivo quedan a medias.
     // Proveedor de IA (ADR-027). Hoy solo hay uno y no pide nada, pero el asistente ya
     // recorre el registro: agregar otro no cambia este código.
     let ai_providers = registry::ai_providers();
@@ -80,6 +87,7 @@ pub fn config_init(store: &impl ConfigStore, secrets: &impl SecretStore) -> anyh
 
     let mut settings = AppSettings::new((descriptor.provider_settings)(&values));
     settings.ai.kind = ai_providers[ai_choice].kind;
+    // Validar antes de guardar nada: ni el token ni el archivo quedan a medias.
     settings.validate()?;
     for (name, value) in new_secrets {
         secrets.set(name, value)?;
@@ -136,7 +144,8 @@ fn ask(field: &FieldSpec, theme: &ColorfulTheme) -> anyhow::Result<Answer> {
 /// # Errors
 ///
 /// Fallo del proveedor, entrada cancelada o proyecto inválido (por ejemplo, sin reglas).
-pub async fn project_add(ctx: &AppContext) -> anyhow::Result<()> {
+pub(crate) async fn project_add(ctx: &AppContext) -> anyhow::Result<()> {
+    crate::term::need_terminal("`project add` es un asistente: córrelo en una terminal")?;
     let theme = ColorfulTheme::default();
 
     // 1. Primero el espacio (una sola petición) y después solo su árbol. Pedir el árbol

@@ -8,24 +8,38 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SessionState {
-    /// La IA está armando el reporte. `note`: lo que pidió el usuario al rechazar el anterior.
+    /// La IA está armando el reporte.
     Analyzing {
+        /// Lo que pidió el usuario al rechazar el anterior.
         note: Option<String>,
     },
     /// El reporte está listo (o la IA falló) y espera tu luz verde.
     AwaitingApproval,
+    /// Aprobado: se está trabajando, con el contador corriendo.
     InProgress,
+    /// En pausa: el contador está detenido.
     Paused {
+        /// Desde cuándo.
         since: DateTime<Utc>,
     },
+    /// Terminada con `done`.
     Closed,
+    /// Cancelada con `abort`.
     Aborted,
 }
 
 impl SessionState {
+    /// Si terminó (`closed` o `aborted`): ya no acepta comandos.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Closed | Self::Aborted)
+    }
+
+    /// Si el plan ya se aprobó y se está trabajando (`in_progress` o `paused`): lo que
+    /// necesitan el agente, el commit y el reporte de lo hecho.
+    #[must_use]
+    pub fn is_approved(&self) -> bool {
+        matches!(self, Self::InProgress | Self::Paused { .. })
     }
 
     /// El nombre para mensajes y errores: `"awaiting_approval"`.
@@ -64,9 +78,11 @@ impl SessionState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum ReportOutcome {
+    /// El reporte está en `report.md`.
     Ready,
     /// Degradación elegante: la IA falló, pero puedes aprobar igual, pedir otro o abortar.
     Unavailable {
+        /// Por qué falló.
         reason: String,
     },
 }
@@ -75,9 +91,12 @@ pub enum ReportOutcome {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "publication", rename_all = "snake_case")]
 pub enum Publication {
+    /// Todavía no se publicó.
     #[default]
     Draft,
+    /// Publicado como comentario en la tarea.
     Published {
+        /// Cuándo.
         at: DateTime<Utc>,
     },
 }

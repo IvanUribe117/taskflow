@@ -3,6 +3,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 /// Fuente de "ahora". Es un puerto para que los tests no dependan del día en que se ejecutan:
 /// en producción se usa [`SystemClock`]; en tests, `testing::FixedClock`.
 pub trait Clock: Send + Sync {
+    /// El instante actual, en UTC.
     fn now(&self) -> DateTime<Utc>;
 
     /// Desfase horario del usuario; define qué es "hoy" (ver `ScoringContext::offset`).

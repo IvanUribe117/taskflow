@@ -13,6 +13,7 @@ pub struct BrowseLocations<'a> {
 }
 
 impl<'a> BrowseLocations<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }

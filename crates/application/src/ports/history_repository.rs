@@ -19,22 +19,28 @@ pub enum RecordSubject {
 /// Lo que se guarda: el documento ya armado (Markdown) y dónde ubicarlo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryRecord {
+    /// De qué es: decide la carpeta (`analyses/<tarea>` o `plans`).
     pub subject: RecordSubject,
     /// El proyecto de la tarea, o el de `plan --project`. `None`: va a la carpeta general.
     pub project: Option<ProjectSlug>,
     /// Hora local del usuario: es la que ve en el nombre del archivo.
     pub saved_at: NaiveDateTime,
+    /// El documento completo en Markdown, tal como se escribe en el archivo.
     pub content: String,
 }
 
 /// Un registro ya guardado, sin su contenido.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryEntry {
+    /// De qué es, deducido de la carpeta.
     pub subject: RecordSubject,
+    /// El proyecto de la carpeta, o `None` si está en la general.
     pub project: Option<ProjectSlug>,
+    /// Hora local del usuario, leída del nombre del archivo.
     pub saved_at: NaiveDateTime,
     /// El primer encabezado `# ...` del documento, o el nombre del archivo si no tiene.
     pub title: String,
+    /// El archivo, para leerlo con `read` o abrirlo.
     pub path: PathBuf,
 }
 
@@ -43,11 +49,14 @@ pub struct HistoryEntry {
 pub struct HistoryFilter {
     /// `None`: todos los proyectos, también la carpeta general.
     pub project: Option<ProjectSlug>,
+    /// Por defecto, análisis y planes.
     pub subject: SubjectFilter,
 }
 
+/// Qué tipo de registros listar.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum SubjectFilter {
+    /// Análisis de cualquier tarea y planes.
     #[default]
     Any,
     /// Solo los análisis de esta tarea.

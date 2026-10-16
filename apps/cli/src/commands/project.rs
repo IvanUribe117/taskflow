@@ -1,29 +1,29 @@
 use application::AppContext;
-use std::path::Path;
 
 use application::ports::ConfigStore;
 use application::projects::{ListProjects, RenameProject, ShowProject};
-use application::settings::{AppSettings, SettingsChange};
+use application::settings::AppSettings;
 use domain::project::ProjectSlug;
 
 use crate::args::ProjectCommand;
 use crate::{presenter, wizard};
 
-/// `project list | show | add`.
+/// `project list | show | add | rename`.
 ///
 /// - `list`: `ListProjects` → `presenter::projects` (o JSON).
 /// - `show`: el slug del argumento o, si no viene, [`default_slug`]; después `ShowProject`
 ///   → `presenter::project_detail` (o JSON).
 /// - `add`: `wizard::project_add`.
+/// - `rename`: `RenameProject`, que también actualiza `projects.default` si hace falta.
 ///
 /// # Errors
 ///
 /// Proyecto inexistente, sin slug ni `projects.default`, o fallo del repositorio.
-pub async fn run(
+pub(crate) async fn run(
     command: ProjectCommand,
     ctx: &AppContext,
     settings: &AppSettings,
-    config_path: &Path,
+    store: &dyn ConfigStore,
 ) -> anyhow::Result<()> {
     match command {
         ProjectCommand::List { json } => {
@@ -48,17 +48,15 @@ pub async fn run(
         }
         ProjectCommand::Add => wizard::project_add(ctx).await?,
         ProjectCommand::Rename { old, new } => {
-            let project = RenameProject::new(ctx).execute(&old, &new).await?;
-            // `projects.default` vive en la configuración: lo actualiza la interfaz.
-            if settings.projects.default.as_deref() == Some(old.as_str()) {
-                bootstrap::config_store(Some(config_path))?.apply(&SettingsChange::Set {
-                    key: "projects.default".parse()?,
-                    value: new.to_string(),
-                })?;
+            let renamed = RenameProject::new(ctx)
+                .updating_config(store)
+                .execute(&old, &new)
+                .await?;
+            if renamed.default_updated {
                 println!("✔ projects.default = {new}");
             }
             println!("✔ {old} → {new}");
-            println!("{}", presenter::project_detail(&project));
+            println!("{}", presenter::project_detail(&renamed.project));
         }
     }
     Ok(())

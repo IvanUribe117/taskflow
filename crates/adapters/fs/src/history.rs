@@ -12,6 +12,8 @@ use domain::project::ProjectSlug;
 use domain::task::TaskId;
 use tempfile::NamedTempFile;
 
+use crate::paths::safe_name;
+
 /// Carpeta de las tareas sin proyecto y de los planes sin `--project`. El guion bajo no es
 /// válido en un slug, así que nunca choca con un proyecto.
 const GENERAL: &str = "_general";
@@ -38,6 +40,7 @@ pub struct FsHistoryRepository {
 }
 
 impl FsHistoryRepository {
+    /// Con la carpeta del historial.
     #[must_use]
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
@@ -157,21 +160,6 @@ impl HistoryRepository for FsHistoryRepository {
         fs::read_to_string(&entry.path)
             .map_err(|e| RepoError::Storage(format!("{}: {e}", entry.path.display())))
     }
-}
-
-/// Un id de tarea como nombre de carpeta: todo lo que no sea letra, dígito, `-` o `_` se
-/// cambia por `_`. Los ids de `ClickUp` no cambian; un id raro como `../x` no se sale de
-/// la carpeta.
-pub(crate) fn safe_name(id: &str) -> String {
-    id.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 fn file_name(path: &Path) -> Option<&str> {
@@ -315,19 +303,20 @@ mod tests {
         assert_eq!(files, 3, "no temporary files left behind");
     }
 
+    // `TaskId` ya no admite `/`, pero `..` sí: tampoco debe salir de la carpeta.
     #[tokio::test]
     async fn odd_task_ids_stay_inside_the_folder() {
         let dir = tempfile::tempdir().unwrap();
         let repo = FsHistoryRepository::new(dir.path());
 
         let path = repo
-            .save(&record(analysis("../../x"), None, at(14, 9)))
+            .save(&record(analysis(".."), None, at(14, 9)))
             .await
             .unwrap();
 
         assert!(path.starts_with(dir.path().join("_general/analyses")));
         let filter = HistoryFilter {
-            subject: SubjectFilter::Task(TaskId::new("../../x").unwrap()),
+            subject: SubjectFilter::Task(TaskId::new("..").unwrap()),
             ..HistoryFilter::default()
         };
         assert_eq!(repo.list(&filter).await.unwrap().len(), 1);

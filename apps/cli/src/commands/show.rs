@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use anyhow::Context as _;
+
 use application::AppContext;
 use application::ai::{AiLimits, SummarizeTask};
 use application::history::SaveToHistory;
@@ -10,13 +12,14 @@ use domain::task::TaskId;
 
 use crate::{presenter, record};
 
-/// `taskflow show <TASK_ID> [--json]`: igual que `today`, con `InspectTask` y
-/// `presenter::task_detail`.
+/// `taskflow show <TASK_ID> [--json]`: el detalle de una tarea con sus comentarios
+/// (`InspectTask`). La fecha de vencimiento se muestra relativa al día local ("hoy",
+/// "mañana"), igual que en `today`.
 ///
 /// # Errors
 ///
 /// Los del caso de uso (la tarea no existe, red...).
-pub async fn run(ctx: &AppContext, task_id: &TaskId, json: bool) -> anyhow::Result<()> {
+pub(crate) async fn run(ctx: &AppContext, task_id: &TaskId, json: bool) -> anyhow::Result<()> {
     let detail = InspectTask::new(ctx).execute(task_id).await?;
 
     if json {
@@ -41,7 +44,7 @@ pub async fn run(ctx: &AppContext, task_id: &TaskId, json: bool) -> anyhow::Resu
 ///
 /// Los del caso de uso (tarea inexistente, IA no disponible...) o no poder escribir `out`
 /// o el historial.
-pub async fn run_with_ai(
+pub(crate) async fn run_with_ai(
     ctx: &AppContext,
     settings: &AppSettings,
     task_id: &TaskId,
@@ -50,15 +53,12 @@ pub async fn run_with_ai(
     save: bool,
 ) -> anyhow::Result<()> {
     eprintln!("Analizando la tarea con {}…", ctx.ai.name());
-    let limits = AiLimits {
-        max_description_chars: settings.ai.max_description_chars,
-        max_comments: settings.ai.max_comments,
-        budget_chars: settings.context.budget_chars,
-    };
+    let limits = AiLimits::from(settings);
     let insight = SummarizeTask::new(ctx).execute(task_id, limits).await?;
 
     if let Some(path) = out {
-        std::fs::write(path, &insight.summary.agent_prompt)?;
+        std::fs::write(path, &insight.summary.agent_prompt)
+            .with_context(|| format!("no se pudo escribir {}", presenter::path(path)))?;
         eprintln!(
             "Prompt para el agente guardado en {}",
             presenter::path(path)

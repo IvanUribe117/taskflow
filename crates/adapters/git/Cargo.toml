@@ -9,7 +9,7 @@ publish.workspace = true
 [dependencies]
 application.workspace = true
 async-trait.workspace = true
-tokio = { workspace = true, features = ["process", "io-util", "fs"] }
+tokio = { workspace = true, features = ["process", "io-util", "fs", "time", "macros"] }
 
 [dev-dependencies]
 tempfile.workspace = true

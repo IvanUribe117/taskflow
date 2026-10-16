@@ -1,5 +1,5 @@
-//! Convierten datos del dominio en lo que se envía a la IA. Ya están hechas: son
-//! conversiones campo por campo, como los DTO de las fases anteriores.
+//! Convierten datos del dominio en lo que se envía a la IA: campo por campo, con la
+//! descripción recortada y las fechas en la zona horaria del usuario.
 
 use chrono::{DateTime, FixedOffset, Utc};
 use domain::task::{Comment, Task};

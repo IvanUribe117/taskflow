@@ -34,7 +34,7 @@ use crate::presenter;
 /// Va en bloques `text` y no como Markdown propio para guardar **exactamente** lo que se
 /// vio: la descripción y los comentarios de `ClickUp` pueden traer cualquier cosa.
 #[must_use]
-pub fn analysis(
+pub(crate) fn analysis(
     insight: &TaskInsight,
     ai_name: &str,
     saved_at: NaiveDateTime,
@@ -73,7 +73,7 @@ pub fn analysis(
 /// <presenter::daily_plan: el plan de la IA ya es Markdown>
 /// ```
 #[must_use]
-pub fn plan(
+pub(crate) fn plan(
     plan: &DailyPlan,
     project: Option<&ProjectSlug>,
     ai_name: &str,

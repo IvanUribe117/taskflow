@@ -18,22 +18,30 @@ use crate::ports::{
 };
 use serde::Serialize;
 
+/// Una tarea en una lista (`today`, `plan`, el detalle de `show`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TaskView {
+    /// El id de la tarea en el proveedor (`86b2x1abc`).
     pub id: String,
+    /// El título tal como está en el proveedor.
     pub title: String,
     /// `Status` mostrado con `Display` ("in progress", "Code Review"...).
     pub status: String,
     /// `Priority` mostrado con `Display` ("urgent", "high"...).
     pub priority: String,
+    /// Fecha límite, si tiene.
     pub due: Option<DateTime<Utc>>,
+    /// Si `due` ya pasó respecto de `now` al armar la vista.
     pub overdue: bool,
     /// Comentarios sin resolver asignados a `me`.
     pub pending_comments: usize,
+    /// Enlace para abrir la tarea en el proveedor.
     pub url: String,
 }
 
 impl TaskView {
+    /// Arma la vista a partir de la tarea. `me` decide qué comentarios cuentan como pendientes
+    /// y `now`, si está vencida.
     #[must_use]
     pub fn from_task(task: &Task, me: &UserId, now: DateTime<Utc>) -> Self {
         Self {
@@ -49,9 +57,12 @@ impl TaskView {
     }
 }
 
+/// Un proyecto resumido: lo justo para encabezar un grupo o una tarea.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectView {
+    /// Identificador estable del proyecto (`acme`): el que se usa en los comandos.
     pub slug: String,
+    /// Nombre para mostrar.
     pub name: String,
     /// "client" o "internal".
     pub kind: String,
@@ -67,10 +78,12 @@ impl From<&Project> for ProjectView {
     }
 }
 
+/// Las tareas de un proyecto, para mostrarlas bajo un mismo encabezado.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TaskGroup {
     /// `None` = "Sin proyecto" o lista sin agrupar.
     pub project: Option<ProjectView>,
+    /// En el orden en que se deben mostrar (ya ordenadas por el caso de uso).
     pub tasks: Vec<TaskView>,
 }
 
@@ -111,16 +124,22 @@ impl TaskGroup {
     }
 }
 
+/// El resultado de `today` (UC-01): las tareas del día agrupadas por proyecto.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TodayReport {
+    /// Cuándo se armó el reporte (UTC).
     pub generated_at: DateTime<Utc>,
+    /// Sin agrupar, un solo grupo sin proyecto. Por proyecto, el primero es el de la tarea más
+    /// prioritaria.
     pub groups: Vec<TaskGroup>,
 }
 
 /// Un proyecto con todas sus reglas, para `project list` y `project show` (UC-06).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectDetail {
+    /// Identificador estable del proyecto (`acme`).
     pub slug: String,
+    /// Nombre para mostrar.
     pub name: String,
     /// "client" o "internal".
     pub kind: String,
@@ -128,6 +147,7 @@ pub struct ProjectDetail {
     pub rules: Vec<String>,
     /// La ruta como texto (`Path::display`), o `None`.
     pub repo_path: Option<String>,
+    /// Puntos extra en la priorización de sus tareas.
     pub priority_boost: i64,
     /// Los estados sugeridos propios, por etapa: `"ready: needs approval"`. Vacío si usa
     /// los globales.
@@ -168,6 +188,7 @@ impl From<&Project> for ProjectDetail {
 /// Un estado disponible para la tarea, para mostrarlo en un selector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StatusOptionView {
+    /// El nombre exacto del estado en el proveedor: el que se envía al cerrar.
     pub name: String,
     /// `"open"`, `"custom"`, `"done"` o `"closed"`.
     pub kind: String,
@@ -185,7 +206,9 @@ impl From<&StatusOption> for StatusOptionView {
 /// Lo que la interfaz necesita para preguntar cómo cerrar una tarea (UC-04).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CloseOptions {
+    /// El id de la tarea en el proveedor.
     pub task_id: String,
+    /// El título de la tarea.
     pub title: String,
     /// El estado actual, con el `Display` de `Status`.
     pub current_status: String,
@@ -198,17 +221,22 @@ pub struct CloseOptions {
 /// El resultado de cerrar una tarea.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CloseResult {
+    /// El id de la tarea en el proveedor.
     pub task_id: String,
     /// El nombre exacto con que quedó en el proveedor.
     pub final_status: String,
+    /// Si se publicó el comentario de cierre.
     pub commented: bool,
 }
 
 /// Una sección de contexto lista para enviarse a la IA: solo lo que la IA necesita.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ContextBlock {
+    /// La clave de la sección (`negocio`).
     pub key: String,
+    /// El título de la sección, que encabeza el bloque.
     pub title: String,
+    /// El texto en Markdown, sin el front matter.
     pub body: String,
 }
 
@@ -236,13 +264,18 @@ pub struct BuiltContext {
 /// Una sección tal como la ve `context list`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SectionView {
+    /// La clave de la sección (`negocio`): con ella se edita o se borra.
     pub key: String,
+    /// El título de la sección.
     pub title: String,
     /// `"knowledge"` o `"instruction"`.
     pub role: String,
     /// Cada uso con su `Display`, en el orden de declaración de `Usage`.
     pub usage: Vec<String>,
+    /// Menor número = más importante: al pasar del presupuesto se omiten primero las de número
+    /// más alto.
     pub priority: u8,
+    /// Si es `true`, nunca se envía a la IA (FR-39).
     pub private: bool,
     /// Largo del cuerpo en caracteres: lo que cuenta para el presupuesto.
     pub chars: usize,
@@ -253,23 +286,31 @@ pub struct SectionView {
 /// Lo que recibiría la IA para una tarea (`context preview`, FR-40).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ContextPreview {
+    /// El id de la tarea en el proveedor.
     pub task_id: String,
+    /// El título de la tarea.
     pub title: String,
+    /// El proyecto al que pertenece la tarea, si alguno la reclama.
     pub project: Option<ProjectView>,
+    /// El uso para el que se armó el contexto (`summary`, `plan`, `agent_prompt`...).
     pub usage: String,
+    /// Las secciones que recibiría la IA, separadas por rol.
     pub context: BuiltContext,
 }
 
 /// `show --ai`: el detalle de la tarea más el análisis de la IA (UC-03).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TaskInsight {
+    /// Lo mismo que muestra `show` sin `--ai`.
     pub detail: TaskDetail,
+    /// El análisis de la IA.
     pub summary: TaskSummary,
 }
 
 /// `plan`: las tareas del día y, si la IA respondió, el plan (UC-02).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DailyPlan {
+    /// Cuándo se armó el plan (UTC).
     pub generated_at: DateTime<Utc>,
     /// En orden de prioridad.
     pub tasks: Vec<PlanTask>,
@@ -281,15 +322,20 @@ pub struct DailyPlan {
     pub omitted_sections: Vec<String>,
 }
 
-/// Detalle de una tarea para `show` (UC-03). En la fase 6 se suma el resumen de la IA.
+/// Detalle de una tarea para `show` (UC-03). Con `--ai`, va dentro de [`TaskInsight`] junto
+/// con el análisis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TaskDetail {
+    /// Los datos de la lista: título, estado, prioridad, vencimiento.
     pub task: TaskView,
+    /// La descripción en Markdown, o `None` si la tarea no tiene.
     pub description: Option<String>,
     /// Ruta legible, de la raíz a la lista: `["90110001", "Backend", "ACME – Sprint"]`.
     /// Cada tramo usa su nombre o, si no tiene (el espacio de `ClickUp`), su id.
     pub location: Vec<String>,
+    /// Las etiquetas tal como están en el proveedor.
     pub tags: Vec<String>,
+    /// El proyecto al que pertenece la tarea, si alguno la reclama.
     pub project: Option<ProjectView>,
     /// En el mismo orden en que los entrega el proveedor.
     pub comments: Vec<CommentView>,
@@ -325,17 +371,23 @@ impl TaskDetail {
     }
 }
 
+/// Un comentario de la tarea, para el detalle de `show`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CommentView {
+    /// El nombre del autor tal como lo muestra el proveedor.
     pub author: String,
+    /// El texto del comentario.
     pub body: String,
+    /// Cuándo se escribió (UTC).
     pub created_at: DateTime<Utc>,
+    /// Si ya se marcó como resuelto en el proveedor.
     pub resolved: bool,
     /// Asignado a `me`: lo que la interfaz resalta como pendiente.
     pub assigned_to_me: bool,
 }
 
 impl CommentView {
+    /// Arma la vista; `me` decide `assigned_to_me`.
     #[must_use]
     pub fn new(comment: &Comment, me: &UserId) -> Self {
         Self {
@@ -609,10 +661,13 @@ pub struct HistoryItem {
     pub kind: &'static str,
     /// Solo en los análisis.
     pub task_id: Option<String>,
+    /// El slug del proyecto, si la tarea o el plan tenían uno.
     pub project: Option<String>,
     /// Hora local del usuario.
     pub saved_at: NaiveDateTime,
+    /// Título para la lista: el de la tarea o el del plan.
     pub title: String,
+    /// El archivo Markdown del registro, para abrirlo.
     pub path: PathBuf,
 }
 
@@ -636,23 +691,34 @@ impl From<&HistoryEntry> for HistoryItem {
 /// La sesión de trabajo, para `session show` y la salida de cada comando.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SessionView {
+    /// El id de la tarea en el proveedor.
     pub task_id: String,
+    /// El título de la tarea al empezar la sesión.
     pub title: String,
+    /// Enlace a la tarea en el proveedor.
     pub url: String,
+    /// El slug del proyecto de la tarea, si tiene.
     pub project: Option<String>,
     /// `analyzing`, `awaiting_approval`, `in_progress`, `paused`, `closed` o `aborted`.
     pub state: &'static str,
+    /// Cuándo empezó la sesión (UTC).
     pub started_at: DateTime<Utc>,
     /// Minutos con el contador corriendo (sin las pausas).
     pub elapsed_minutes: i64,
+    /// Si el contador de tiempo está corriendo ahora.
     pub timer_running: bool,
     /// `None` mientras se analiza; después, `ready` o `unavailable`.
     pub report: Option<&'static str>,
     /// Por qué falló la IA, si falló.
     pub report_error: Option<String>,
+    /// Cuándo se publicó el reporte en la tarea, o `None` si sigue como borrador.
     pub published_at: Option<DateTime<Utc>>,
+    /// `report.md`: el análisis de la IA; se puede editar antes de publicarlo.
     pub report_path: PathBuf,
+    /// `agent-prompt.md`: el prompt que recibe el agente de código.
     pub agent_prompt_path: PathBuf,
+    /// `work-report.md`: lo que se hizo, para publicar (existe después de armarlo).
+    pub work_report_path: PathBuf,
     /// Lo que quedó sin aplicar tras un fallo, en palabras (`session retry`).
     pub pending: Vec<String>,
     /// Si la sesión cree que el contador corre pero el proveedor no lo tiene en esta tarea
@@ -663,12 +729,15 @@ pub struct SessionView {
 }
 
 impl SessionView {
+    /// Arma la vista de `session` en `now`. Las rutas las pone quien llama (las conoce el
+    /// `SessionStore`); `timer_out_of_sync` queda en `false` hasta que `session show` lo calcule.
     #[must_use]
     pub fn new(
         session: &WorkSession,
         now: DateTime<Utc>,
         report_path: PathBuf,
         agent_prompt_path: PathBuf,
+        work_report_path: PathBuf,
     ) -> Self {
         let (report, report_error) = match &session.report {
             None => (None, None),
@@ -695,6 +764,7 @@ impl SessionView {
             published_at,
             report_path,
             agent_prompt_path,
+            work_report_path,
             pending: session
                 .pending
                 .iter()
@@ -709,12 +779,16 @@ impl SessionView {
 /// El resultado de un comando de la sesión.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SessionOutcome {
+    /// La sesión tal como quedó después del comando.
     pub session: SessionView,
     /// Lo que no salió pero no detiene la sesión (una notificación, un estado sugerido que
     /// no existe en la lista...).
     pub warnings: Vec<String>,
     /// Lo que conviene saber y salió bien (la rama se puso al día con la base...).
     pub notes: Vec<String>,
+    /// Al terminar (`done`, `abort`): el worktree de la tarea, si quedó limpio y se puede
+    /// quitar. La interfaz pregunta y lo quita con `SessionWorkDir::remove`.
+    pub removable_worktree: Option<RemovableWorktree>,
     /// Dónde quedó archivada, si terminó (`done` o `abort`).
     pub archived_to: Option<PathBuf>,
 }
@@ -722,8 +796,11 @@ pub struct SessionOutcome {
 /// Un contador del proveedor que ya está corriendo.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TimerView {
+    /// La tarea del contador, o `None` si corre sin tarea.
     pub task_id: Option<String>,
+    /// El título de esa tarea, si el proveedor lo informa.
     pub task_title: Option<String>,
+    /// Cuándo arrancó (UTC).
     pub started_at: DateTime<Utc>,
 }
 
@@ -751,9 +828,11 @@ pub struct StartCheck {
 /// La sesión anterior de una tarea.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PreviousView {
+    /// Cuándo terminó (UTC).
     pub ended_at: DateTime<Utc>,
     /// `closed` o `aborted`.
     pub state: &'static str,
+    /// Si llegó a publicar el reporte en la tarea.
     pub published: bool,
     /// Si tiene una conversación del agente para retomar.
     pub has_agent: bool,
@@ -805,6 +884,7 @@ pub struct AgentBrief {
 /// La carpeta donde se trabaja la tarea.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkDirSetup {
+    /// La carpeta: un worktree o el repo principal.
     pub path: PathBuf,
     /// Su rama (`CU-86b1`), si se sabe.
     pub branch: Option<String>,
@@ -819,8 +899,11 @@ pub struct WorkDirSetup {
 /// La vista previa del worktree: dónde se ve y cómo se levanta y se detiene.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PreviewView {
+    /// Dónde se ve la vista previa, con el puerto de la tarea ya puesto.
     pub url: String,
+    /// El comando para levantarla.
     pub start: String,
+    /// El comando para detenerla, si el proyecto lo define.
     pub stop: Option<String>,
 }
 
@@ -834,10 +917,21 @@ impl From<domain::project::RenderedPreview> for PreviewView {
     }
 }
 
+/// Un worktree que se puede quitar: no tiene cambios sin commit y no es el repo principal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemovableWorktree {
+    /// El repo principal, desde donde se quita (`git -C <repo> worktree remove`).
+    pub repo: PathBuf,
+    /// La carpeta del worktree que se quitaría.
+    pub path: PathBuf,
+}
+
 /// Otro worktree con cambios, donde parece que trabajó el agente.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorktreeCandidate {
+    /// La carpeta del worktree.
     pub path: PathBuf,
+    /// Su rama, o `None` si está en *detached HEAD*.
     pub branch: Option<String>,
     /// Archivos sin commit.
     pub changed_files: usize,
@@ -848,29 +942,37 @@ pub struct WorktreeCandidate {
 /// El reporte de lo que se hizo, listo para revisar y publicar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkReportView {
+    /// El reporte en Markdown, tal como se publicaría.
     pub markdown: String,
     /// `work-report.md`: se puede editar antes de publicar.
     pub path: PathBuf,
     /// `true` si lo escribió el mismo agente (retomando su conversación).
     pub from_agent: bool,
+    /// Lo que no salió pero no impide publicar.
     pub warnings: Vec<String>,
 }
 
 /// Lo que propone `taskflow commit`, para que elijas y confirmes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CommitProposal {
+    /// El repositorio donde se haría el commit.
     pub repo: PathBuf,
+    /// La rama actual, o `None` si está en *detached HEAD*.
     pub branch: Option<String>,
+    /// Los archivos con cambios, para elegir cuáles entran.
     pub files: Vec<ChangedFile>,
     /// El mensaje que propone la IA; lo puedes editar.
     pub message: CommitMessage,
+    /// Lo que no salió pero no impide hacer el commit.
     pub warnings: Vec<String>,
 }
 
 /// El estado de la rama para `taskflow pr`, sin IA.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BranchStatus {
+    /// El repositorio de la rama.
     pub repo: PathBuf,
+    /// La rama actual (`CU-86b1`).
     pub branch: String,
     /// La rama a la que se integra, sin `origin/` (`master`).
     pub base: String,
@@ -885,11 +987,13 @@ pub struct BranchStatus {
 /// Lo que propone `taskflow pr` para que lo revises antes de abrirlo.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PrProposal {
+    /// La rama, su base, sus commits y su PR, si tiene.
     pub status: BranchStatus,
     /// El título y la descripción que propone la IA. `None` si la rama ya tiene PR (solo
     /// hace falta el push).
     pub description: Option<PrDescription>,
     /// `true` si lo escribió el mismo agente (retomando su conversación).
     pub from_agent: bool,
+    /// Lo que no salió pero no impide abrir el PR.
     pub warnings: Vec<String>,
 }

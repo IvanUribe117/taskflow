@@ -7,6 +7,7 @@
 //! - `provider`: `impl TaskProvider for ClickUpProvider`.
 //! - `time`: `impl TimeTracker for ClickUpTimeTracker` (el contador).
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
 
 mod api_types;
 mod client;

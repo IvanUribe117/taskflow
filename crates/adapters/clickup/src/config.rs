@@ -13,6 +13,7 @@ pub struct ClickUpConfig {
     pub token: String,
     /// ID del Workspace (en la API se llama "team").
     pub team_id: String,
+    /// Qué nombres de estado de `ClickUp` corresponden a cada estado del dominio.
     pub statuses: StatusMap,
     /// Peticiones simultáneas como máximo (NFR-07).
     pub max_concurrent_requests: usize,
@@ -23,8 +24,10 @@ pub struct ClickUpConfig {
 }
 
 impl ClickUpConfig {
+    /// La API v2 de `ClickUp`. Los tests la cambian por la de un servidor falso.
     pub const DEFAULT_BASE_URL: &'static str = "https://api.clickup.com/api/v2";
 
+    /// Con el token y el workspace; lo demás (URL, reintentos, concurrencia) por defecto.
     #[must_use]
     pub fn new(token: impl Into<String>, team_id: impl Into<String>) -> Self {
         Self {

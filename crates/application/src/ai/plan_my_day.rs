@@ -8,12 +8,14 @@ use crate::sections::{BuildContext, ContextRequest};
 use crate::tasks::{GetTodayTasks, GroupBy, TodayQuery};
 use crate::{AppContext, AppError};
 
+/// Qué tareas entran en el plan y cuánto contexto se envía.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanQuery {
     /// Cuántas de las tareas más prioritarias entran en el plan (`ai.max_tasks`).
     pub max_tasks: usize,
     /// Solo las tareas de un proyecto; también suma el contexto de ese proyecto.
     pub project: Option<ProjectSlug>,
+    /// Presupuesto de caracteres para las secciones de contexto (`context.budget_chars`).
     pub budget_chars: usize,
 }
 
@@ -24,12 +26,17 @@ pub struct PlanMyDay<'a> {
 }
 
 impl<'a> PlanMyDay<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
     }
 
-    /// Ver la especificación del paso 7 en `docs/learning/fase-6b.md`.
+    /// 1. Pide las tareas del día con `GetTodayTasks`, agrupadas por proyecto y limitadas a
+    ///    `query.max_tasks`; cada una lleva el nombre de su proyecto.
+    /// 2. Arma el contexto del uso `plan` (con el del proyecto, si se filtró por uno).
+    /// 3. Sin tareas, devuelve el resultado sin llamar a la IA (`plan` en `None`).
+    /// 4. Si no, le pide el plan a la IA con la fecha de hoy en la zona del usuario.
     ///
     /// # Errors
     ///

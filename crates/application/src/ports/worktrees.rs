@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde::Serialize;
 
-use crate::ports::{NoRepoInspector, RepoError};
+use crate::ports::RepoError;
 
 /// Un worktree de git: una carpeta con su propia rama, que comparte el repositorio.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Worktree {
+    /// La carpeta del worktree.
     pub path: PathBuf,
     /// La rama (`CU-86b1`), sin `refs/heads/`. `None` si está en un commit suelto.
     pub branch: Option<String>,
@@ -20,13 +21,26 @@ pub enum SyncOutcome {
     /// Ya tenía todo lo de la base.
     UpToDate,
     /// Se trajeron `commits` de la base (`base`, como `origin/master`).
-    Updated { base: String, commits: usize },
+    Updated {
+        /// La base con que se unió (`origin/master`).
+        base: String,
+        /// Cuántos commits de la base se trajeron.
+        commits: usize,
+    },
     /// Hay cambios sin commit: no se tocó nada.
     SkippedDirty,
     /// La unión choca: se deshizo (`git merge --abort`) y la rama quedó como estaba.
-    Conflict { base: String },
+    Conflict {
+        /// La base con que chocó (`origin/master`).
+        base: String,
+    },
     /// No se encontró la rama base, o la carpeta está en la base misma.
     NoBase,
+    /// No se pudo ejecutar git: la rama quedó como estaba.
+    Failed {
+        /// El error de git, como texto.
+        reason: String,
+    },
 }
 
 /// Los worktrees del repositorio: así cada tarea tiene su carpeta y su rama, y el repo
@@ -65,23 +79,4 @@ pub trait Worktrees: Send + Sync {
     ///
     /// Si no se puede ejecutar git.
     async fn sync_with_base(&self, path: &Path) -> Result<SyncOutcome, RepoError>;
-}
-
-#[async_trait]
-impl Worktrees for NoRepoInspector {
-    async fn list(&self, _repo: &Path) -> Result<Vec<Worktree>, RepoError> {
-        Ok(Vec::new())
-    }
-
-    async fn add(&self, _repo: &Path, _path: &Path, _branch: &str) -> Result<(), RepoError> {
-        Err(RepoError::Invalid("not a git repository".into()))
-    }
-
-    async fn remove(&self, _repo: &Path, _path: &Path) -> Result<(), RepoError> {
-        Err(RepoError::Invalid("not a git repository".into()))
-    }
-
-    async fn sync_with_base(&self, _path: &Path) -> Result<SyncOutcome, RepoError> {
-        Ok(SyncOutcome::NoBase)
-    }
 }

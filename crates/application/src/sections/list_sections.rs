@@ -13,6 +13,7 @@ pub struct ListSections<'a> {
 }
 
 impl<'a> ListSections<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -23,7 +24,7 @@ impl<'a> ListSections<'a> {
     /// 2. Secciones globales y, si hay proyecto, las del proyecto.
     /// 3. `ProjectContext::merge` (quedan ordenadas por clave), e incluir **también las
     ///    privadas**: aquí no se envía nada a la IA, solo se listan.
-    /// 4. Cada sección con [`section_view`], calculando su origen:
+    /// 4. Cada sección con `section_view`, calculando su origen:
     ///    - la clave está entre las del proyecto y entre las globales → `"override"`;
     ///    - solo entre las del proyecto → `"project"`;
     ///    - global, pero el proyecto la excluye → `"excluded"` (se lista para que sepas
@@ -73,7 +74,7 @@ impl<'a> ListSections<'a> {
     }
 }
 
-/// `SectionView` de una sección con su origen ya calculado. Ya está hecha.
+/// `SectionView` de una sección con su origen ya calculado.
 ///
 /// Recorrer un `EnumSet` con `iter()` da las variantes en el orden en que están declaradas
 /// en `Usage`.

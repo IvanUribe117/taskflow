@@ -9,7 +9,7 @@
 //! La confirmación es de la interfaz, no de esta capa (UC-04): aquí solo se ejecuta lo ya
 //! confirmado.
 
-use domain::task::{StatusOption, TaskId, find_status, suggest_final};
+use domain::task::{TaskId, find_status, suggest_final, unknown_status};
 
 use crate::dto::{CloseOptions, CloseResult, StatusOptionView};
 use crate::{AppContext, AppError};
@@ -21,6 +21,7 @@ pub struct PrepareClose<'a> {
 }
 
 impl<'a> PrepareClose<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -60,6 +61,7 @@ impl<'a> PrepareClose<'a> {
 /// Lo que la interfaz ya decidió y el usuario confirmó.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloseCommand {
+    /// La tarea a cerrar.
     pub task_id: TaskId,
     /// El estado final como lo escribió o eligió el usuario (sin distinguir mayúsculas).
     pub status: String,
@@ -74,6 +76,7 @@ pub struct CloseTask<'a> {
 }
 
 impl<'a> CloseTask<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -83,7 +86,7 @@ impl<'a> CloseTask<'a> {
     ///
     /// 1. Pedir los estados disponibles de la tarea.
     /// 2. Buscar `command.status` con `find_status`. Si no existe →
-    ///    `AppError::InvalidInput` con el mensaje de [`unknown_status`].
+    ///    `AppError::InvalidInput` con el mensaje de `unknown_status`.
     /// 3. Recortar el comentario (`trim`). Si queda texto, publicarlo con `add_comment`.
     /// 4. Cambiar el estado con `set_status`, usando el nombre **exacto** del estado
     ///    encontrado (no el que escribió el usuario).
@@ -123,18 +126,9 @@ impl<'a> CloseTask<'a> {
     }
 }
 
-/// `unknown status `QA`; available: to do, in progress, complete`. Ya está hecha.
-pub(crate) fn unknown_status(name: &str, options: &[StatusOption]) -> String {
-    let available: Vec<&str> = options.iter().map(|o| o.name.as_str()).collect();
-    format!(
-        "unknown status `{name}`; available: {}",
-        available.join(", ")
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use domain::task::{Status, StatusKind};
+    use domain::task::{Status, StatusKind, StatusOption};
     use domain::testing::{task, user};
 
     use super::*;

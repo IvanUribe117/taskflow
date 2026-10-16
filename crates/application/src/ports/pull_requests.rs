@@ -8,7 +8,9 @@ use crate::ports::RepoError;
 /// Un pull request abierto.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PullRequest {
+    /// El número del PR en el repositorio (`#42`).
     pub number: u64,
+    /// Enlace para abrirlo en el navegador.
     pub url: String,
 }
 
@@ -19,7 +21,9 @@ pub struct PullRequestDraft {
     pub base: String,
     /// La rama de trabajo (`CU-86b1`).
     pub head: String,
+    /// El título del PR.
     pub title: String,
+    /// La descripción en Markdown.
     pub body: String,
     /// Abrirlo como borrador.
     pub draft: bool,
@@ -43,27 +47,4 @@ pub trait PullRequests: Send + Sync {
     /// permisos…).
     async fn create(&self, repo: &Path, draft: &PullRequestDraft)
     -> Result<PullRequest, RepoError>;
-}
-
-/// Objeto nulo: sin servidor de PRs.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoPullRequests;
-
-#[async_trait]
-impl PullRequests for NoPullRequests {
-    async fn find(&self, _repo: &Path, _branch: &str) -> Result<Option<PullRequest>, RepoError> {
-        Ok(None)
-    }
-
-    async fn template(&self, _repo: &Path) -> Result<Option<String>, RepoError> {
-        Ok(None)
-    }
-
-    async fn create(
-        &self,
-        _repo: &Path,
-        _draft: &PullRequestDraft,
-    ) -> Result<PullRequest, RepoError> {
-        Err(RepoError::Invalid("pull requests are not available".into()))
-    }
 }

@@ -24,6 +24,7 @@ pub enum StatusTarget {
     Original,
 }
 
+/// Qué comentario publicar en la tarea.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "text", rename_all = "snake_case")]
 pub enum CommentKind {
@@ -33,11 +34,15 @@ pub enum CommentKind {
     Closing(String),
 }
 
+/// Sobre qué avisar (notificación de escritorio).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NoticeKind {
+    /// El análisis está listo para que lo revises.
     ReadyForReview,
+    /// La IA no pudo analizar la tarea.
     AnalysisFailed,
+    /// La sesión terminó.
     Closed,
 }
 
@@ -46,21 +51,31 @@ pub enum NoticeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "effect", rename_all = "snake_case")]
 pub enum Effect {
+    /// Iniciar el contador del proveedor.
     StartTimer,
+    /// Detenerlo.
     StopTimer,
+    /// Pedirle a la IA el análisis de la tarea.
     Analyze {
+        /// Lo que pediste al rechazar el anterior, si hay.
         note: Option<String>,
     },
+    /// Cambiar el estado de la tarea en el proveedor.
     SetStatus {
+        /// A cuál: uno sugerido para una etapa, uno explícito o el original.
         target: StatusTarget,
     },
+    /// Publicar un comentario en la tarea.
     PostComment {
+        /// Cuál: lo que se hizo o el de cierre.
         comment: CommentKind,
     },
     /// Va siempre **después** de `PostComment(WorkReport)`: si el comentario falla, la cadena
     /// se detiene y el reporte no queda marcado como publicado.
     MarkReportPublished,
+    /// Avisar (notificación de escritorio). No es crítico: si falla, solo queda un aviso.
     Notify {
+        /// Sobre qué.
         notice: NoticeKind,
     },
 }

@@ -12,9 +12,23 @@ use crate::{AppContext, AppError};
 /// `[context]` en la configuración.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AiLimits {
+    /// Máximo de caracteres de la descripción; si es más larga, se recorta con `…`.
     pub max_description_chars: usize,
+    /// Cuántos de los comentarios más recientes se envían.
     pub max_comments: usize,
+    /// Presupuesto de caracteres para las secciones de contexto (FR-38).
     pub budget_chars: usize,
+}
+
+impl From<&crate::settings::AppSettings> for AiLimits {
+    /// `ai.max_description_chars`, `ai.max_comments` y `context.budget_chars`.
+    fn from(settings: &crate::settings::AppSettings) -> Self {
+        Self {
+            max_description_chars: settings.ai.max_description_chars,
+            max_comments: settings.ai.max_comments,
+            budget_chars: settings.context.budget_chars,
+        }
+    }
 }
 
 /// Análisis de una tarea con IA: resumen y prompt para el agente (UC-03, `show --ai`).
@@ -24,12 +38,19 @@ pub struct SummarizeTask<'a> {
 }
 
 impl<'a> SummarizeTask<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
     }
 
-    /// Ver la especificación del paso 6 en `docs/learning/fase-6b.md`.
+    /// 1. Pide **a la vez** el usuario actual, la tarea y sus comentarios.
+    /// 2. Resuelve el proyecto de la tarea con los proyectos guardados.
+    /// 3. Arma el contexto con las secciones de los usos `summary` y `agent_prompt` (el
+    ///    resumen y el prompt salen de la misma llamada), dentro de `limits.budget_chars`.
+    /// 4. Envía a la IA la tarea (descripción recortada), los últimos
+    ///    `limits.max_comments` comentarios, el proyecto y el contexto.
+    /// 5. Devuelve el detalle de la tarea (como `show`) junto con el análisis.
     ///
     /// # Errors
     ///

@@ -4,10 +4,13 @@
 //! invocan las interfaces. Nunca imprime, nunca lee argumentos y nunca habla con la red
 //! directamente. Ver `docs/ARCHITECTURE.md`, §10 y §11.
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
 
 pub mod ai;
+/// `AppContext`: las dependencias de los casos de uso.
 pub mod context;
 pub mod dto;
+/// `AppError`: el error de cualquier caso de uso.
 pub mod error;
 pub mod history;
 pub mod ports;

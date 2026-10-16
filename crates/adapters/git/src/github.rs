@@ -2,12 +2,12 @@
 //! login`; Taskflow no guarda ningún token de GitHub.
 
 use std::path::Path;
-use std::process::Stdio;
 
 use application::ports::{PullRequest, PullRequestDraft, PullRequests, RepoError};
 use async_trait::async_trait;
-use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+
+use crate::run;
 
 /// Dónde se busca la plantilla de PR, en el orden en que la busca GitHub.
 const TEMPLATES: &[&str] = &[
@@ -19,6 +19,7 @@ const TEMPLATES: &[&str] = &[
     "docs/PULL_REQUEST_TEMPLATE.md",
 ];
 
+/// Los pull requests de GitHub (`impl PullRequests`), con la CLI `gh`.
 #[derive(Debug, Clone)]
 pub struct GhPullRequests {
     /// El programa: `gh`, o un sustituto en los tests.
@@ -32,6 +33,7 @@ impl Default for GhPullRequests {
 }
 
 impl GhPullRequests {
+    /// Con `program` en lugar de `gh` (los tests usan un `gh` falso).
     #[must_use]
     pub fn new(program: impl Into<String>) -> Self {
         Self {
@@ -40,56 +42,34 @@ impl GhPullRequests {
     }
 
     /// `gh <args>` dentro de `repo` (así `gh` sabe de qué repositorio de GitHub se trata),
-    /// con `stdin` si hay. Devuelve la salida; si falla, el error trae lo que dijo `gh`.
+    /// con `stdin` si hay y el tiempo límite de la red. Devuelve la salida; si falla, el
+    /// error trae lo que dijo `gh` (ver [`crate::run::run`]).
     async fn gh(
         &self,
         repo: &Path,
         args: &[&str],
         stdin: Option<&str>,
     ) -> Result<String, RepoError> {
-        let mut child = Command::new(&self.program)
+        let mut command = Command::new(&self.program);
+        command
             .args(args)
             .current_dir(repo)
-            .env("GH_PROMPT_DISABLED", "1")
-            .stdin(if stdin.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                RepoError::Storage(format!(
-                    "could not run `{}` ({e}): install the GitHub CLI (https://cli.github.com) and run `gh auth login`",
-                    self.program
-                ))
-            })?;
-        if let (Some(text), Some(mut input)) = (stdin, child.stdin.take()) {
-            input
-                .write_all(text.as_bytes())
-                .await
-                .map_err(|e| RepoError::Storage(format!("gh: {e}")))?;
-        }
-        let output = child
-            .wait_with_output()
+            .env("GH_PROMPT_DISABLED", "1");
+        let what = format!("gh {}", args[..2.min(args.len())].join(" "));
+        let output = run::run(command, stdin, run::NETWORK, &what)
             .await
-            .map_err(|e| RepoError::Storage(format!("gh: {e}")))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let said = if stderr.trim().is_empty() {
-                stdout.trim()
-            } else {
-                stderr.trim()
-            };
-            return Err(RepoError::Invalid(format!(
-                "gh {} failed ({}): {said}",
-                args[..2.min(args.len())].join(" "),
-                output.status
-            )));
+            .map_err(|error| match error {
+                RepoError::Storage(_) => RepoError::Storage(format!(
+                    "could not run `{}` ({error}): install the GitHub CLI (https://cli.github.com) and run `gh auth login`",
+                    self.program
+                )),
+                other => other,
+            })?;
+        if output.status.success() {
+            Ok(run::stdout(&output).trim().to_owned())
+        } else {
+            Err(run::failure(&what, &output))
         }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 }
 
@@ -262,6 +242,32 @@ mod tests {
 
         assert!(failed.to_string().contains("gh pr list failed"), "{failed}");
         assert!(absent.to_string().contains("gh auth login"), "{absent}");
+    }
+
+    #[tokio::test]
+    async fn a_gh_that_exits_without_reading_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("gh");
+        fs::write(
+            &script,
+            "#!/bin/sh\necho 'To get started with GitHub CLI, please run: gh auth login' >&2\nexit 4\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        let gh = GhPullRequests::new(script.to_string_lossy());
+        let draft = PullRequestDraft {
+            base: "master".into(),
+            head: "CU-1".into(),
+            title: "CU-1 - x".into(),
+            // Más de lo que cabe en el buffer del pipe: escribirlo daría "Broken pipe".
+            body: "x".repeat(1 << 20),
+            draft: false,
+        };
+
+        let error = gh.create(dir.path(), &draft).await.unwrap_err().to_string();
+
+        assert!(error.contains("gh pr create failed"), "{error}");
+        assert!(error.contains("gh auth login"), "{error}");
     }
 
     #[tokio::test]

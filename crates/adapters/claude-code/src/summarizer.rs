@@ -23,6 +23,7 @@ pub struct ClaudeCodeSummarizer {
 }
 
 impl ClaudeCodeSummarizer {
+    /// Con la configuración de `[ai]` (modelo, esfuerzo, tiempo límite, idiomas).
     #[must_use]
     pub fn new(config: ClaudeCodeConfig) -> Self {
         Self { config }

@@ -8,6 +8,7 @@ use crate::ports::RepoError;
 /// Los cambios de la rama de trabajo respecto de la rama base.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RepoChanges {
+    /// La rama actual (`CU-86b1`).
     pub branch: String,
     /// La rama base (`origin/master`), si se pudo detectar.
     pub base: Option<String>,
@@ -32,24 +33,10 @@ pub trait RepoInspector: Send + Sync {
     ) -> Result<Option<RepoChanges>, RepoError>;
 }
 
-/// Objeto nulo: sin git, no hay cambios que leer.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoRepoInspector;
-
-#[async_trait]
-impl RepoInspector for NoRepoInspector {
-    async fn changes(
-        &self,
-        _repo: &Path,
-        _max_diff_chars: usize,
-    ) -> Result<Option<RepoChanges>, RepoError> {
-        Ok(None)
-    }
-}
-
 /// Un archivo con cambios sin commit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChangedFile {
+    /// Ruta relativa a la raíz del repositorio, tal como la da `git status`.
     pub path: String,
     /// Las dos letras de `git status --porcelain` (`" M"`, `"A "`, `"??"`...).
     pub status: String,
@@ -58,8 +45,9 @@ pub struct ChangedFile {
     pub untracked: bool,
 }
 
-/// Escribe en el repositorio: solo `add` y `commit` de los archivos que elijas. Lo usa
-/// `taskflow commit`, que lo hace **Taskflow**, no el agente.
+/// Lo que necesita `taskflow commit` (que hace **Taskflow**, no el agente): leer los
+/// cambios pendientes y la convención de commits, `add` + `commit` de los archivos que
+/// elijas, y `push` para `taskflow pr`.
 #[async_trait]
 pub trait RepoCommitter: Send + Sync {
     /// Los archivos con cambios sin commit.
@@ -91,32 +79,4 @@ pub trait RepoCommitter: Send + Sync {
     ///
     /// [`RepoError::Invalid`] con la salida de git si el push falla.
     async fn push(&self, repo: &Path) -> Result<(), RepoError>;
-}
-
-#[async_trait]
-impl RepoCommitter for NoRepoInspector {
-    async fn changed_files(&self, _repo: &Path) -> Result<Vec<ChangedFile>, RepoError> {
-        Ok(Vec::new())
-    }
-
-    async fn pending_diff(&self, _repo: &Path, _max_chars: usize) -> Result<String, RepoError> {
-        Ok(String::new())
-    }
-
-    async fn recent_commits(&self, _repo: &Path, _n: usize) -> Result<Vec<String>, RepoError> {
-        Ok(Vec::new())
-    }
-
-    async fn commit(
-        &self,
-        _repo: &Path,
-        _files: &[String],
-        _message: &str,
-    ) -> Result<String, RepoError> {
-        Err(RepoError::Invalid("not a git repository".into()))
-    }
-
-    async fn push(&self, _repo: &Path) -> Result<(), RepoError> {
-        Err(RepoError::Invalid("not a git repository".into()))
-    }
 }

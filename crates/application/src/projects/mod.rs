@@ -8,4 +8,4 @@ mod rename_project;
 pub use browse_locations::BrowseLocations;
 pub use create_project::{CreateProject, ProjectDraft};
 pub use list_projects::{ListProjects, ShowProject};
-pub use rename_project::RenameProject;
+pub use rename_project::{RenameProject, RenamedProject};

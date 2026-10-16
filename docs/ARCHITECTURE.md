@@ -419,7 +419,7 @@ Dentro de `domain` y `application` el código se organiza **por capacidad** (tar
 
 | Crate                 | Tipo         | Responsabilidad                                                                                                                                                                                                 | Depende de                                                                                                                           |
 | --------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `domain`            | lib          | Entidades, value objects, política de prioridad, resolución de proyectos, selección de contexto, modelo validado de Playbooks, máquina de estados de la sesión de trabajo. Código puro, sin async ni I/O. | `chrono`, `thiserror`, `enumset`, `indexmap`, `serde` (solo derive)                                                        |
+| `domain`            | lib          | Entidades, value objects, política de prioridad, resolución de proyectos, selección de contexto, modelo validado de Playbooks, máquina de estados de la sesión de trabajo. Código puro, sin async ni I/O. | `chrono`, `thiserror`, `enumset`, `serde` (derive; `TaskId` se (de)serializa a mano para validarlo al leer)                                                        |
 | `application`       | lib          | Puertos (traits), casos de uso, DTOs serializables,`AppContext`, motor de Playbooks, servicio de sesiones de trabajo, decorador de caché.                                                                    | `domain`, `async-trait`, `serde`, `serde_json`, `futures`, `tokio` (`sync`, `macros`), `tokio-util`, `minijinja` |
 | `adapter-clickup`   | lib          | Implementa`TaskProvider` y `TimeTracker` para la API v2 de ClickUp.                                                                                                                                         | `application`, `reqwest`, `serde`                                                                                              |
 | `adapter-anthropic` | lib          | Implementa`Summarizer` usando la API de Messages (pago por uso, API key).                                                                                                                                     | `application`, `reqwest`, `serde`                                                                                              |
@@ -454,7 +454,7 @@ taskflow/
 │   │   ├── task/                 # mod.rs (Task, TaskId, Comment), status.rs, location.rs
 │   │   ├── project/              # mod.rs (Project, ProjectSlug), rules.rs, resolver.rs
 │   │   ├── context/              # mod.rs (ContextSection, SectionKey, Usage), selection.rs
-│   │   ├── playbook/             # mod.rs (Playbook), step.rs, input.rs, validate.rs
+│   │   ├── playbook/             # (fase 9, pendiente) mod.rs (Playbook), step.rs, input.rs, validate.rs
 │   │   ├── session/              # mod.rs (WorkSession), state.rs, command.rs, effect.rs, report.rs
 │   │   ├── policy.rs             # PrioritizationPolicy, WeightedPolicy
 │   │   └── error.rs              # DomainError, PlaybookIssue
@@ -1371,6 +1371,10 @@ El diseño de arriba se implementó con estos ajustes (detalle en `docs/learning
 | `RunHook(HookPoint)` | No existe todavía | Llega con los Playbooks (fase 10) |
 | `journal: Journal` | `pending: Vec<Effect>` | Basta con saber qué falta para `session retry`; antes de cada efecto se guarda "este + lo que sigue" |
 | `original_status: Status` | `original_status: String` (de `Task::status_name`) | `Status` normaliza ("to do") y pierde el nombre exacto ("Open") que hace falta para restaurarlo |
+| `StatusName` (newtype no vacío) en `Approve`, `ChangeStatus`, `Finish` y `StatusTarget::Explicit` | `String` | Antes de llegar al dominio, `application` cambia cada nombre por el **exacto** de la lista de la tarea (`find_status`, sin distinguir mayúsculas ni tildes); un nombre vacío o inexistente se rechaza ahí con la lista de los que hay. El tipo no agregaría una garantía que ese paso no dé ya |
+| — | `allowed_commands` y `handle` se escriben por separado | Un test recorre los 6 estados × 10 comandos y comprueba que coinciden |
+| — | Puertos `Folders`, `Shell`, `AgentConversations` (con `launch_args` y `new_id`) y `Worktrees::sync_with_base` | El núcleo no toca el disco, ni procesos, ni genera ids por su cuenta: todo pasa por puertos con fakes en `testing` |
+| — | `ProviderParts`: el descriptor construye el proveedor y su contador juntos | El token se lee una vez y comparten el cliente HTTP (un solo límite de concurrencia, NFR-07) |
 | `SetStatus(Suggested)` crítico | Si ningún nombre sugerido existe en la lista: aviso, no error | Una sugerencia no debe romper la sesión |
 | — | `StopTimer` solo detiene el contador **de esta tarea** | Si iniciaste otro a mano en ClickUp, no se toca (aviso) |
 | FR-66 "ofrecer pausar o terminar la actual" | Ofrece terminarla o abortarla | Hay una sola sesión a la vez: pausarla no libera el lugar |

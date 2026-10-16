@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use application::ports::{ProviderError, TaskProvider, TaskQuery};
 use async_trait::async_trait;
 use domain::task::{
@@ -14,14 +16,20 @@ use crate::api_types::{
 use crate::client::ClickUpClient;
 use crate::mapper::{location_node, map_task, status_option, user_id};
 use crate::query::task_search_params;
+use crate::time::ClickUpTimeTracker;
 use crate::{ClickUpConfig, StatusMap};
 
 /// Tareas por página en `GET /team/{team_id}/task`.
 pub(crate) const PAGE_SIZE: usize = 100;
 
+/// Tope de páginas por búsqueda: 100 × 100 tareas, mucho más que una lista personal.
+const MAX_PAGES: u32 = 100;
+
+/// El proveedor de tareas `ClickUp` (`impl TaskProvider`), sobre su API v2.
 #[derive(Debug)]
 pub struct ClickUpProvider {
-    client: ClickUpClient,
+    /// Compartido con el contador ([`Self::time_tracker`]): un solo límite de peticiones.
+    client: Arc<ClickUpClient>,
     team_id: String,
     statuses: StatusMap,
 }
@@ -32,10 +40,17 @@ impl ClickUpProvider {
     /// [`ProviderError::Network`] si no se puede inicializar el cliente HTTP.
     pub fn new(config: ClickUpConfig) -> Result<Self, ProviderError> {
         Ok(Self {
-            client: ClickUpClient::new(&config)?,
+            client: Arc::new(ClickUpClient::new(&config)?),
             team_id: config.team_id,
             statuses: config.statuses,
         })
+    }
+
+    /// El contador de tiempo del mismo workspace, con **el mismo** cliente: comparten el
+    /// semáforo de peticiones simultáneas (NFR-07) y las conexiones.
+    #[must_use]
+    pub fn time_tracker(&self) -> ClickUpTimeTracker {
+        ClickUpTimeTracker::with_client(Arc::clone(&self.client), self.team_id.clone())
     }
 
     /// Los hijos de un espacio: primero las carpetas visibles (cada una con sus listas),
@@ -114,7 +129,7 @@ impl TaskProvider for ClickUpProvider {
     ///   y devolverlas en el mismo orden (ignora los demás filtros).
     /// - Si no: `GET /team/{team_id}/task` página por página, con `task_search_params`,
     ///   hasta que `last_page` sea `true`, o, si no viene, hasta una página con menos de
-    ///   [`PAGE_SIZE`] tareas.
+    ///   `PAGE_SIZE` tareas. Como mucho `MAX_PAGES` páginas: si hubiera más, es un error.
     async fn search_tasks(&self, query: &TaskQuery) -> Result<Vec<Task>, ProviderError> {
         if !query.ids.is_empty() {
             return try_join_all(query.ids.iter().map(|id| self.task(id))).await;
@@ -134,6 +149,12 @@ impl TaskProvider for ClickUpProvider {
                 break;
             }
             page += 1;
+            // Una API que siempre dice "hay más" no deja el programa en un bucle infinito.
+            if page >= MAX_PAGES {
+                return Err(ProviderError::InvalidResponse(format!(
+                    "{path}: more than {MAX_PAGES} pages of tasks; narrow the query"
+                )));
+            }
         }
         Ok(tasks)
     }
@@ -217,7 +238,7 @@ impl TaskProvider for ClickUpProvider {
             .collect())
     }
 
-    /// Los hijos de un espacio, con [`Self::space_children`]: `2 + carpetas` peticiones,
+    /// Los hijos de un espacio, con `space_children`: `2 + carpetas` peticiones,
     /// solo de **ese** espacio.
     async fn location_children(
         &self,

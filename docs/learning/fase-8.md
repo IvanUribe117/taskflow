@@ -896,3 +896,71 @@ Revisaste la tarea real `86bcgkg76`, que volvió a "needs more work". Taskflow y
 - En el sandbox, la sesión apuntaba a la conversación real de `86bcgkg76` (solo se leyó para medirla): "La tarea volvió y la conversación anterior del agente tiene ~189K tokens", la opción por defecto fue la nueva, y el agente falso recibió `--session-id` con el resumen de lo hecho.
 - `master` avanzó en el remoto y la rama seguía a `origin/master`: al abrir el agente, "✔ `CU-86bcjdn6v` al día con `origin/master`: 1 commit nuevo de la base", y la rama dejó de seguir a `master`. Con cambios sin commit, avisó y no tocó nada.
 - Tests: de 507 a 514.
+
+## Duodécima parte: auditoría de todo el código
+
+Pediste verificar todo: la documentación, las convenciones de Rust y la arquitectura. Cuatro revisiones en paralelo, una por capa (dominio, aplicación, adaptadores con bootstrap, CLI), dieron unos 110 hallazgos. Se corrigieron en cuatro tandas.
+
+### 1. Errores reales
+
+| Dónde | Qué pasaba | Arreglo |
+| --- | --- | --- |
+| CLI | Aprobar y abrir el agente preparaba el `AgentBrief` dos veces: dos `git fetch` y unión con la base, y los avisos de la primera se perdían | `deliver_prompt` devuelve el brief y `open_agent` lo usa |
+| CLI | Sin terminal, `done`, `abort`, `close`, `context remove` y `start` sin ID fallaban con un error de E/S de `dialoguer` | `term::need_terminal` y `term::confirm`: un error claro que dice qué opción usar (`--yes`, `--status`, el ID) |
+| CLI | Un error en `commit` sacaba del menú del agente | Se avisa y se sigue, como con el PR |
+| Aplicación | `EffectFailed` decía "could not iniciar el contador" | `effect_name` en inglés para los errores; `effect_label` en español para los avisos |
+| Aplicación | Si fallaba leer el proyecto, la exclusión de secciones se ignoraba y se enviaban a la IA secciones excluidas | Se propaga el error |
+| Aplicación | Un fallo de `sync_with_base` se convertía en "sin base" en silencio | `SyncOutcome::Failed`, que se muestra como aviso |
+| `adapter-fs` | `set_context_exclude` escribía `project.toml` antes de validarlo; `rename` cambiaba cualquier línea que empezara con `slug` | Se valida en memoria antes de escribir; `rename` usa `toml_edit` y deshace el cambio de carpeta si falla |
+| `adapter-fs` | Escribir sobre un enlace simbólico (dotfiles) lo reemplazaba por un archivo | Se escribe en el destino del enlace |
+| `adapter-git` | `fetch`, `push` y `gh` sin tiempo límite; ssh podía quedarse esperando la passphrase; un `gh` sin sesión daba "Broken pipe"; `git add` fallaba sin decir por qué; los colores del usuario llegaban al prompt | `run.rs`: un solo helper con tiempo límite, `kill_on_drop`, `ssh -o BatchMode=yes`, `color.ui=false`, `--no-ext-diff`, la entrada escrita mientras se espera la salida y el error con lo que dijo el programa |
+| ClickUp | Errores 4xx sin el motivo; sin reintentos ante 5xx; paginación sin tope; token no marcado como sensible; dos lecturas del token y dos clientes HTTP | El cuerpo `err`/`ECODE` en el error; reintentos solo en `GET`; `MAX_PAGES`; `set_sensitive`; `ProviderParts` construye el proveedor y su contador con un mismo cliente |
+| Dominio | `TaskId` aceptaba `/`, `?`, `#`, que cambian la ruta de la API; `find_status` no igualaba `Ó` con `ó`; `Preview::render` reemplazaba en cinco pasadas | Validación en `TaskId::new`; comparación Unicode; una sola pasada (`fill_placeholders`) |
+
+### 2. Arquitectura
+
+- **El núcleo ya no hace I/O directo:** el disco pasa por el puerto `Folders` (`FsFolders`), los ids de conversación por `AgentConversations::new_id`, la hora del contador local por `Clock` y los comandos de la configuración por `Shell` (`ShShell`).
+- **Las decisiones salieron de la CLI:**
+  - `choices.rs` (`after_agent_choices`, `upload_after_commit`);
+  - `PrepareAgent::opening` (retomar o empezar) junto con `AgentConversations::launch_args` (los argumentos de `claude`);
+  - `SessionPrefs::from(&AppSettings)`;
+  - `HandleSession`, que detiene la vista previa y devuelve `removable_worktree`;
+  - `RenameProject::updating_config`;
+  - `SectionFile::create_from_template`;
+  - `CheckConnection`.
+- **Sin duplicación:** la sesión activa se carga solo con `session::active`; el "con la conversación del agente y, si falla, sin ella" se resuelve con `with_agent_fallback` (un `AsyncFn`); la regla "aprobada" es `SessionState::is_approved`; la convención de la rama es `TaskId::branch`; `unknown_status` va junto a `find_status` en el dominio.
+- **Sin código muerto:** se quitaron `NoRepoInspector`, `NoPullRequests`, `NoConversations` y `NoopNotifier`, que nadie usaba.
+- **La CLI en módulos:** `commands/session/{start, agent, git, finish, report}.rs`, `presenter/{tasks, projects, context, ai, history, session}.rs` y `term.rs`.
+
+### 3. Documentación
+
+- Los nueve crates de biblioteca tienen `#![warn(missing_docs)]`: cada tipo, campo, variante y función pública está documentado, también los fakes de `testing`.
+- `cargo doc` con `-D warnings` no da advertencias (había enlaces a elementos privados).
+- Se reescribieron las docs con restos del curso ("Ya está hecho", "Pista:").
+- `ARCHITECTURE.md` quedó alineado con el código.
+
+### 4. Tests
+
+De 503 a 557. Entre los nuevos:
+- `allowed_commands` coincide con `handle` en los 6 estados × 10 comandos;
+- las decisiones de los menús y la forma de abrir el agente;
+- el `gh` que termina sin leer la entrada;
+- escribir sin dañar `project.toml`;
+- el enlace simbólico;
+- la lectura del final del `.jsonl`;
+- los argumentos de clap que faltaban.
+
+### Conceptos aplicados
+
+- **`AsyncFn`** (Rust 1.85): un closure asíncrono que se puede llamar dos veces tomando prestada la entrada; sin él, `with_agent_fallback` necesitaría lifetimes de orden superior.
+- **Guardián con `Drop`** (`term::TempFile`): el archivo temporal se borra también si hay un `?` o un panic.
+- **`tokio::join!` dentro de `timeout`:** escribir la entrada y esperar la salida a la vez, y matar el proceso si se pasa del tiempo.
+- **`unused_crate_dependencies`:** el lint del compilador que dice qué dependencia sobra (no sobró ninguna).
+
+### Lo que quedó como decisión (no se cambió)
+
+- Los campos de `WorkSession` siguen públicos. Encapsularlos tocaría todo el código que lee la sesión; lo que se cambia fuera del dominio está documentado en el tipo.
+- `RepoCommitter` conserva sus tres lecturas (`changed_files`, `pending_diff`, `recent_commits`). Se corrigió su documentación.
+- `StatusName` no existe: `application` valida cada nombre contra la lista de la tarea antes de llegar al dominio (ver `ARCHITECTURE.md` §9.6).
+- En Linux, el backend de `keyring` (keyutils) no guarda los secretos tras reiniciar: está documentado en `keychain.rs`. Taskflow hoy corre en macOS.
+- Clipboard (`pbcopy`), el editor y abrir el agente en la terminal se quedan en la CLI: son de la interfaz.

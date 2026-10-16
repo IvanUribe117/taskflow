@@ -32,6 +32,7 @@ impl FsProjectRepository {
         Self::with_home(dir, home)
     }
 
+    /// Como `new`, pero con la carpeta personal dada (para expandir `~` en los tests).
     #[must_use]
     pub fn with_home(dir: impl Into<PathBuf>, home: Option<PathBuf>) -> Self {
         Self {
@@ -57,12 +58,18 @@ impl FsProjectRepository {
     /// [`RepoError::Invalid`] con la ruta del archivo y el motivo, para cualquier fallo
     /// de los pasos 1 a 3; [`RepoError::Storage`] si no se puede leer.
     fn read(&self, path: &Path) -> Result<Project, RepoError> {
-        let invalid =
-            |message: String| RepoError::Invalid(format!("{}: {message}", path.display()));
-
         let text = fs::read_to_string(path)
             .map_err(|e| RepoError::Storage(format!("{}: {e}", path.display())))?;
-        let file: ProjectFile = toml::from_str(&text).map_err(|e| invalid(e.to_string()))?;
+        self.parse(path, &text)
+    }
+
+    /// Valida `text` como el `project.toml` de `path` (sin leer ni escribir nada): lo usan
+    /// la lectura y, **antes** de escribir, los cambios, para no dejar nunca un archivo
+    /// inválido en disco.
+    fn parse(&self, path: &Path, text: &str) -> Result<Project, RepoError> {
+        let invalid =
+            |message: String| RepoError::Invalid(format!("{}: {message}", path.display()));
+        let file: ProjectFile = toml::from_str(text).map_err(|e| invalid(e.to_string()))?;
         let mut project = Project::try_from(file).map_err(|e| invalid(e.to_string()))?;
 
         let folder = path
@@ -125,13 +132,14 @@ impl ProjectRepository for FsProjectRepository {
         }
         let text = toml::to_string_pretty(&ProjectFile::from(project))
             .map_err(|e| RepoError::Invalid(e.to_string()))?;
-        atomic::write(&self.file(&project.slug), &text)
-            .map_err(|e| RepoError::Storage(e.to_string()))
+        let file = self.file(&project.slug);
+        atomic::write(&file, &text)
+            .map_err(|e| RepoError::Storage(format!("{}: {e}", file.display())))
     }
 
     /// Con `toml_edit`: cambia `[context] exclude` y nada más. Sin claves, quita `exclude`
-    /// (y la tabla `[context]` si queda vacía). Después vuelve a leer el archivo, para no
-    /// dejar nunca uno inválido.
+    /// (y la tabla `[context]` si queda vacía). El texto nuevo se valida **antes** de
+    /// escribirlo: un `project.toml` inválido haría fallar la lista de todos los proyectos.
     async fn set_context_exclude(
         &self,
         slug: &ProjectSlug,
@@ -163,41 +171,45 @@ impl ProjectRepository for FsProjectRepository {
             }
             doc["context"]["exclude"] = value(list);
         }
-        atomic::write(&file, &doc.to_string()).map_err(storage)?;
-        self.read(&file).map(|_| ())
+        let text = doc.to_string();
+        self.parse(&file, &text)?;
+        atomic::write(&file, &text).map_err(storage)
     }
 
     /// 1. `<dir>/<old>` debe existir y `<dir>/<new>` no.
     /// 2. Renombrar la carpeta (se lleva `context/` y todo lo demás).
-    /// 3. Reescribir solo la línea `slug = "..."` de `project.toml`, para conservar el
-    ///    resto del archivo tal cual (comentarios, `~` en `repo_path`).
+    /// 3. Cambiar solo la clave `slug` de `project.toml` con `toml_edit`, que conserva el
+    ///    resto tal cual (comentarios, `~` en `repo_path`), y validar el resultado
+    ///    **antes** de tocar el disco.
+    /// 4. Renombrar la carpeta (se lleva `context/` y todo lo demás) y escribir el archivo
+    ///    nuevo. Si la escritura falla, la carpeta vuelve a su nombre.
     async fn rename(&self, old: &ProjectSlug, new: &ProjectSlug) -> Result<(), RepoError> {
         let from = self.dir.join(old.as_str());
         let to = self.dir.join(new.as_str());
-        if !self.file(old).exists() {
+        let old_file = self.file(old);
+        if !old_file.exists() {
             return Err(RepoError::NotFound(old.to_string()));
         }
         if to.exists() {
             return Err(RepoError::AlreadyExists(new.to_string()));
         }
-        fs::rename(&from, &to)
-            .map_err(|e| RepoError::Storage(format!("{}: {e}", from.display())))?;
-        let file = self.file(new);
-        let text = fs::read_to_string(&file)
-            .map_err(|e| RepoError::Storage(format!("{}: {e}", file.display())))?;
-        let renamed: String = text
-            .lines()
-            .map(|line| {
-                if line.trim_start().starts_with("slug") && line.contains('=') {
-                    format!("slug = \"{new}\"")
-                } else {
-                    line.to_owned()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-            + "\n";
-        atomic::write(&file, &renamed).map_err(|e| RepoError::Storage(e.to_string()))
+        let storage =
+            |path: &Path, e: std::io::Error| RepoError::Storage(format!("{}: {e}", path.display()));
+        let text = fs::read_to_string(&old_file).map_err(|e| storage(&old_file, e))?;
+        let mut doc: DocumentMut = text
+            .parse()
+            .map_err(|e| RepoError::Invalid(format!("{}: {e}", old_file.display())))?;
+        doc["slug"] = value(new.as_str());
+        let renamed = doc.to_string();
+        let new_file = self.file(new);
+        self.parse(&new_file, &renamed)?;
+
+        fs::rename(&from, &to).map_err(|e| storage(&from, e))?;
+        if let Err(e) = atomic::write(&new_file, &renamed) {
+            let _ = fs::rename(&to, &from);
+            return Err(storage(&new_file, e));
+        }
+        Ok(())
     }
 }
 
@@ -412,5 +424,48 @@ mod tests {
         let result = repo.create(&project("acme")).await;
 
         assert!(matches!(result, Err(RepoError::AlreadyExists(_))));
+    }
+
+    #[tokio::test]
+    async fn an_invalid_change_never_reaches_the_disk() {
+        let (_dir, repo) = repo();
+        repo.create(&project("acme")).await.unwrap();
+        let file = repo.file(&"acme".parse().unwrap());
+        // Una sección con una clave que el dominio no acepta.
+        let before = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(
+            &file,
+            before.replace("kind = \"client\"", "kind = \"cliente\""),
+        )
+        .unwrap();
+        let broken = std::fs::read_to_string(&file).unwrap();
+
+        let error = repo
+            .set_context_exclude(&"acme".parse().unwrap(), &["negocio".parse().unwrap()])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, RepoError::Invalid(_)), "{error}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), broken, "untouched");
+    }
+
+    #[tokio::test]
+    async fn rename_only_touches_the_slug_key() {
+        let (_dir, repo) = repo();
+        repo.create(&project("acme")).await.unwrap();
+        let old = repo.file(&"acme".parse().unwrap());
+        let text = std::fs::read_to_string(&old).unwrap();
+        std::fs::write(&old, format!("# slug = \"comentario\"\n{text}")).unwrap();
+
+        repo.rename(&"acme".parse().unwrap(), &"acme-corp".parse().unwrap())
+            .await
+            .unwrap();
+
+        let renamed = std::fs::read_to_string(repo.file(&"acme-corp".parse().unwrap())).unwrap();
+        assert!(
+            renamed.starts_with("# slug = \"comentario\"\n"),
+            "{renamed}"
+        );
+        assert!(renamed.contains("slug = \"acme-corp\""), "{renamed}");
     }
 }

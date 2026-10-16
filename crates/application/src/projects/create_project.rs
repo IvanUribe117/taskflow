@@ -8,10 +8,15 @@ use crate::{AppContext, AppError};
 /// Lo que el asistente reunió para crear un proyecto. El slug ya viene validado por su tipo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectDraft {
+    /// El identificador del proyecto (`acme`): nombre de su carpeta y el que se usa en los comandos.
     pub slug: ProjectSlug,
+    /// Nombre para mostrar; se guarda sin espacios alrededor y no puede quedar vacío.
     pub name: String,
+    /// Cliente o interno.
     pub kind: ProjectKind,
+    /// Cómo reconoce sus tareas; al menos una.
     pub rules: Vec<MatchRule>,
+    /// El repositorio local, si tiene (`~` ya expandido).
     pub repo_path: Option<PathBuf>,
 }
 
@@ -22,6 +27,7 @@ pub struct CreateProject<'a> {
 }
 
 impl<'a> CreateProject<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }

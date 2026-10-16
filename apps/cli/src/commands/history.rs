@@ -13,13 +13,13 @@ use crate::presenter;
 /// - Con `--last`: el documento más reciente tal cual se guardó; con `--json`, el registro
 ///   y su contenido.
 ///
-/// `base` es la carpeta del historial: la tabla muestra las rutas relativas a ella, y se
-/// imprime al final para saber dónde buscar.
+/// `base` es la carpeta del historial: la tabla muestra las rutas relativas a ella (para
+/// que quepan), y la carpeta completa aparece al final para saber dónde buscar.
 ///
 /// # Errors
 ///
 /// Los del repositorio (no se puede leer la carpeta o el archivo).
-pub async fn run(
+pub(crate) async fn run(
     ctx: &AppContext,
     base: &Path,
     filter: HistoryFilter,
@@ -30,7 +30,11 @@ pub async fn run(
     let history = ListHistory::new(ctx);
     if last {
         let Some((item, content)) = history.latest(&filter).await? else {
-            println!("{}", presenter::history(&[], base));
+            if json {
+                println!("null");
+            } else {
+                println!("{}", presenter::history(&[], base));
+            }
             return Ok(());
         };
         if json {

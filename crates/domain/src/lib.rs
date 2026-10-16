@@ -3,8 +3,10 @@
 //! Tipos puros y reglas de negocio: sin async, sin I/O y sin conceptos propios de ningún
 //! proveedor (`ClickUp`, `GitHub`...). Ver `docs/ARCHITECTURE.md`, §9.
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
 
 pub mod context;
+/// Los errores al construir valores del dominio.
 pub mod error;
 pub mod policy;
 pub mod project;

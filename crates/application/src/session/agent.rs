@@ -4,11 +4,12 @@
 use std::fmt::Write;
 
 use domain::context::Usage;
-use domain::session::{SessionState, WorkSession};
+use domain::session::WorkSession;
 
 use domain::project::RenderedPreview;
 
 use crate::dto::{AgentBrief, WorkDirSetup};
+use crate::ports::AgentLaunch;
 use crate::sections::{BuildContext, ContextRequest};
 use crate::session::SessionPrefs;
 use crate::{AppContext, AppError};
@@ -72,6 +73,32 @@ fn workspace_notes(worktree: Option<&WorkDirSetup>, preview: Option<&RenderedPre
     notes
 }
 
+/// Cómo se abre el agente esta vez (para decirlo en pantalla).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpeningKind {
+    /// Conversación nueva con el prompt de la sesión.
+    New,
+    /// Conversación nueva con el prompt y el pedido de revisión.
+    NewWithReview,
+    /// Retomar la conversación.
+    Resume,
+    /// Retomar la conversación de una sesión anterior con el prompt nuevo.
+    ResumeWithNewPrompt,
+    /// Retomar la conversación con el pedido de revisión.
+    Review,
+}
+
+/// Los argumentos para abrir el agente y cómo se abre.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentOpening {
+    /// Los argumentos para el programa del agente (`session.agent_command`).
+    pub args: Vec<String>,
+    /// Si retoma una conversación (si falla al instante, es que ya no está).
+    pub resumes: bool,
+    /// Cómo se abre esta vez, para decirlo en pantalla.
+    pub kind: OpeningKind,
+}
+
 /// Arma lo que recibe el agente.
 #[derive(Debug)]
 pub struct PrepareAgent<'a> {
@@ -79,6 +106,7 @@ pub struct PrepareAgent<'a> {
 }
 
 impl<'a> PrepareAgent<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
@@ -97,24 +125,16 @@ impl<'a> PrepareAgent<'a> {
     /// No hay sesión, no está aprobada, no hay reporte o fallan las secciones.
     pub async fn execute(&self, prefs: &SessionPrefs) -> Result<AgentBrief, AppError> {
         let budget_chars = prefs.limits.budget_chars;
-        let mut session = self
-            .ctx
-            .sessions
-            .active()
-            .await?
-            .ok_or_else(|| AppError::InvalidInput("there is no active session".into()))?;
-        if !matches!(
-            session.state,
-            SessionState::InProgress | SessionState::Paused { .. }
-        ) {
+        let mut session = super::active(self.ctx).await?;
+        if !session.state.is_approved() {
             return Err(AppError::InvalidInput(format!(
                 "the session is `{}`; approve the report first with `taskflow approve`",
                 session.state.name()
             )));
         }
-        let id = &session.task_id.clone();
-        let prompt = self.ctx.sessions.load_agent_prompt(id).await?;
-        let report = self.ctx.sessions.load_report(id).await?;
+        let id = session.task_id.clone();
+        let prompt = self.ctx.sessions.load_agent_prompt(&id).await?;
+        let report = self.ctx.sessions.load_report(&id).await?;
         let context = BuildContext::new(self.ctx)
             .execute(ContextRequest {
                 project: session.project.clone(),
@@ -176,7 +196,7 @@ impl<'a> PrepareAgent<'a> {
             preview: preview.map(Into::into),
             warnings,
             notes,
-            prompt_path: self.ctx.sessions.agent_prompt_path(id),
+            prompt_path: self.ctx.sessions.agent_prompt_path(&id),
             agent_session: session.agent_session.clone(),
             briefed: session.agent_briefed,
             suggest_fresh: previous_tokens.is_some_and(|tokens| tokens > prefs.resume_max_tokens),
@@ -217,6 +237,74 @@ impl<'a> PrepareAgent<'a> {
         Ok((worktree, warnings, notes))
     }
 
+    /// Cómo abrir el agente esta vez, y sus argumentos (los arma el adaptador del agente):
+    ///
+    /// - con `message` (el pedido de revisión): retomar la conversación con ese mensaje; sin
+    ///   conversación, una nueva con `prompt` y el mensaje;
+    /// - sin él: retomar la conversación (con `prompt` si todavía no lo recibió, en una tarea
+    ///   devuelta) o empezar una con `prompt`.
+    ///
+    /// Una conversación nueva se guarda en la sesión ([`Self::new_conversation`]).
+    ///
+    /// # Errors
+    ///
+    /// No hay sesión activa o no se puede guardar.
+    pub async fn opening(
+        &self,
+        prompt: &str,
+        resume: Option<&str>,
+        briefed: bool,
+        message: Option<String>,
+    ) -> Result<AgentOpening, AppError> {
+        let (launch, kind) = match (resume, message) {
+            (Some(id), Some(text)) => (
+                AgentLaunch::Resume {
+                    id: id.to_owned(),
+                    message: Some(text),
+                },
+                OpeningKind::Review,
+            ),
+            (Some(id), None) if briefed => (
+                AgentLaunch::Resume {
+                    id: id.to_owned(),
+                    message: None,
+                },
+                OpeningKind::Resume,
+            ),
+            (Some(id), None) => (
+                AgentLaunch::Resume {
+                    id: id.to_owned(),
+                    message: Some(prompt.to_owned()),
+                },
+                OpeningKind::ResumeWithNewPrompt,
+            ),
+            (None, message) => {
+                let id = self.new_conversation().await?;
+                match message {
+                    Some(text) => (
+                        AgentLaunch::New {
+                            id,
+                            first: format!("{prompt}\n\n---\n\n{text}"),
+                        },
+                        OpeningKind::NewWithReview,
+                    ),
+                    None => (
+                        AgentLaunch::New {
+                            id,
+                            first: prompt.to_owned(),
+                        },
+                        OpeningKind::New,
+                    ),
+                }
+            }
+        };
+        Ok(AgentOpening {
+            args: self.ctx.conversations.launch_args(&launch),
+            resumes: matches!(launch, AgentLaunch::Resume { .. }),
+            kind,
+        })
+    }
+
     /// Una conversación nueva para el agente: genera su id (UUID v4), lo guarda en la
     /// sesión y lo devuelve. La interfaz abre el agente con ese id (`--session-id`), y así
     /// después se puede retomar (`--resume`) o pedirle el resumen de lo que hizo.
@@ -225,13 +313,8 @@ impl<'a> PrepareAgent<'a> {
     ///
     /// No hay sesión activa o no se puede guardar.
     pub async fn new_conversation(&self) -> Result<String, AppError> {
-        let mut session = self
-            .ctx
-            .sessions
-            .active()
-            .await?
-            .ok_or_else(|| AppError::InvalidInput("there is no active session".into()))?;
-        let id = uuid::Uuid::new_v4().to_string();
+        let mut session = super::active(self.ctx).await?;
+        let id = self.ctx.conversations.new_id();
         session.agent_session = Some(id.clone());
         session.agent_briefed = true;
         self.ctx.sessions.save(&session).await?;
@@ -245,12 +328,7 @@ impl<'a> PrepareAgent<'a> {
     ///
     /// No hay sesión activa o no se puede guardar.
     pub async fn mark_briefed(&self) -> Result<(), AppError> {
-        let mut session = self
-            .ctx
-            .sessions
-            .active()
-            .await?
-            .ok_or_else(|| AppError::InvalidInput("there is no active session".into()))?;
+        let mut session = super::active(self.ctx).await?;
         session.agent_briefed = true;
         self.ctx.sessions.save(&session).await?;
         Ok(())

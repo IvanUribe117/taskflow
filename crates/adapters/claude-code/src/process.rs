@@ -10,8 +10,8 @@ use tokio::process::Command;
 
 use crate::command::Invocation;
 
-/// Ejecuta `program` con la invocación y devuelve lo que imprimió en la salida estándar.
-/// Ver la especificación del paso 3 en `docs/learning/fase-6b.md`.
+/// Ejecuta `program` con la invocación (argumentos, carpeta y el prompt por la entrada
+/// estándar) y devuelve lo que imprimió en la salida estándar.
 ///
 /// # Errors
 ///
@@ -42,19 +42,23 @@ pub(crate) async fn run(
         _ => AiError::Unavailable(e.to_string()),
     })?;
 
-    // El prompt por la entrada estándar; al cerrarla, `claude` sabe que terminó de leer.
-    let mut stdin = child.stdin.take().expect("stdin is piped");
-    stdin
-        .write_all(invocation.stdin.as_bytes())
-        .await
-        .map_err(|e| AiError::Failed(format!("cannot write the prompt: {e}")))?;
-    drop(stdin);
-
+    // El prompt por la entrada estándar, **mientras** se espera la salida y dentro del
+    // tiempo límite. Al terminar de escribir se suelta `stdin` y `claude` sabe que terminó
+    // de leer. Si `claude` sale antes de leerlo, escribir da "Broken pipe": se ignora, y
+    // el error que cuenta es el suyo (su stderr).
+    let stdin = child.stdin.take();
+    let write = async {
+        if let Some(mut stdin) = stdin {
+            let _ = stdin.write_all(invocation.stdin.as_bytes()).await;
+        }
+    };
     // Si se agota el tiempo, `timeout` suelta el future y `kill_on_drop` mata el proceso.
-    let output = tokio::time::timeout(timeout, child.wait_with_output())
-        .await
-        .map_err(|_| AiError::Timeout(timeout))?
-        .map_err(|e| AiError::Failed(e.to_string()))?;
+    let ((), output) = tokio::time::timeout(timeout, async {
+        tokio::join!(write, child.wait_with_output())
+    })
+    .await
+    .map_err(|_| AiError::Timeout(timeout))?;
+    let output = output.map_err(|e| AiError::Failed(e.to_string()))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     if !stdout.trim().is_empty() {

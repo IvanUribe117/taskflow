@@ -15,6 +15,7 @@ use crate::ports::RepoError;
 /// - `sessions/archive/<fecha>_<tarea>.json`: las sesiones cerradas o abortadas.
 #[async_trait]
 pub trait SessionStore: Send + Sync {
+    /// La sesión activa, o `None` si no hay ninguna.
     async fn active(&self) -> Result<Option<WorkSession>, RepoError>;
 
     /// Guarda la sesión activa (la reemplaza entera, de forma atómica).
@@ -47,6 +48,7 @@ pub trait SessionStore: Send + Sync {
     /// Lee `work-report.md` tal como quedó, con tus ediciones.
     async fn load_work_report(&self, task: &TaskId) -> Result<String, RepoError>;
 
+    /// Dónde está (o estaría) `work-report.md`.
     fn work_report_path(&self, task: &TaskId) -> PathBuf;
 
     /// Lee y **borra** `work-report.md`: al empezar una sesión nueva, el de la anterior no

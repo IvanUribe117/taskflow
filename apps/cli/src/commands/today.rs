@@ -10,7 +10,7 @@ use crate::presenter;
 /// - `limit` y `project` pasan tal cual.
 /// - `group_by`: `GroupBy::Project` si se pasó `--by-project`; si no, `settings.ui.group_by`.
 #[must_use]
-pub fn query(
+pub(crate) fn query(
     settings: &AppSettings,
     limit: Option<usize>,
     by_project: bool,
@@ -32,7 +32,7 @@ pub fn query(
 /// # Errors
 ///
 /// Los del caso de uso (red, token inválido...).
-pub async fn run(ctx: &AppContext, json: bool, query: TodayQuery) -> anyhow::Result<()> {
+pub(crate) async fn run(ctx: &AppContext, json: bool, query: TodayQuery) -> anyhow::Result<()> {
     let report = GetTodayTasks::new(ctx).execute(query).await?;
 
     if json {

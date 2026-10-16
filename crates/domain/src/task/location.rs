@@ -6,16 +6,26 @@ use crate::DomainError;
 /// Nivel jerárquico genérico. `ClickUp`: Space > Folder > List. `GitHub`: Owner > Repository.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LocationLevel {
+    /// Todo el espacio de trabajo (el `team` de `ClickUp`).
     Workspace,
+    /// Un espacio de `ClickUp`.
     Space,
+    /// Una carpeta dentro de un espacio.
     Folder,
+    /// Una lista, donde viven las tareas.
     List,
+    /// Un repositorio (`GitHub`).
     Repository,
+    /// Un nivel que el dominio no conoce, con el nombre que da el proveedor.
     Other(String),
 }
 
 impl LocationLevel {
-    /// Mayor profundidad = más específico. Lo usa la resolución de proyectos.
+    /// Mayor profundidad = más específico. Lo usa la resolución de proyectos: si una
+    /// tarea encaja con dos proyectos, gana la regla más profunda (una lista le gana a su
+    /// espacio). Un nivel desconocido (`Other`) cuenta como un espacio: no se sabe qué tan
+    /// específico es, y así no le gana a una carpeta ni a una lista conocidas. Una lista y
+    /// un repositorio son el último nivel de su proveedor.
     #[must_use]
     pub fn depth(&self) -> u8 {
         match self {
@@ -64,10 +74,14 @@ impl FromStr for LocationLevel {
     }
 }
 
+/// Un tramo de la ruta de una tarea: un espacio, una carpeta o una lista.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocationSegment {
+    /// Qué nivel es: espacio, carpeta, lista...
     pub level: LocationLevel,
+    /// El id en el proveedor (`901100200300`): es lo que usan las reglas `[[match]]`.
     pub id: String,
+    /// El nombre visible.
     pub name: String,
 }
 
@@ -76,11 +90,13 @@ pub struct LocationSegment {
 pub struct TaskLocation(Vec<LocationSegment>);
 
 impl TaskLocation {
+    /// La ruta con sus tramos, de la raíz a la lista.
     #[must_use]
     pub fn new(segments: Vec<LocationSegment>) -> Self {
         Self(segments)
     }
 
+    /// Los tramos, de la raíz a la lista.
     #[must_use]
     pub fn segments(&self) -> &[LocationSegment] {
         &self.0
@@ -91,7 +107,9 @@ impl TaskLocation {
 /// por eso el tipo recursivo no necesita `Box`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocationNode {
+    /// Este nodo.
     pub segment: LocationSegment,
+    /// Lo que contiene: las carpetas y listas de un espacio, las listas de una carpeta.
     pub children: Vec<LocationNode>,
 }
 
@@ -117,6 +135,7 @@ impl LocationNode {
 pub struct FlatNode<'a> {
     /// 0 para las raíces (espacios), 1 para sus hijos, etc.
     pub depth: usize,
+    /// El segmento del nodo, prestado del árbol.
     pub segment: &'a LocationSegment,
 }
 

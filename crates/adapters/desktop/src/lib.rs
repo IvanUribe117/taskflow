@@ -1,7 +1,14 @@
-//! Notificaciones de escritorio (§10.6): `impl Notifier for MacNotifier`.
+//! Integración con el escritorio:
 //!
-//! En macOS se usa `osascript` (`AppleScript`), que viene con el sistema: sin dependencias.
+//! - Notificaciones (§10.6): `impl Notifier for MacNotifier`. En macOS se usa `osascript`
+//!   (`AppleScript`), que viene con el sistema: sin dependencias.
+//! - [`ShShell`]: correr un comando de la configuración (el `stop` de la vista previa).
 #![warn(clippy::pedantic)]
+#![warn(missing_docs)]
+
+mod shell;
+
+pub use shell::ShShell;
 
 use application::ports::{Notice, Notifier, NotifyError};
 use async_trait::async_trait;
@@ -16,6 +23,7 @@ const SCRIPT: [&str; 3] = [
     "end run",
 ];
 
+/// Notificaciones de escritorio en macOS (`impl Notifier`), con `osascript`.
 #[derive(Debug, Clone)]
 pub struct MacNotifier {
     program: String,
@@ -59,9 +67,12 @@ impl Notifier for MacNotifier {
         if output.status.success() {
             Ok(())
         } else {
-            Err(NotifyError(
-                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            ))
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(NotifyError(if stderr.trim().is_empty() {
+                format!("{} exited with {}", self.program, output.status)
+            } else {
+                stderr.trim().to_owned()
+            }))
         }
     }
 }

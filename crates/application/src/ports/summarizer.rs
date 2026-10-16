@@ -37,7 +37,9 @@ pub trait Summarizer: Send + Sync {
 /// Todo lo que recibe `pr_body`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrInput {
+    /// La tarea del PR.
     pub task: TaskBrief,
+    /// Su proyecto, si tiene: el nombre y el repositorio.
     pub project: Option<ProjectBrief>,
     /// La rama, la base, los commits y el diff contra la base.
     pub changes: RepoChanges,
@@ -63,6 +65,7 @@ pub struct PrDescription {
 /// Todo lo que recibe `commit_message`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitInput {
+    /// La tarea de los cambios.
     pub task: TaskBrief,
     /// Los archivos que entran en el commit.
     pub files: Vec<String>,
@@ -99,7 +102,9 @@ impl CommitMessage {
 /// Todo lo que recibe `summarize_work`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkInput {
+    /// La tarea de la sesión.
     pub task: TaskBrief,
+    /// Su proyecto, si tiene: el nombre y el repositorio.
     pub project: Option<ProjectBrief>,
     /// `report.md`: lo que se planeó y aprobó (con tus ediciones).
     pub plan: String,
@@ -128,6 +133,8 @@ pub struct WorkSummary {
     pub notes: Vec<String>,
 }
 
+/// Por qué falló una llamada a la IA. Los casos de uso lo degradan a un aviso cuando
+/// pueden (el plan sin IA sigue siendo útil).
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum AiError {
@@ -148,15 +155,21 @@ pub enum AiError {
 /// Los datos de una tarea que se envían a la IA: solo lo necesario (NFR-05).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TaskBrief {
+    /// El id de la tarea en el proveedor.
     pub id: String,
+    /// El título de la tarea.
     pub title: String,
     /// Recortada a `ai.max_description_chars`.
     pub description: Option<String>,
+    /// El estado con el `Display` de `Status` (`in progress`).
     pub status: String,
+    /// La prioridad con el `Display` de `Priority` (`high`).
     pub priority: String,
     /// `AAAA-MM-DD` en la zona horaria del usuario.
     pub due: Option<String>,
+    /// Enlace a la tarea en el proveedor.
     pub url: String,
+    /// Las etiquetas tal como están en el proveedor.
     pub tags: Vec<String>,
     /// `"[x] Título (estado)"`, una por subtarea.
     pub subtasks: Vec<String>,
@@ -167,6 +180,7 @@ pub struct TaskBrief {
 /// El proyecto de la tarea, si tiene.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectBrief {
+    /// El nombre del proyecto, para que la IA lo nombre.
     pub name: String,
     /// El repositorio local. Un proveedor que pueda leer archivos (Claude Code) lo usa como
     /// carpeta de trabajo para entender el código.
@@ -176,10 +190,12 @@ pub struct ProjectBrief {
 /// Todo lo que recibe `summarize_task`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryInput {
+    /// Los datos de la tarea a analizar.
     pub task: TaskBrief,
     /// Los comentarios más recientes como `"Autor (AAAA-MM-DD): texto"`, del más viejo al
     /// más nuevo.
     pub comments: Vec<String>,
+    /// Su proyecto, si tiene: el nombre y el repositorio.
     pub project: Option<ProjectBrief>,
     /// Secciones de contexto de los usos `summary` y `agent_prompt`.
     pub context: BuiltContext,
@@ -201,13 +217,21 @@ pub struct PreviousWork {
 /// Una tarea dentro del plan del día.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlanTask {
+    /// El id de la tarea en el proveedor.
     pub id: String,
+    /// El título de la tarea.
     pub title: String,
+    /// El nombre del proyecto, si tiene.
     pub project: Option<String>,
+    /// El estado con el `Display` de `Status`.
     pub status: String,
+    /// La prioridad con el `Display` de `Priority`.
     pub priority: String,
+    /// Fecha límite, `AAAA-MM-DD` en la zona horaria del usuario.
     pub due: Option<String>,
+    /// Si la fecha límite ya pasó.
     pub overdue: bool,
+    /// Comentarios sin resolver asignados al usuario.
     pub pending_comments: usize,
 }
 
@@ -226,8 +250,11 @@ pub struct PlanInput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Complexity {
+    /// Baja: `"low"`.
     Low,
+    /// Media: `"medium"`.
     Medium,
+    /// Alta: `"high"`.
     High,
 }
 
@@ -235,16 +262,20 @@ pub enum Complexity {
 /// también es `Deserialize`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSummary {
+    /// Qué pide la tarea, en palabras simples.
     pub what_is_requested: String,
     /// Cómo se sabe que está terminada (FR-56). `default`: un análisis viejo sin el campo
     /// sigue siendo válido.
     #[serde(default)]
     pub acceptance_criteria: Vec<String>,
+    /// Los pasos que propone la IA, en orden.
     pub suggested_steps: Vec<String>,
     /// Qué puede salir mal o romperse (FR-56).
     #[serde(default)]
     pub risks: Vec<String>,
+    /// Lo que falta aclarar con quien pidió la tarea; vacío si nada.
     pub open_questions: Vec<String>,
+    /// Qué tan compleja es, según la IA.
     pub estimated_complexity: Complexity,
     /// Un prompt listo para pegar en el agente de código.
     pub agent_prompt: String,

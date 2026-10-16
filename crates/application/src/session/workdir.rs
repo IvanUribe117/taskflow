@@ -9,7 +9,7 @@ use domain::project::{PreviewVars, RenderedPreview};
 use domain::session::WorkSession;
 use domain::task::TaskId;
 
-use crate::dto::{PreviewView, WorkDirSetup, WorktreeCandidate};
+use crate::dto::{PreviewView, RemovableWorktree, WorkDirSetup, WorktreeCandidate};
 use crate::ports::{SyncOutcome, Worktree};
 use crate::session::SessionPrefs;
 use crate::{AppContext, AppError};
@@ -24,7 +24,7 @@ use crate::{AppContext, AppError};
 /// ```
 #[must_use]
 pub fn task_branch(task_id: &TaskId) -> String {
-    format!("CU-{}", task_id.as_str())
+    task_id.branch()
 }
 
 /// `CU-86b1` o `CU-86b1-fondo-login`: la rama es de la tarea.
@@ -71,12 +71,6 @@ pub fn worktree_path(repo: &Path, dir: Option<&Path>, task_id: &TaskId) -> PathB
     root.join(task_branch(task_id))
 }
 
-/// La misma carpeta, aunque una ruta pase por un enlace (`/tmp` → `/private/tmp`).
-fn same_dir(a: &Path, b: &Path) -> bool {
-    let canonical = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    canonical(a) == canonical(b)
-}
-
 /// El `repo_path` del proyecto de la sesión, si existe en disco.
 pub(crate) async fn project_repo(ctx: &AppContext, session: &WorkSession) -> Option<PathBuf> {
     let slug = session.project.as_ref()?;
@@ -85,16 +79,20 @@ pub(crate) async fn project_repo(ctx: &AppContext, session: &WorkSession) -> Opt
         .await
         .ok()?
         .repo_path
-        .filter(|path| path.is_dir())
+        .filter(|path| ctx.folders.exists(path))
 }
 
 /// El worktree que ya tiene la rama de la tarea, si hay (puede ser el repo principal).
-fn task_worktree<'w>(list: &'w [Worktree], task_id: &TaskId) -> Option<&'w Worktree> {
+fn task_worktree<'w>(
+    ctx: &AppContext,
+    list: &'w [Worktree],
+    task_id: &TaskId,
+) -> Option<&'w Worktree> {
     list.iter().find(|w| {
         w.branch
             .as_deref()
             .is_some_and(|branch| is_task_branch(branch, task_id))
-            && w.path.is_dir()
+            && ctx.folders.exists(&w.path)
     })
 }
 
@@ -102,11 +100,15 @@ fn task_worktree<'w>(list: &'w [Worktree], task_id: &TaskId) -> Option<&'w Workt
 /// existiendo; si no, el worktree con la rama de la tarea; si no, el repo del proyecto.
 pub(crate) async fn resolve(ctx: &AppContext, session: &WorkSession) -> Option<PathBuf> {
     let repo = project_repo(ctx, session).await?;
-    if let Some(dir) = session.work_dir.as_ref().filter(|dir| dir.is_dir()) {
+    if let Some(dir) = session
+        .work_dir
+        .as_ref()
+        .filter(|dir| ctx.folders.exists(dir))
+    {
         return Some(dir.clone());
     }
     let list = ctx.worktrees.list(&repo).await.unwrap_or_default();
-    Some(task_worktree(&list, &session.task_id).map_or(repo, |w| w.path.clone()))
+    Some(task_worktree(ctx, &list, &session.task_id).map_or(repo, |w| w.path.clone()))
 }
 
 /// Deja lista la carpeta de la tarea y la guarda en `session` (quien llama la guarda):
@@ -136,7 +138,9 @@ pub(crate) async fn ensure(
             ctx.worktrees
                 .sync_with_base(&setup.path)
                 .await
-                .unwrap_or(SyncOutcome::NoBase),
+                .unwrap_or_else(|error| SyncOutcome::Failed {
+                    reason: error.to_string(),
+                }),
         );
     }
     Ok(Some(setup))
@@ -145,7 +149,7 @@ pub(crate) async fn ensure(
 /// Qué decirte del [`SyncOutcome`]: una nota si se trajeron cambios, un aviso si no se
 /// pudo. `(nota, aviso)`.
 #[must_use]
-pub fn sync_messages(setup: &WorkDirSetup) -> (Option<String>, Option<String>) {
+pub(crate) fn sync_messages(setup: &WorkDirSetup) -> (Option<String>, Option<String>) {
     let branch = setup.branch.as_deref().unwrap_or("la rama de la tarea");
     match &setup.sync {
         Some(SyncOutcome::Updated { base, commits }) => (
@@ -172,7 +176,13 @@ pub fn sync_messages(setup: &WorkDirSetup) -> (Option<String>, Option<String>) {
                 setup.path.display()
             )),
         ),
-        _ => (None, None),
+        Some(SyncOutcome::Failed { reason }) => (
+            None,
+            Some(format!(
+                "no se pudo poner `{branch}` al día con la base ({reason}); sigue como estaba"
+            )),
+        ),
+        Some(SyncOutcome::UpToDate | SyncOutcome::NoBase) | None => (None, None),
     }
 }
 
@@ -189,18 +199,22 @@ async fn locate_or_create(
     let setup = |path: &Path, branch: Option<&str>, created| WorkDirSetup {
         path: path.to_path_buf(),
         branch: branch.map(str::to_owned),
-        is_worktree: !same_dir(path, &repo),
+        is_worktree: !ctx.folders.same(path, &repo),
         created,
         sync: None,
     };
-    if let Some(dir) = session.work_dir.clone().filter(|dir| dir.is_dir()) {
+    if let Some(dir) = session
+        .work_dir
+        .clone()
+        .filter(|dir| ctx.folders.exists(dir))
+    {
         let branch = list
             .iter()
-            .find(|w| same_dir(&w.path, &dir))
+            .find(|w| ctx.folders.same(&w.path, &dir))
             .and_then(|w| w.branch.clone());
         return Ok(Some(setup(&dir, branch.as_deref(), false)));
     }
-    if let Some(found) = task_worktree(&list, &session.task_id) {
+    if let Some(found) = task_worktree(ctx, &list, &session.task_id) {
         session.work_dir = Some(found.path.clone());
         return Ok(Some(setup(&found.path, found.branch.as_deref(), false)));
     }
@@ -221,15 +235,15 @@ pub(crate) async fn preview(ctx: &AppContext, session: &WorkSession) -> Option<R
     let slug = session.project.as_ref()?;
     let project = ctx.projects.get(slug).await.ok()?;
     let template = project.preview?;
-    let repo = project.repo_path.filter(|path| path.is_dir())?;
+    let repo = project.repo_path.filter(|path| ctx.folders.exists(path))?;
     let dir = resolve(ctx, session).await?;
-    if same_dir(&repo, &dir) {
+    if ctx.folders.same(&repo, &dir) {
         return None;
     }
     let list = ctx.worktrees.list(&repo).await.unwrap_or_default();
     let branch = list
         .iter()
-        .find(|w| same_dir(&w.path, &dir))
+        .find(|w| ctx.folders.same(&w.path, &dir))
         .and_then(|w| w.branch.clone())
         .unwrap_or_else(|| task_branch(&session.task_id));
     let (repo, worktree) = (repo.display().to_string(), dir.display().to_string());
@@ -241,6 +255,25 @@ pub(crate) async fn preview(ctx: &AppContext, session: &WorkSession) -> Option<R
     }))
 }
 
+/// El worktree de `session`, si se puede quitar al terminar: no es el repo principal y no
+/// tiene cambios sin commit (la rama se queda, con sus commits).
+pub(crate) async fn removable(
+    ctx: &AppContext,
+    session: &WorkSession,
+) -> Option<RemovableWorktree> {
+    let repo = project_repo(ctx, session).await?;
+    let dir = resolve(ctx, session).await?;
+    if ctx.folders.same(&repo, &dir) {
+        return None;
+    }
+    let clean = ctx
+        .committer
+        .changed_files(&dir)
+        .await
+        .is_ok_and(|files| files.is_empty());
+    clean.then_some(RemovableWorktree { repo, path: dir })
+}
+
 /// La carpeta de trabajo de la sesión activa: prepararla, detectar si el agente trabajó en
 /// otra, cambiarla y, al terminar, quitar el worktree.
 #[derive(Debug)]
@@ -249,20 +282,17 @@ pub struct SessionWorkDir<'a> {
 }
 
 impl<'a> SessionWorkDir<'a> {
+    /// El caso de uso, con las dependencias de `ctx`.
     #[must_use]
     pub fn new(ctx: &'a AppContext) -> Self {
         Self { ctx }
     }
 
     async fn active(&self) -> Result<WorkSession, AppError> {
-        self.ctx
-            .sessions
-            .active()
-            .await?
-            .ok_or_else(|| AppError::InvalidInput("there is no active session".into()))
+        super::active(self.ctx).await
     }
 
-    /// [`ensure`] sobre la sesión activa, y la guarda si cambió.
+    /// `ensure` sobre la sesión activa, y la guarda si cambió.
     ///
     /// # Errors
     ///
@@ -310,12 +340,11 @@ impl<'a> SessionWorkDir<'a> {
                 .branch
                 .as_deref()
                 .is_some_and(|branch| is_task_branch(branch, &session.task_id));
-            let by_agent = worktree.path.starts_with(&agent_dir)
-                || worktree
-                    .path
-                    .canonicalize()
-                    .is_ok_and(|p| agent_dir.canonicalize().is_ok_and(|a| p.starts_with(a)));
-            if same_dir(&worktree.path, &current) || !(ours || by_agent) || !worktree.path.is_dir()
+            let folders = &self.ctx.folders;
+            let by_agent = folders.is_inside(&worktree.path, &agent_dir);
+            if folders.same(&worktree.path, &current)
+                || !(ours || by_agent)
+                || !folders.exists(&worktree.path)
             {
                 continue;
             }
@@ -356,7 +385,10 @@ impl<'a> SessionWorkDir<'a> {
             AppError::InvalidInput("the session's project has no `repo_path`".into())
         })?;
         let list = self.ctx.worktrees.list(&repo).await?;
-        let Some(worktree) = list.into_iter().find(|w| same_dir(&w.path, path)) else {
+        let Some(worktree) = list
+            .into_iter()
+            .find(|w| self.ctx.folders.same(&w.path, path))
+        else {
             return Err(AppError::InvalidInput(format!(
                 "{} is not a worktree of {}",
                 path.display(),
@@ -366,32 +398,6 @@ impl<'a> SessionWorkDir<'a> {
         session.work_dir = Some(worktree.path);
         self.ctx.sessions.save(&session).await?;
         Ok(())
-    }
-
-    /// El worktree de la sesión, si se puede quitar al terminar: no es el repo principal y
-    /// no tiene cambios sin commit. (La rama se queda, con sus commits.)
-    ///
-    /// # Errors
-    ///
-    /// No hay sesión activa.
-    pub async fn removable(&self) -> Result<Option<PathBuf>, AppError> {
-        let session = self.active().await?;
-        let (Some(repo), Some(dir)) = (
-            project_repo(self.ctx, &session).await,
-            resolve(self.ctx, &session).await,
-        ) else {
-            return Ok(None);
-        };
-        if same_dir(&repo, &dir) {
-            return Ok(None);
-        }
-        let clean = self
-            .ctx
-            .committer
-            .changed_files(&dir)
-            .await
-            .is_ok_and(|files| files.is_empty());
-        Ok(clean.then_some(dir))
     }
 
     /// `git worktree remove` de `path`, desde el repo del proyecto `repo`. No necesita la
@@ -413,16 +419,6 @@ impl<'a> SessionWorkDir<'a> {
     pub async fn preview(&self) -> Result<Option<PreviewView>, AppError> {
         let session = self.active().await?;
         Ok(preview(self.ctx, &session).await.map(PreviewView::from))
-    }
-
-    /// El repo del proyecto de la sesión activa.
-    ///
-    /// # Errors
-    ///
-    /// No hay sesión activa.
-    pub async fn repo(&self) -> Result<Option<PathBuf>, AppError> {
-        let session = self.active().await?;
-        Ok(project_repo(self.ctx, &session).await)
     }
 }
 
